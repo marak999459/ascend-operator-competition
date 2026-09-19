@@ -1,0 +1,54 @@
+#!/bin/bash
+# 构建指定 kernel 版本并跑一组用例
+# 用法: run.sh <kernel文件> [host文件] [tiling文件]
+set -u
+source /home/developer/Ascend/cann-9.0.0/set_env.sh 2>/dev/null
+CANN=/home/developer/Ascend/cann-9.0.0
+B=/home/developer/mhc_build
+T=/home/developer/mhc_test
+V=$B/myopp/vendors/custom
+
+KERNEL="${1:-$T/fixed_kernel.cpp}"
+HOST="${2:-$T/host_orig.cpp}"
+TILING="${3:-$T/orig_tiling.h}"
+
+cp "$KERNEL" $B/op_kernel/mhc_sinkhorn.cpp
+cp "$HOST"   $B/op_host/mhc_sinkhorn.cpp
+cp "$TILING" $B/op_kernel/mhc_sinkhorn_tiling.h
+
+cd $B && rm -rf build && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release >/tmp/cmake.log 2>&1 || { echo "CMAKE FAIL"; grep -a -A5 error /tmp/cmake.log|head -20; exit 1; }
+make -j8 >/tmp/make.log 2>&1 || { echo "MAKE FAIL"; grep -a -i error /tmp/make.log|head -20; exit 1; }
+[ -f $B/build/libcust_opapi.so ] || { echo "NO SO"; exit 1; }
+echo "构建 OK"
+
+rm -rf $B/myopp && mkdir -p $V
+cp -r $B/build/tmp/vendors/custom/* $V/ 2>/dev/null
+mkdir -p $V/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64 $V/op_api/lib $V/op_api/include
+cp $B/build/op_host/libcustom_ascendc_cust_optiling.so \
+   $V/op_impl/ai_core/tbe/op_tiling/lib/linux/aarch64/libcust_opmaster_rt2.0.so
+cp $B/build/libcust_opapi.so $V/op_api/lib/
+cp $B/build/autogen/aclnn_mhc_sinkhorn.h $V/op_api/include/
+
+cd $T/harness
+g++ -std=c++17 -O2 test_mhc_sinkhorn.cpp -o test_sink \
+  -I$CANN/aarch64-linux/include -I$V/op_api/include \
+  -L$CANN/aarch64-linux/lib64 -L$V/op_api/lib \
+  -lascendcl -lnnopbase -lcust_opapi 2>&1 | head -6
+[ -f test_sink ] || { echo "HARNESS FAIL"; exit 1; }
+
+export ASCEND_CUSTOM_OPP_PATH=$V
+export LD_LIBRARY_PATH=$V/op_api/lib:$CANN/aarch64-linux/lib64:$LD_LIBRARY_PATH
+
+for cfg in "8 8 20" "1024 8 20" "64 4 20" "100 6 20" "1 8 20" "8192 8 20"; do
+  set -- $cfg
+  printf "  batch=%-6s n=%-2s iters=%-3s -> " "$1" "$2" "$3"
+  timeout 70 ./test_sink $1 $2 $3 1e-6 > /tmp/r_$1_$2.txt 2>&1
+  rc=$?
+  case $rc in
+    0)   echo "成功   | $(grep -a '输出前' /tmp/r_$1_$2.txt | head -1 | cut -c1-70)";;
+    2)   echo "设备崩溃";;
+    124) echo "死锁超时";;
+    *)   echo "退出码 $rc";;
+  esac
+done

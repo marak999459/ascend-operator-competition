@@ -1,0 +1,27 @@
+# ===== 凭据与密钥（绝不入库）=====
+密钥.txt
+public.pem
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+*private*
+*credential*
+*.session.json
+session.json
+
+# ===== Windows 误创建文件 =====
+nul
+
+# ===== 构建产物 =====
+build/
+build_out/
+__pycache__/
+*.o
+*.obj
+*.log
+*.tmp
+
+# ===== 备份文件 =====
+*.bak
+*.orig

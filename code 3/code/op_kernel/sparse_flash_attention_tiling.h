@@ -1,0 +1,39 @@
+// Tiling结构体定义的头文件
+//
+// ⚠️ 相对题目原始骨架的扩展（原骨架只有 7 个字段）：
+//    新增 sparseBlockSize / sparseCount / nb / nBlk 四个字段。
+//    原因：原骨架没有传递 sparseBlockSize（题面必选属性！）与分块尺寸，
+//    kernel 无法工作。这四个值必须由 host 计算下发。
+//    这属于"必须做的扩展"，不是随意改动 —— 原骨架本身不足以实现本题。
+#pragma once
+
+#include <cstdint>
+
+struct SparseFlashAttentionTilingData {
+    // ---- 原骨架字段（保持顺序不变）----
+    uint32_t B;
+    uint32_t Q_S;
+    uint32_t KV_S;
+    uint32_t Q_N;
+    uint32_t Q_D;
+    uint32_t Dr;
+    uint32_t sparse_size;
+    float    scale_value;
+    uint32_t sparse_mode;
+    uint32_t batch_per_core;
+
+    // ---- 新增字段（本题实现必需）----
+    uint32_t sparse_block_size;   // 题面必选属性 sparseBlockSize
+    uint32_t sparse_count;        // sparse_indices 末维（官方固定 2048）
+    uint32_t nb;                  // 每次处理多少个 query 头（UB 分块）
+    uint32_t n_blk;               // 每个 KV chunk 容纳的 token 数（UB 分块）
+    uint32_t attention_mode;      // 题面必选属性（仅支持 2）
+    uint32_t total_tokens;        // B * Q_S，用于核间切分
+
+    // ---- 变长（官方 BSND 语义：per-batch arr[b]；长度为 1 时广播 arr[0]）----
+    uint32_t actual_q_len_size;   // actual_seq_lengths_query 元素个数（0=未传）
+    uint32_t actual_kv_len_size;  // actual_seq_lengths_kv  元素个数（0=未传）
+
+    // ---- bf16 支持：host 检测 dtype，1=输入是 bf16，kernel 用软件解码 ----
+    uint32_t is_bf16;
+};
