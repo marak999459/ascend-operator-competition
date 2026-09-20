@@ -162,4 +162,53 @@
 
 ---
 
+## 7. 环境搭建与部署教学（新组员三步上手）
+
+> 本节只讲**环境怎么搭**。搭完再回 §6 跑通验证链路。
+
+### 第一步：建立本地虚拟机（CPU 逻辑验证环境）
+
+这是**本地 CPU 调试环境**，用来在不上 NPU 的情况下先验证算子的数学逻辑。
+
+- 用 **VMware**（**不是** WSL、**不是** Docker）装 Ubuntu，在其中**直接部署 CANN 9.0.0**
+- CANN 环境路径：`/usr/local/Ascend/cann-9.0.0/set_env.sh` ⚠️ **与 NPU 的路径不同，别照抄**
+- 怎么告诉 AI 连接：在虚拟机内跑 `ip addr` 拿到 IP，把 **IP、用户名、密码、CANN 路径** 一起告诉你的 agent，让它用 SSH 连进去跑 CPU 仿真对拍
+- ⚠️ 这台是 **CPU 环境不是 NPU**；两台环境的环境变量必须分别确认，混用会直接报 `libascend_hal.so: cannot open shared object file`
+
+### 第二步：SSH 连接 NPU 真机
+
+NPU 真机（910B3）**不直连**，走 **VS Code Remote-SSH 扩展拉的 WebSocket 隧道**（本机 `127.0.0.1` 端口转发）：
+
+1. **先由你本人动手**：用 VS Code Remote-SSH 扩展连上 NPU——隧道是它拉起来的，**不是常驻监听端口**。你确认 VS Code 已连上之后，AI 才能操作
+2. 端口**每次会变**，每次向现场确认；连接形式：
+   ```bash
+   ssh -p <PORT> -i <私钥路径> developer@127.0.0.1 "<命令>"
+   ```
+3. ⚠️ 三条纪律（已实测踩坑）：
+   - `Connection refused` → **直接问用户"隧道断了吗"，绝不反复重试**（重试只会堆积 TIME_WAIT、放大失败窗口）
+   - **不要**用 `Test-NetConnection <PORT>` 判断连通性——该端口不是常规监听口，探不到
+   - 跑任何测试前先 `source ~/Ascend/cann-9.0.0/set_env.sh`
+4. `scp` 卡死时改用管道传输（`cmd /c type ...`），传完必须 `md5sum` 复验
+
+### 第三步：提交代码的 API 密钥设置
+
+比赛平台提交走 **CANNJudge API**，与上面的 NPU SSH 隧道是**两套独立认证**，不要混用。
+
+1. 凭据三件套（**已被 `.gitignore` 排除、不进 Git**，组员各自保管，clone 后仓库里没有这些文件）：
+   | 文件 | 作用 |
+   |---|---|
+   | `public.pem` | RSA 公钥，用于加密密码 |
+   | `encrypt_password.py` | 加密脚本（依赖 `pip install pycryptodome`） |
+   | `密钥.txt` | 登录密文（只用于 API 调用，**绝不打印/记录**） |
+2. 生成/更新密文：
+   ```bash
+   python3 encrypt_password.py            # 默认读同目录 public.pem
+   # 公钥不在当前目录时显式指定：
+   python3 encrypt_password.py --public-key <路径>/public.pem
+   ```
+3. 提交工具（如 cannjudge-submit）自动读 `密钥.txt` 做认证，无需手工传 token
+4. ⛔ 密文绝不能写进代码 / 日志 / 提交包；提交包里**只含算子源码**
+
+---
+
 *祝比赛顺利 —— 这套文档体系的目标是：任何一个组员（或任何一任 AI）接手，都能在半小时内接上进度。*
