@@ -865,7 +865,7 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 
 | 文件 | 作用 |
 |---|---|
-| `code 3/probes/p0_quantp.py` | 往 kernel 的 `:446`（`e = ExpPoly(sc-mNew)`）**注入 P 量化**；`apply [--grid N]` / `restore` / `status`。**硬闸门**：kernel md5 不等于通过版 `bcb2f654…` 就拒绝动手；已注入时拒绝重复注入；备份存在 `probes/`（**不进 `code/`**，免得混进提交包）。已实测 apply→restore 后 md5 精确回到基线 |
+| `code 3/probes/p0_quantp.py` | 往 kernel 的 `:446`（`e = ExpPoly(sc-mNew)`）**注入 P 量化**；`apply [--grid N]`（默认 65536）/ `restore` / `status`。**硬闸门**：kernel md5 不等于通过版 `bcb2f654…` 就拒绝动手；已注入时拒绝重复注入；备份存在 `probes/`（**不进 `code/`**，免得混进提交包）。**往返已实测**：apply→`f47249c5…`→restore→`bcb2f654…` 精确回基线，且**在 LF 和"模拟 `core.autocrlf=true` 检出成 CRLF"两种工作副本下结果一致**（脚本对 md5 闸门读文件都先剥 `\r`，写文件恒写规范 LF） |
 | `code 3/probes/p0_grid_sim.py` | 纯 Python 仿真"某档网格到底给 `softmaxSum` 注入多大误差"，用来选网格 |
 
 仿真结果（400 行 × m=2048，三种 score 分布 + 一组 m=8，取最坏值）：
