@@ -949,7 +949,7 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 | 通过版 zip | `code 3/sparse_flash_attention_submission_365715_pass.zip` md5 `ae9bcd2d…`；**解包后 host/kernel 与磁盘逐字节一致** ⇒ 提交源 = 6/6 通过版 |
 | 行尾 | 四文件 CR=0（纯 LF），末字节 `0x0A` |
 | 调试输出 | 四文件 grep `printf\|fflush\|fprintf\|std::cout\|TODO\|FIXME\|#if 0` **全空** ✅ |
-| `code 3/probes/` | 新增（另一路会话）：`p0_quantp.py`、`p0_grid_sim.py`、`kernel_base_bcb2f654c4e0.cpp`、`backup/`（旧 `.bak_*` 也在）—— **不在 `code/` 内，不会混进提交包** ✅ |
+| `code 3/probes/` | 新增：`p0_quantp.py`、`p0_grid_sim.py`、`backup/`（从 `code/op_kernel/` 移出来的 5 个旧 `.bak_*`）—— **不在 `code/` 内，不会混进提交包** ✅。注入时临时生成的 `kernel_base_bcb2f654c4e0.cpp` 是**用完即删的产物，未入库** |
 
 ### 12.6 ✅ `sfa_ref.py` 空行口径**已同步**（§10.7 待办 2 / §10.6 闭环）
 
