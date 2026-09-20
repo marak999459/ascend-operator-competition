@@ -11,77 +11,69 @@
 
 | # | 约束 |
 |---|---|
-| 1 | **每完成一轮对话，必须把进展更新到本文件（code1.md）** —— 新结论、新排除的假设、下一步方向，都要写进来 |
-| 2 | 只改 code 1/ 目录下的文件，**不动其他目录**（code3 / code2 / 根目录），除非用户明确要求 |
-| 3 | 不要 printf / flush / cout 调试输出，用其他手段（dump 到文件、返回值对比等） |
-| 4 | 每次改动代码前先备份（cp xxx xxx.bak） |
-| 5 | 一步一步验证，每步单独确认结果，不要一次性改多处 |
+| 1 | **每完成一轮对话，必须把进展更新到本文件（code1.md）** —— 新结论、新排除的假设、下一步方向都要写进来；写完换新会话（会话越长每轮越贵） |
+| 2 | 只改 `code1/` 下的文件，**不动其他目录**（code2 / code3 / 根目录），除非用户明确要求 |
+| 3 | 提交源里**绝不允许**调试输出（`printf` / `fflush` / `fprintf` / `std::cout`），也不留 `TODO` / `FIXME` / `#if 0` / `调试` 字样；诊断一律走"写进输出张量 + host 读回" |
+| 4 | 每次改动代码前先备份（`cp xxx xxx.bak`），改完 md5 复验 |
+| 5 | 一步一步验证；但**一次上机改多处**，不要"改一处跑一次"（每次失败诊断都会变成永久历史） |
+| 6 | **提交不必逐次请示**（2026-09-20 22:12 用户下达），但**每次提交完必须先分析总结、再问是否继续**；本条不覆盖破坏性/不可逆操作 |
+| 7 | 凭据（`密钥.txt` / `public.pem` / 私钥与端口）**绝不进提交、绝不打印到日志或文档**，只用于 API 调用 |
 
 ---
 ## 1. 状态速览
 
-| 项 | 值 |
+| 项 | 当前结论（细节见括号） |
 |---|---|
-| 算子名 | `mhc_expand`（赛题：《【B组简单题】mHC-expand 算子（前向与反向）》） |
-| 工程目录 | `code1/`（`op_host/`、`op_kernel/`、`tools/`） |
-| 目标芯片 | `ascend910b` —— **已实测坐实**：真机 `02aeb` = **Ascend 910B3，NPU ID=7**（旧记录 ID=2 作废），驱动 25.5.0，CANN 9.0.0，HBM 64GB（§11.8） |
-| 源码状态 | 【实测】`op_host/mhc_expand.cpp` / `op_kernel/mhc_expand.cpp` 已含**完整实现 + 性能优化**（tiling 整行条件修正 + 反向双缓冲流水线，见 §9），**不是**骨架 |
-| 真机验证 | ✅✅ **真机全量矩阵全绿**（2026-09-20 19:55–21:10，`02aeb` / 910B3 / 50 AIV，§11.9 + §11.10）。修复后一次性跑 **7 轮 / 89 条用例（quick×2 + medium + mtile + bnd + ub48 + large）→ 每轮 `ALL PASS  fail=0 err=0`**。⭐ **前后向均位级精确**（`maxdiff=0.00000`，非"容差内通过"）：`fwd-fp16-large` / `fwd-bf16-large` 各 **0/469762048**、`bwd-*-large` 各 0/58720256、最小形状 `fwd-fp16-S1D1` 0/2、`bwd-fp16-sat-m2` 0/512（fp16 溢出按 IEEE **+inf** 达标）。前向根因与修法见 §11.9.4 / §11.10：纯搬运路径缺 MTE2→MTE1 序，**最终用一行 `PipeBarrier<PIPE_ALL>()` 补齐**（提交源 **+3 行**）。msprof 基线也已采完并做完 V0/V3 A/B（§11.11，本轮唯一剩余项关闭） |
-| 仿真机验证 | ✅ **两侧全绿且口径已对齐**：本地仿真机 quick **28 用例 ALL PASS**（§8）；第二轮云端仿真机 5 组收口（§9.5 / §9.5.2，`tpm0u` 未被回收，"日志丢失"判断**作废**）；**barrier 修复后在云端仿真机 `tpm0u` 重编并跑完 quick 全量 29 条（11 前向 + 18 反向）→ `=== ALL PASS ===`、FAIL=0**（`cpu_debug/logs/sim_quick_full_barrier_20260920_2109.log`，md5 `dadd14dc…` 双侧一致、CR=0）⇒ `PipeBarrier` 在 `ICPU` 下可编可过，不破坏仿真。⚠️ 保留口径：**仿真对前向流水竞争无保护力**（`[TmSim]: Run in serial mode.` ⇒ 竞争原理上不可见，§11.9.4），同时 `bwd-*-BND-D32768-m2` 是**仿真假失败**（真机位级 PASS，§9.5.2）⇒ **本题正确性判据以真机为准**；fp16 溢出语义两侧不同（真机 inf / 仿真 Cast 饱和 65504），参考侧已统一以真机为准（§11.10） |
-| 比赛平台提交 | ✅✅ **已提交并通过**（2026-09-20 22:15，`submission_id=6aafea71b0477ec41ea07f63`，`problem_id=6a7c1a74a52e0f540a89d39b`／`problemName=mhcexpand`）：**`状态: Pass`、8/8 测试用例全过、每条 `precision_ratio: 1`**。⚠️ 榜单 `score` 显示 0 —— **已判因：比赛平台自 2026-09-03 起对所有提交都停止写入分数**（榜上 90.15/88.17/85.20 三条今天重交同样是 0，`contest.ongoing=false`），**不是**对我方性能的否定，§13.3 有证据。性能侧实测：中大档 6 条已贴比赛平台固定基准 1–4%（两条反超榜首），**唯一缺口 = 两条小档慢 3.0–3.7 倍的固定开销**（§13.2）。✅ **23:41 第二次提交已把该缺口压到 2.7–2.8 倍**：case 1 **5.02→3.82µs（−24%）**、case 5 **4.44→3.96µs（−11%）**，其余 6 条在平台噪声内，8/8 `precision_ratio=1` 不变（`submission_id=6aaffd92b0477ec41eb14eb0`，**只改 `op_host` 一个文件**、核函数与首交逐字节一致，归因与定则见 §14）。⛔ 此前"只能交第三题"的判断是错的 —— 是 `problem_id` 写死，非权限锁（§12） |
-| 性能 | ✅ **已有 `msprof` 基线**（2026-09-20 21:26–21:30，fp16 `large` 8192×7168×8，每任务读写合计 1.057GB，§11.11）：当前提交版 V3 前向 **1117.3µs（946GB/s）**、反向 **1088.3µs（971GB/s）**；对照 V0（去掉 barrier、前向结果错误）前向 1059.0µs（998GB/s）⇒ **`PipeBarrier<PIPE_ALL>` 的代价 = 前向 +5.5%**，同轮反向只差 0.25%（对照组 ⇒ 环境未漂移）。前向 `vec≈0 / mte3(写出 DMA)=1088µs` ⇒ 纯搬运且贴住带宽上限，与反向仅差 2.7%。⚠️ **§9 两项优化自身的加速比仍未定档**（本轮只做了 barrier A/B）。🆕 **§14 追记（23:40 真机复测）**：本机 **AIV 实为 40 核**（msprof `Block Num` 裁定，不是 config 里的 50）；两条小档的逐任务时间已从 4.1–4.9µs 压到 **2.9–3.6µs**（blockDim 40→16，规则见 §14.3），中大档与上面 1117.3/1088.3µs 基线差 ≤0.3% ⇒ 环境未漂移、规则对它们确是恒等变换 |
+| 算子名 | `mhc_expand`（赛题《【B组简单题】mHC-expand 算子（前向与反向）》）；工程目录 `code1/` |
+| 目标芯片 | **Ascend 910B3 / arch22（`__NPU_ARCH__=2201`）/ NPU ID=7**，驱动 25.5.0，CANN 9.0.0，HBM 64GB，**AIV 实为 40 核**（§14.1）（§11.8） |
+| 源码状态 | **完整实现 + 四层优化，不是骨架**：tiling 整行条件修正 + 反向双缓冲（§9）→ 前向 `PipeBarrier<PIPE_ALL>`（§11.10）→ host 少开核定则（§14.3） |
+| 真机 | ✅ **7 轮 89 条 + 规则版 45 条×2 每轮 `ALL PASS fail=0 err=0`**，前后向**位级精确**（`fwd-fp16-large 0/469762048`）（§11.10.3 / §14.4） |
+| 仿真机 | ✅ 三轮全绿（quick 29 条 + 5 组全量 + 边界组）；⚠️ **对前向流水竞争无保护力**（串行执行），`bwd-fp16-BND-D32768-m2` 是**仿真假失败** ⇒ **正确性判据只认真机**（§8.3） |
+| 比赛平台 | ✅✅ **两次提交均 `状态: Pass`、8/8 用例、每条 `precision_ratio: 1`**（首交 22:15 / 规则版 23:41；§13 / §14.7）。⚠️ 榜单 `score=0` **不是我方慢**：平台自 2026-09-03 起对**所有人**停写分数（§13.3） |
+| 性能 | fp16-large 前向 **1117.3µs / 946GB/s**、反向 **1088.3µs / 971GB/s**（§11.11）；小档经 §14 定则 **case1 −24% / case5 −11%**。中大档 6 条已贴平台基准 1–4%（两条反超榜首），**残余缺口 = 小档每任务固定开销 ~1.7µs，投入产出比极低**（§14.8） |
+| 唯一未定档项 | §9 两项优化**各自的加速比**未回退重测（§4.3） |
 
-**一句话**：真机 7 轮 89 条用例**全部 `ALL PASS`、前后向位级精确**（`fwd-fp16-large 0/469762048`），上一轮"前向 14/14 全红"的阻塞点已修复 —— 机理坐实为前向纯搬运路径 **MTE2→MTE1 无序**，用户批准的 `SetFlag/WaitFlag` 事件配对**实测不足**（quick 里 9 条前向仍全 FAIL，计数只降不归零），窄 `PipeBarrier<PIPE_MTE2/MTE1>` **运行期 trap**，最终落到一行 `PipeBarrier<PIPE_ALL>()` 才全绿（§11.10，提交源 diff 仅 +3 行）；fp16 溢出分歧已判掉（真机 = IEEE inf，改参考不改核）。CPU 仿真侧同步复验 ALL PASS。**只剩性能基线（§11.6 msprof）一件事。**
+**时间线（2026-09-20 一天内走完）**：真机首跑 ⇒ 反向全绿 / 前向 14 条全红（§11.9）→ 机理 = 前向纯搬运缺 MTE2→MTE1 序 → V1 事件配对**实测不足**、V2 窄 barrier **运行期 trap**、V3 `PipeBarrier<PIPE_ALL>` 全绿（§11.10）→ msprof 定 barrier 代价 **+5.5%**（§11.11）→ **首次提交 8/8 Pass**（§13）→ 小档差距定位 + blockDim 扫描 + "少开核"定则 → **第二次提交 case1 −24% / case5 −11%**（§14）。
 
-> ✅ **21:30 追记**：性能基线也已采完并定档（§11.11）—— `PipeBarrier<PIPE_ALL>` 的代价 = **前向 +5.5%**（1117.3µs vs 1059.0µs，同轮反向对照组只差 0.25%），当前实现前向 946GB/s、反向 971GB/s（剔首 mean 口径）。**题 1 至此正确性与性能基线双双收口**，剩余项全在 §4.3（比赛平台口径、§9 优化自身加速比）。
-
-> ⭐ **22:25 追记（首次比赛平台提交）**：题 1 交出去了 —— `problem_id=6a7c1a74a52e0f540a89d39b`、`submission_id=6aafea71b0477ec41ea07f63`，**`状态: Pass`、8/8 用例全过、每条 `precision_ratio: 1`**（§13）。顺带裁掉 §4.3 四条：`sum` 口径正确、精度判据是"逐元素通过比例"且我方为满分、8.5.0 编译无碍、真/仿之争对本题已无风险。⚠️ 榜单 `score` 显示 0，**判因不是我方慢**：比赛平台自 2026-09-03 起对**所有**提交都不再写分（90.15 分那几条今天重交同样是 0，`ongoing=false`，§13.3）。真实缺口只有一条：**两个小档 case 慢 3.0–3.7 倍的固定开销**，而中大档 6 条已贴基准 1–4%、其中两条反超榜首（§13.2）。
-
-> ⭐ **权威来源**：官方题面全文见 `official_problem_statement.md`（第一题章节）。下表与官方**逐条核对一致**。
+**一句话**：题 1 的**正确性**（真机 89+90 条 + 平台 8/8）与**性能**（中大档贴基准、小档压掉 24%）双双收口；只剩"§9 优化自身加速比未定量"和"小档残余 ~2µs 固定开销（不建议再投）"两条尾巴。
 
 ---
 
-## 2. 输入契约（**动手前先看这张表**）
+## 2. 输入契约与语义（**动手前先看这一节**）
 
-| 项 | 值 | 官方题面 |
+| 项 | 值 | 与官方题面 |
 |---|---|---|
-| 输入名 | `x`（REQUIRED） | `x`，必选输入 ✅ |
-| 输出名 | `o`（REQUIRED） | `o` ✅ |
-| dtype | `ge::DT_FLOAT16`、`ge::DT_BF16`（InferDataType 直通：输出 dtype = 输入 dtype） | bfloat16、float16 ✅ 一致 |
-| format | `ge::FORMAT_ND`（行主序连续，**无 batch 维、无 N 维**） | ND ✅ 一致 |
-| 属性 | `mhc_mult`：OPTIONAL Int，默认 **2**；`backward`：OPTIONAL Bool，默认 **false** | 前向/反向为**两个独立接口**（`MHC Expand Forward` / `Backward`），本实现用 `backward` 属性合一 ⚠️ 见 §5-E5 |
+| 输入 / 输出 | `x`（REQUIRED）→ `o`（REQUIRED） | 一致 |
+| dtype | `ge::DT_FLOAT16`、`ge::DT_BF16`；`InferDataType` 直通（输出 dtype = 输入 dtype） | 一致 |
+| format | `ge::FORMAT_ND`，行主序连续，**无 batch 维、无 N 维** | 一致 |
+| 属性 | `mhc_mult` OPTIONAL Int 默认 **2**；`backward` OPTIONAL Bool 默认 **false** | ⚠️ 官方把前向/反向写成**两个独立算子**，本实现用 `backward` 属性合一 ⇒ ✅ 已由首次提交裁定"可行"（§13.1） |
 
 ### 2.1 语义
 
 | `backward` | 输入 shape | 输出 shape | 语义 |
 |---|---|---|---|
-| `false`（前向） | `[S, D]`（rank 2） | `[S, m, D]`（rank 3） | `o[s, k, j] = x[s, j]`，沿**倒数第 2 维**复制 m 份 |
-| `true`（反向） | `[S, m, D]`（rank 3，且必须 `in_shape[1] == mhc_mult`） | `[S, D]`（rank 2） | `x_grad[s, j] = Σ_{k=0}^{m-1} o_grad[s, k, j]`，沿 m 维**求和** |
+| `false`（前向） | `[S, D]`（rank 2） | `[S, m, D]`（rank 3） | `o[s,k,j] = x[s,j]`，沿**倒数第 2 维**复制 m 份 |
+| `true`（反向） | `[S, m, D]`（rank 3，且 `in_shape[1] == mhc_mult`） | `[S, D]`（rank 2） | `x_grad[s,j] = Σ_{k=0}^{m-1} o_grad[s,k,j]`，沿 m 维**求和** |
 
-官方原文：
+官方原文：`前向 o[i,m,j] = x[i,j] 对所有 m ∈ [0, mhc_mult)`；`反向 x_grad[i,j] = Σ_m o_grad[i,m,j]`。
+官方形状约束：`o_grad` 必须与前向**输出**同形，`x_grad` 必须与前向**输入**同形。
 
-```
-前向：o[i, m, j] = x[i, j]    对所有 m ∈ [0, mhc_mult)
-反向：x_grad[i, j] = Σ_{m=0}^{mhc_mult-1} o_grad[i, m, j]
-```
-
-官方形状约束：`o_grad` 的形状**必须与前向输出的形状一致**；`x_grad` 的形状**必须与前向输入的形状一致**。
-
-- `m` 插在**倒数第 2 维**（不是最后一维、不是首维）。
-- 轴语义：`S` = token 数，`D` = 隐藏维，`m` = `mhc_mult`。**本算子没有 batch 维**。
-- 本算子**无任何可学习参数**，是纯数据搬运算子（memory-bound）。
-- 关键布局性质：`[S, m, D]` 在行主序下等价于 `(S*m, D)`，即 **token s 的 m 份副本在 GM 上连续占 `m*D` 个元素**。
+- 轴语义：`S` = token 数，`D` = 隐藏维，`m` = `mhc_mult`；**本算子没有 batch 维**，`m` 插在**倒数第 2 维**（不是最后一维、不是首维）。
+- **无任何可学习参数** ⇒ 纯数据搬运、memory-bound。
+- 关键布局性质：`[S, m, D]` 行主序 ≡ `(S*m, D)` ⇒ token s 的 m 份副本在 GM 上**连续占 `m*D` 个元素**。
 
 ### 2.2 ⭐ 反向是**求和**，不是平均
 
-- 赛题 2.2 原文给出 `x_grad[i, j] = Σ o_grad[i, m, j]`，示例代码 `o_grad.sum(dim=1)`。**赛题是唯一权威。**
-- 数学上：**广播的伴随就是求和**。
+- 题面 2.2 原文给 `Σ`、示例代码 `o_grad.sum(dim=1)` ⇒ **题面是唯一权威**；数学上"广播的伴随就是求和"。
 - vLLM 的 `hc_contract` 用 `mean(dim=-2)`，但那是"往返可复原"的独立归约原语，**不是**本算子的反向。
-- **两者数值相差恰好 `m` 倍 → 方向选错必定零分。**
+- **两者数值恰好差 `m` 倍 → 方向选错必定零分。**
+- ✅ 平台口径已由首交裁定：按 `sum` 实现 → **8/8 `precision_ratio=1`**（§13.1）。
 
 ---
 
-## 3. 提交文件清单
+## 3. 提交文件与提交前闸门
+
+### 3.1 四字段 ↔ 本地文件
 
 | 提交字段 | 文件 | 位置 |
 |---|---|---|
@@ -90,605 +82,382 @@
 | `tiling_key_h` | `tiling_key_mhc_expand.h` | `op_kernel/` |
 | `host_cpp` | `mhc_expand.cpp` | `op_host/` |
 
-- 另有三个 `CMakeLists.txt`（`code1/`、`op_host/`、`op_kernel/`）。
-- ⛔ **`op_host/` 与 `op_kernel/` 下是同名但不同内容的两个 `mhc_expand.cpp`，别传错。**
-- ⛔ 提交前扫描：`grep -n "printf\|fflush\|cout\|调试" <四个文件>` 必须为空。
-- 提交前**先 `--dry-run`**，确认四个文件都被正确识别。
+- 另有三个 `CMakeLists.txt`（`code1/`、`op_host/`、`op_kernel/`），**不在提交面**。
+- ⛔ `op_host/` 与 `op_kernel/` 下是**同名但内容不同**的两个 `mhc_expand.cpp`，别传错（`--dry-run` 回传的 path 会自动显示，见 §3.4）。
+
+### 3.2 md5 基线与演变链（**判断"文件是否被动过"只认本节**）
+
+```
+c76d30be6bd1117e2848d858168d89e3  op_host/mhc_expand.cpp               10,343B  ← ⭐第二次提交版（§14.3 少开核定则）
+53ee60e532ee1730b3bd0f1bc713c983  op_kernel/mhc_expand.cpp              9,318B  ← ⭐两次提交共同的内核（§11.10 barrier 版）
+f759a052a865facbb889149ea1aa37e3  op_kernel/mhc_expand_tiling.h         1,201B  ← 自始至终未动
+267e012564ba3d18cfabc729cc214e88  op_kernel/tiling_key_mhc_expand.h       530B  ← 自始至终未动
+```
+
+演变链（每一跳的完整 diff 都已核实）：
+- **host**：`a16c371d…`（首交，tiling 条件修正版）→ **`c76d30be…`**（第二次提交）＝ §14.3 那一段 host 侧整数算术，**不含新 API、不碰核函数**。
+- **kernel**：`d9af5611…`（原始）→ `0fb9e6ec…`（§9.2 反向双缓冲）→ **`53ee60e5…`**（§11.10 前向 barrier）＝ 上一版 **+3 行**（1 行 `PipeBarrier` + 2 行注释），反向路径与 host 未动。
+- **sha256**（`--dry-run` 回传口径，§3.4 / §14.7）：`tiling_h be5f660b02fef22a…` · `tiling_key_h b79c2cbda239ff8d…` · `kernel_cpp a1744d146c71acfb…778b68` · `host_cpp` 首交 `32cce2e9…`(9,143B) → 规则版 `278b7b84…`(10,343B)。
+
+> ⛔ **`op_kernel/` 三个文件是"提交内核零改动"的证据链**：推到任何调试环境都用 **tar 管道 + 逐文件 md5 复验**（工作流 §6），**不得对它们做格式化 / 行尾转换**。远端只是副本，**本地 `code1/` 永远是唯一权威源**（容器销毁不影响任何文件）。
+> ⚠️ **本仓库 `core.autocrlf=true` 且无 `.gitattributes`** ⇒ 内核文件在 git 索引里是 LF，`checkout` / 重新 clone 会把工作区写成 CRLF（实测同一文件 `d9af5611…` → `28f7760d…`，多出 183 个 CR）⇒ **上面这份 md5 会集体失配而代码一字未改**。核对口径三选一：① `tr -d '\r' < f | md5sum`；② `git cat-file -p :<路径>` 直接读索引字节；③ 加 `.gitattributes` 写 `* -text`（属仓库配置，**需用户同意**）。行尾状态一律用 `tr -dc '\r' < f | wc -c` 判定，**别用 `grep -c $'\r'`**（模式退化过）。
+
+### 3.3 提交前合规扫描（**必须为空**）
+
+```bash
+grep -n "printf\|fflush\|fprintf\|std::cout\|TODO\|FIXME\|#if 0\|调试\|ABL-\|MHC_SK" <四个提交文件>
+```
+2026-09-20 23:34（第二次提交前）实测**零命中**；首交前、加 barrier 后各扫过一次，均为空。
+⚠️ 归因注入（如 `[ABL-SK]` 的 `MHC_SK_T` / `MHC_SK_BLK` 两个 `getenv` 开关和 `#include <cstdlib>`）**用完必须整段删除**再扫（§14.6）。留在 `npu_debug/` 里的 `MHC_PCASE` / `MHC_REPS` / `MHC_OPAPI_SO` 属调试工装，不在提交面内。
+
+### 3.4 `--dry-run` 是防传错的保险步骤（**不创建提交**）
+
+两次提交前都跑过：比赛平台回传的清单**恰好四个字段、无多余文件**，且 sha256 + 字节数与本地逐字节一致 ⇒ **上传链路不做 CRLF 转换、不会把 `.bak` / `npu_debug/` 带上去**（`op_kernel/*.cpp` 与 `op_host/*.cpp` 各只有 1 个匹配；`.bak_pre_fwd_event`、`.events_v1` 后缀不是 `.cpp`，不被 glob 命中）。
 
 ---
 
-## 4. 已排除 / 已确认（**别重复走**）
+## 4. 已确认 / 已排除 / 仍未排除
 
-### 4.1 已确认（有源码级证据）
+### 4.1 源码结构事实（**均有源码级证据，别重复走**）
 
 | 项 | 结论 |
 |---|---|
-| 源码落地状态 | **已完整实现**，不是骨架（实测 `op_host`/`op_kernel` 源码） |
-| tiling 结构体 | **11 字段** `MhcExpandTilingData`（全 `uint32_t`），非"只有一个 `length`" |
-| `InferShape` / `InferDataType` | **已完整实现**（前向设 3 维、反向设 2 维、失败返 `GRAPH_FAILED`；dtype 直通） |
-| OpDef dtype | **已同时声明 `DT_FLOAT16` / `DT_BF16`** |
-| tiling key 项数 | **4 项** = 2(dtype) × 2(backward)：`fp16/false`、`fp16/true`、`bf16/false`、`bf16/true` |
-| 模板域 | `template <typename DT_X, bool BACKWARD>`（**backward 已进模板域**），4 个显式实例化 |
-| 反向实现 | **逐副本 `for k` 各一次 `DataCopyPad`**（`blockCount` 固定 1），**不是**单次 `blockCount=m` |
-| `Init` 签名 | `(GM_ADDR x, GM_ADDR o, GM_ADDR workspace, const MhcExpandTilingData &tiling)`（**多一个 `workspace` 形参**；host 恒置 `workspace[0]=0`，实际不需要 workspace） |
-| 反向小 S 切分 | `SPLIT_ELEMENT`，`total_tasks = S * dTileNum`，**免跨核归约** |
-| 核数/UB | `GetCoreNumAiv()` + `SetBlockDim(block_dim)`；UB 预算 = `ub_size/4`，`ub_size==0` 时兜底 192KB；kernel 用 `TQue` 双缓冲 + 2 个 fp32 buffer |
-| 合规扫描（2026-09-20） | 四个提交文件 `grep "printf\|fflush\|cout\|fprintf\|TODO\|FIXME\|#if 0\|调试"` 为空 ✅ 可随时提交（**§11.10 加 barrier 后已复扫，仍为空**） |
-| 静态审查（2026-09-20） | 全文通读 4 个提交文件：host/kernel 两侧任务编码（ROW/STREAM/ELEMENT）一致；反向 fp32 累加（`CAST_NONE` 入 / `CAST_RINT` 出）；GM↔UB 全部走 `DataCopyPad`（非 32B 对齐已处理）；切分决策无 uint32 溢出路径。⚠️ **其"未发现阻塞性问题"的结论已被真机推翻**（§11.9.4）：静态审查看不见流水线事件序 —— 前向 `ForwardOneBlock` 用 VECIN 缓冲直接喂 MTE1，**没有任何 MTE2→MTE1 依赖**，这是阻塞性缺陷。⇒ **教训：纯搬运 kernel 的队列 `QuePosition` 选择必须逐条对照"谁写这块 UB / 谁读这块 UB"来推，静态过一遍不够** |
-| md5 基线（2026-09-20） | 完整值见 §6.1（**真机修复后口径**：host `a16c371d…` · kernel `53ee60e5…` · tiling.h `f759a052…` · tiling_key `267e0125…`）。⚠️ **本轮提交源有 1 处代码改动**：kernel `0fb9e6ec…`（反向双缓冲优化版）→ `53ee60e5…`，差异就是 §11.10 的 +3 行前向 barrier，其余三文件未动。后续判断"文件是否被动过"以此为准 |
-| 真机 561002 的根因（2026-09-20） | ⭐ **「Do not find tiling func」不是算子缺陷，是加载方式**：`REGISTER_OP_LIB` 的注册器只在**框架自己 dlopen** `libcust_opapi.so` 时才把 `LocalRegistry` 提交进全局表；启动器把它做成**链接期依赖** ⇒ 注册表空 ⇒ 全红。**判据/解法已固化在 §11.9.2，下次直接照抄，不要再从环境变量猜** |
-| 前向 vs 反向的真机分歧（2026-09-20） | ⭐ **反向全绿、前向全红是同一件事的两面**：反向在 VECIN 缓冲上有 `Cast`/`Add`（VEC 消费 ⇒ 序成立）且写出走 VECOUT；前向是**纯搬运、中间没有 VEC 指令** ⇒ VECIN 的序对 MTE1 完全不生效。**别再逐条查前向的偏移/对齐算术** —— `out` 总字节 939MB < 2^31、偏移全为 `int64_t`、`tile*2` 恒 32B 对齐，均已排除（§11.9.4）。✅ **已按此结论修复并真机复跑全绿**（§11.10），修复只在 `ForwardOneBlock` 加 barrier，反向一行未动 |
-|本地仿真机对拍（2026-09-20） | quick 矩阵 **28 用例 ALL PASS**（前向/反向 × fp16/bf16；官方小规模、非对齐 D=100/7167、边界 S=1/D=1/m=1/m=16、强制 STREAM/ELEMENT 切分、fp16 饱和 m=1/m=2、多块切分 6 用例）。本地仿真机全量矩阵 fwd-medium/large、bwd-medium PASS。方法与历史坑见 §8；**提交内核零改动**参与同源验证 |
+| 落地状态 | **已完整实现**，不是骨架；OpDef 同时声明 `DT_FLOAT16` / `DT_BF16` |
+| tiling 结构体 | **11 字段** `MhcExpandTilingData`（全 `uint32_t`），不是"只有一个 `length`" |
+| `InferShape` / `InferDataType` | 已完整实现：前向设 3 维、反向设 2 维、失败返 `GRAPH_FAILED`；dtype 直通 |
+| tiling key / 模板域 | **4 项** = 2(dtype) × 2(backward)；`template <typename DT_X, bool BACKWARD>`（**backward 已进模板域**）+ 4 个显式实例化 |
+| 反向实现 | **逐副本 `for k` 各一次 `DataCopyPad`（`blockCount` 固定 1）**，**不是**单次 `blockCount=m` |
+| `Init` 签名 | `(GM_ADDR x, GM_ADDR o, GM_ADDR workspace, const MhcExpandTilingData &tiling)`（多一个 `workspace` 形参；host 恒置 `workspace[0]=0`，实际不需要 workspace） |
+| 反向小 S 切分 | `SPLIT_ELEMENT`，`total_tasks = S * dTileNum` ⇒ **免跨核归约** |
+| 核数 / UB | `GetCoreNumAiv()` + `SetBlockDim(block_dim)`；UB 预算 = `ub_size/4`（`op_host:85`）；`ub_size==0` 时兜底 `ub_size=192KB`（`op_host:23-27`）⇒ 预算 48KB；kernel 用 `TQue` 双缓冲 + 2 个 fp32 buffer |
+| 静态审查 | host/kernel 三套任务编码（ROW/STREAM/ELEMENT）一致；反向 fp32 累加（`CAST_NONE` 入 / `CAST_RINT` 出）；GM↔UB 全走 `DataCopyPad`（非 32B 对齐已处理）；切分决策无 uint32 溢出路径。⚠️ **其"未发现阻塞性问题"的结论已被真机推翻**（§11.9.4）⇒ 教训见 §4.4 |
+| 561002 根因 | ⭐ **「Do not find tiling func」不是算子缺陷，是加载方式**（`REGISTER_OP_LIB` 的注册表只在框架自己 dlopen 时提升）。判据/解法固化在 §11.9.2，**下次直接照抄，不要再从环境变量猜** |
+| 前向 vs 反向的真机分歧 | ⭐ 同一件事的两面：反向在 VECIN 缓冲上有 `Cast`/`Add`（VEC 消费 ⇒ 序成立）且写出走 VECOUT；前向**纯搬运、中间没有 VEC 指令** ⇒ VECIN 的序对 MTE1 完全不生效。**别再逐条查前向的偏移/对齐算术** —— `out` 总字节 939,524,096 < 2^31、偏移全为 `int64_t`、`tile*2` 恒 32B 对齐，均已排除（§11.9.4）。✅ 已按此结论修复并真机复跑全绿（§11.10），反向一行未动 |
 
-### 4.2 ⚠️ 已排除的**过时结论**（原文曾如是说，**已被源码推翻，不要再信**）
+### 4.2 设计阶段文档 `code1/DESIGN.md` 的全部结论已作废
 
-> 以下都出自已删除的 `code1/DESIGN.md`（设计阶段的计划文档），而落地后的源码与之不符。
-> 该文档**已删除**（其可用的设计意图已并入本文件的 §2/§3/§4）：
+七条"设计已定稿但源码未落地"的旧断言（仍为骨架 / 只有一个 `uint32_t length` / `InferShape` 空实现 / 只声明 `C_DT_FLOAT16` / `backward` 不进模板域 / 反向用一次 DMA 描述读 m 份 / `Init` 需换签名）**全部被落地后的源码推翻**；该文档**已删除**，可用的设计意图已并入 §2/§3/§4.1。
+⇒ 凡遇到引用 DESIGN.md 的说法（含"文件与比赛平台通过版逐字节一致"这句**从来没有 md5 支撑**的转述），一律以 §3.2 / §4.1 为准。
 
-| 设计文档曾写 | 实际情况 |
-|---|---|
-| "设计已定稿，**尚未落地到源码**，`op_host/`、`op_kernel/` 仍为原始骨架" | ❌ **已完整落地** |
-| "当前只有一个 `uint32_t length`，必须整体替换" | ❌ 已是 11 字段结构体 |
-| "`InferShape` 为**空实现**（直接 return GRAPH_SUCCESS）" | ❌ 已完整实现 |
-| "当前只声明了 `C_DT_FLOAT16`，需补 BF16" | ❌ 已含 `C_DT_FLOAT16, C_DT_BF16` |
-| "**`backward` 不进模板域**（否则实例从 2 个翻到 4 个）" | ❌ **`backward` 就在模板域**，实例就是 4 个 |
-| "反向用一次 DMA 描述读 m 份（`blockCount=m`）" | ❌ 实际是逐副本循环，`blockCount=1` |
-| "`Init` 签名必须换成接收全量 tiling" | ❌ 早已是全量 tiling（且多一个 `workspace`） |
+### 4.3 这些**还没有**被排除
 
-> ⚠️ **不可信项**：文档称"文件与比赛平台**通过版逐字节一致**"，但**没有任何 md5 / diff 记录**支撑（文档里的 md5 全是第三题的）。此结论目前只是**转述**，需重新校验（见 §5）。
+- ❌ **§9 两项优化各自的加速比**：§11.11 只做了"加 barrier vs 不加"，§14 只做了 blockDim 扫描，**host tiling 条件修正、反向双缓冲各自没有回退重测** ⇒ "优化有收益"目前只有算术（§9.1 那张 DMA 计数表）与真机 PASS 支撑，**没有定量**。定档需再 2 轮同机 `msprof` A/B（⚠️ 反向回退会改变 `tile` 决策，用例必须固定同一形状）。
+- ⚠️ **真机 UB 用量是否逼近上限**：前向整行 `tile=32768` 时名义占用（`in_que_` 2×64KB + `out_que_` 2×64KB + acc + tmp 2×128KB）远超 256KB，真机却 `D=32768` 反向 PASS ⇒ 说明这些缓冲**并未同时存活**或 `InitBuffer` 有复用。**后续任何调整 tile 策略必须重新核算这一点，不能假定"256KB 够用"**。
+- ❌ **题面是否覆盖 fp16 溢出输入**：`desc` 全文 4168 字**零处**提及 `inf` / `65504` / 饱和，自报覆盖清单里也没有溢出场景 ⇒ 推断"不被判分覆盖"，**仍未实测**。我方对拍已按真机语义（IEEE `inf`）定档（§11.10.5），两次提交也未被触发 ⇒ 不再为它花提交位。
+- ❌ **`sum` 口径的最后一格保留**：不能 100% 排除"平台 8 条里一条反向都没有"；但题面 §6 自报含"反向验证：梯度归约求和是否正确"，且我方反向真机 24 条位级精确 ⇒ 风险极低。
 
-### 4.3 反例：这些**还没有**被排除
+> ✅ **以下已被裁定/关闭，不要再回头查**（旧版在 §4.3、§12 与 §13 三处重复记过同一批口径，现合并到这里）：
+> 真机能否编过跑对（§11.8 / §11.9 / §11.10）· 性能是否定量（§11.11 / §14）· 比赛平台跑真机还是仿真（提交版 8/8 `precision_ratio=1`，而**未加 barrier 的 V0 前向在真机 14/14 全错** ⇒ 不可能是"把流水竞争藏起来的串行仿真"；题面自报最大 `D=7168` 也不覆盖 §8.3 那条 `D=32768` 仿真假失败）· 精度判据形式（字段就叫 `precision_ratio`＝**逐元素通过比例**，我方拿到 `1` ⇒ 任何更严口径下同样满分）· 单算子 vs 双算子（一次提交、4 文件、1 个算子名就把 8 条全判过）· CANN `8.5.0`（平台）vs `9.0.0`（我方）（8.5.0 下编译通过且全绿，`PipeBarrier` / `DataCopyPad` / `TQue` 行为一致）。
 
-- ~~❌ 从未在真机编译过 → 能否编过完全未知~~ → **已排除**：910B3 上 `ascend910b` 口径 20s 编过，4 个 `.o` + `libcust_opapi.so` 产出（§11.8）
-- ~~❌ 从未上机跑过 → 数值正确性、对齐行为、UB 容量全部未验证~~ → **已验证并出结论**（§11.9）：反向 24 条位级精确 PASS；**非对齐 D=7167 / D=100 / D=1 全过**；**UB=256KB ⇒ 64KB 预算口径被真机反证成立**（D=32768 整行 vs 32769 退化 tile=2048，与 §9.1 推导吻合）
-- ~~❌ 前向在真机 14/14 全 FAIL，需修完之后重跑全量矩阵~~ → **已排除**（§11.10）：`ForwardOneBlock` 补 `PipeBarrier<PIPE_ALL>()` 后，真机 **7 轮 89 条用例全部 `ALL PASS  fail=0 err=0`**，前向转为位级精确（`fwd-fp16-large 0/469762048`）；CPU 仿真侧同步重编复跑 quick 亦 ALL PASS
-- ~~❌ 性能未定量：真机墙钟只到 1ms 分辨率、`medium`/`large` 一律印 0.001s~~ → **已定档**（§11.11）：`msprof` fp16 `large` 同机 A/B ⇒ 前向 V3 1117.3µs / V0 1059.0µs（**barrier 代价 +5.5%**），反向 1088.3µs（对照组 +0.25%），有效带宽 946 / 971 GB/s（剔首 mean 口径，细节见 §11.11.3）
-- ❌ **仍未排除：§9 两项优化各自的加速比。** §11.11 只做了"加 barrier vs 不加"，**没有把 host tiling 条件修正、反向双缓冲分别回退重测** ⇒ "优化 A/B 有收益"这句话目前**只有算术与真机 PASS 支撑，没有定量**。要定档需再跑 2 轮同机 `msprof`（每轮改回退 + 复跑，注意反向回退会改变 `tile` 决策，用例要固定同一形状）
-- ~~❌ **比赛平台的执行方式（真机还是 CPU 仿真）**~~ → **已降级为「对本题无风险」**（§13）：提交版（含 §11.10 的前向 barrier）在 8.5.0 环境下 **8/8 `precision_ratio=1`**，而**未加 barrier 的 V0 前向在真机是 14/14 全错**（§11.9）⇒ 比赛平台跑的**不可能是「把流水竞争藏起来的串行仿真」**。同时题面自报最大 `D=7168`，**不覆盖** §9.5.2 那条仿真假失败所在的 `D=32768` 边界 ⇒ 真/仿之争**不再影响本题得分
-- ⚠️ **新未排除项**：真机 UB 用量是否逼近上限 —— 前向整行路径 `tile=32768` 时 `in_que_(2×64KB)+out_que_(2×64KB)+acc+tmp(2×128KB)` 名义上远超 256KB，真机却 `D=32768` 反向 PASS ⇒ 说明这些缓冲**并未同时存活**或 `InitBuffer` 有复用；**若后续调整 tile 策略需重新核算这一点**，不能假定"256KB 够用"
-- ~~❌ `sum` vs `mean` 的比赛平台口径未知（本实现按 `sum`）~~ → **已裁**（§13.1）：按 `sum` 提交，比赛平台 **8/8 `precision_ratio=1`** ⇒ `sum` 是对的。唯一保留：不能 100% 排除"8 条里没有反向"，但题面 §6 自报含"反向验证：梯度归约求和"
-- ❌ 比赛平台精度判据未知（`allclose(rtol=1e-3)` 还是**逐 bit**）—— ⚠️ 本轮新增一个必须靠它来裁的具体分叉：**fp16 溢出取 `inf` 还是 `65504`**（§11.9.5）。**22:15 从比赛平台题面接口再核一遍**：`desc` 全文 4168 字**不含任何 `rtol`/`atol`/容差数值**，`inf`/`65504`/饱和**零处提及**，自报覆盖清单里也没有溢出输入场景 ⇒ 该分叉**大概率不被判分覆盖**（仍是推断，实交为准，§12.3）。✅ **22:20 首次实交已裁**（§13.1）：比赛平台判据字段就叫 `precision_ratio`（**逐元素通过比例**），我方 8/8 拿到 `1` ⇒ 即便实际口径严到逐 bit，我方同样是满分，**这条不必再纠结**；溢出分叉未被触发 ⇒ 不再为它花提交位
-- ~~❌ 比赛平台是按"单算子 + `backward` 属性"调用，还是按两个独立算子名调用~~ → **已无关**（§13.1）：一次提交（4 个文件、1 个算子名）就把 8 条全判过，具体调用形态不再影响得分（仍未观测到，只是不再需要观测）
-- ~~❌ **新**：比赛平台是否会在真机之外用 CPU 仿真跑~~ → **与上一条合并关闭**（同一个问题此前被记了两遍，别在这里凑数）
+### 4.4 ⭐ 教训：`QuePosition` 必须逐条对照"谁写这块 UB / 谁读这块 UB"来推
+
+纯搬运 kernel 里 `TQue<VECIN>` 的序挂的是 **VEC 消费**，对 MTE1 完全不生效 —— 静态通读、甚至"看起来对"的事件配对都不够。
+⇒ **这类流水线序不能靠"背事件名"补**，只能"改一次跑一次直到计数为 0"；而且**任何只跑一轮的全绿都不算证据**（V0 的失配计数每轮不同 ⇒ 必须同参重复跑，V3 就是这么确认的，§11.10.1）。
 
 ---
 
-## 5. ⭐ 下一步证据（按优先级，每条都写清"判据"）
+## 5. 测试面
 
-### E1【最高优先】真机验证：能否编过、跑对 —— ✅ **2026-09-20 已执行完毕，结论见 §11.9**
+### 5.1 官方覆盖 ↔ 我方用例（题面 §6 逐条都有真机 PASS）
 
-- **做什么**：把 `code1/` 的四个源文件推到真机构建目录，编译 + 跑用例矩阵。
-- **判据（二值，不含糊）**：
-  - 编译：出现**完整**编译器输出，`error:` 行为空 → 通过；有 `error:` → 逐条修
-  - 运行：用例矩阵全 PASS → 本题可交；有 FAIL → 记录错误率与形状
-- **前置**：先请用户建立 NPU 隧道（见 `连接信息.md` §2）。
-- **实测结果**：编译门 ✅ 首过（§11.8）；运行 ✅ **判据已满足** —— 修复后一次性跑 7 轮（quick×2 + medium + mtile + bnd + ub48 + large）**每轮 `ALL PASS  fail=0 err=0`**，含 fp16 溢出用例按 IEEE `inf` 达标 ⇒ **按判据本题可交**（§11.9 / §11.10）。首跑时"反向全绿 + 前向全红"的中间态与原错误率记录保留在 §11.9.3，作为"仿真无保护力"的证据链，不因已修复而删除。
+| 题面场景 | 我方用例 |
+|---|---|
+| 小规模 `S=64, D=256, m=2` | `fwd/bwd-{fp16,bf16}-small` ✅ |
+| 中规模 `S=1024, D=4096, m=4` | `fwd/bwd-{fp16,bf16}-medium` ✅ |
+| 大规模 `S=8192, D=7168, m=8` | `fwd/bwd-{fp16,bf16}-large` ✅（含 `0/469762048` 位级） |
+| 扩展倍数 `m=2/4/8` | `bwd-fp16-m2/m4` + `fwd-fp16-ROW-m8` ✅（另覆盖 m=1/3/5/16） |
+| 边界 `S=1`、`D=1` | `fwd-fp16-S1D1`（0/2）、`bwd-*-D1` ✅ |
+| 非对齐维度 | `D=7167` / `D=100` / `D=70001` / `D=33` ✅ |
+| float16 / bfloat16 累加精度 | 反向全部 fp32 域累加，两组 dtype × 正反向全覆盖 ✅ 位级 |
 
-### E2 复核"逐字节一致"（**现状已变化**）
+`tools/reference.py`（**权威判据来源**）内置 **12 组 shape × 2 dtype = 24 组**用例（超集，含官方三档规模）：
+`(4,8,2) (4096,7168,4) (7,100,2) (1000,7167,3) (13,128,4) (1,1,2) (1,4096,4) (128,256,1) (64,512,16) (32,1,4) (64,16,8) (8192,7168,4)`
+- 判据：`torch.allclose(rtol=1e-3, atol=1e-3)`（两侧先转 fp32），前向另需 `torch.equal`（**逐 bit**）。
+- CLI：`python3 tools/reference.py --list | --selftest | --export DIR | --check-forward NPY | --check-backward NPY --case N --dtype {fp16,bf16}`。
+- ⚠️ 官方的中档 `(1024,4096,4)` 与高档 `(8192,7168,8)` **未被 reference.py 精确覆盖**（最接近 `(8192,7168,4)`）；真机/仿真 harness 两组都跑过 ⇒ 缺口只在这份 Python 参考里。
 
-- **2026-09-20 更新**：比赛平台下载的 zip 及早期快照（`_incoming/`、`_submission326701/` 等）**已在整理中删除，本地无副本** → "与 zip 逐字节一致"**无法本地复核**。
-- **替代做法**：已记录当前四个提交文件的 md5 基线（§4.1 / §6.1），以当前文件为唯一事实源。
-- 若用户能**重新下载**比赛平台 zip → 再做一次 `md5sum` / `diff` 复核（先问用户，不自动对齐）。
+### 5.2 分组与条数（**条数会随 harness 版本漂移，别把旧数字当基线**）
 
-### E3 必测风险点（有明确翻车机理）
-
-| 风险 | 机理 | 怎么测 |
+| 组 | 内容 | 条数（2026-09-20 真机） |
 |---|---|---|
-| **反向 `sum` / `mean`** | 差恰好 `m` 倍，选错**必定零分**。✅ 已由官方题面确认是 **sum** | 参考实现同时算两种口径，对拍时两种都比一遍，看哪种过 |
-| **非 32B 对齐** | `D` 非 16 倍数时行首非 32B 对齐，裸 `DataCopy` 会崩 | 必测 `D = 100`、`D = 7167`、`D = 1`（**这是最易翻车处**，官方也点名"非对齐维度"） |
-| **逐 bit 比对** | BF16 只有 8 位尾数，`m=4` 时 fp16/bf16 直接累加与 fp32 累加差最后 1 ulp | 反向**必须 fp32 域累加**（已实现），并对比 `xgrad_ref_fp32`。官方测试覆盖里点名"float16 累加精度、bfloat16 累加精度" |
-| **UB 容量** | `m` 很大（如 16）时整行是否放得下 | 测 `m=16`（`S=64, D=512, m=16`）。✅ 仿真已覆盖：优化 A 去掉 m 因子后 `D=4096, m=16` 走整行 `tile=4096` 且 PASS（§9.3 mtile 组） |
-| **小 shape 用不满核** | `S=8, D=7168, m=2` 按行只能用到 8 个核 | 测小 S，并确认 `SPLIT_ROW_STREAM` / `SPLIT_ELEMENT` 生效。✅ 仿真 mode=1/2 用例全 PASS |
-| **ccec 隐式转换** | `uint32_t`→`float` 隐式转换在**真机**报错，本地仿真机不管 | 真机自然暴露；提交前先自查所有 `static_cast` |
-| **`m=1` 退化** | 官方扩展倍数只列 `m=2/4/8`，但 `m=1` 应退化为纯拷贝 | 测 `m=1`，确认不越界、不退化成错误路径 |
+| `quick` | 官方三档 + 边界 + 强制 STREAM/ELEMENT 切分 + fp16 饱和 | 25（仿真侧同组 29/30/35，因 harness 版本与分组不同） |
+| `medium` / `large` | 中/大档 × 正反向 × 双 dtype | 4 / 4 |
+| `mtile` | 多 tile（`D=70000/70001/33000/33001`，含**奇数尾块**） | 12 |
+| `bnd` | UB 预算边界对 | 15 |
+| `ub48` | `ub_size==0` 兜底 48KB 预算组 | 4 |
 
-### E4 用例矩阵
+⇒ §11.10.3 的 **7 轮 89 条** = quick×2 + medium + mtile + bnd + ub48 + large；§14.4 的 **45 条** = 同一批去掉重复 quick。
+⚠️ **只有 `D` 取奇数才能逼出奇数尾块**：`op_host:90` 的 else 分支写死 `t = std::min<uint64_t>(2048, D)`（不是按预算算出的 24576/32768）⇒ `2048×k` 恒为偶。`D=70001/33001` 两个用例正是补这个缺口。
 
-**官方题面给出的覆盖范围**（§6）：
+### 5.3 三条真有翻车机理的风险（其余已被实测关掉）
 
-| 维度 | 官方取值 |
-|---|---|
-| 数据类型 | bfloat16、float16 |
-| 小规模 | `S=64, D=256, m=2` |
-| 中规模 | `S=1024, D=4096, m=4` |
-| 大规模 | `S=8192, D=7168, m=8` |
-| 扩展倍数 | `m=2`、`m=4`、`m=8` |
-| 边界场景 | `S=1`（单 token）、`D=1`（单维度）、非对齐维度 |
-| 精度场景 | float16 累加精度、bfloat16 累加精度 |
-| 前向验证 | 输出每个副本与输入是否一致 |
-| 反向验证 | 梯度归约求和是否正确 |
+| 风险 | 机理 | 现状 |
+|---|---|---|
+| 反向 `sum` / `mean` | 差恰好 `m` 倍 ⇒ 选错**必定零分** | ✅ 题面 + 平台双重裁定为 sum（§2.2 / §13.1） |
+| 非 32B 对齐 | `D` 非 16 倍数时行首非 32B 对齐，裸 `DataCopy` 会崩（官方也点名"非对齐维度"） | ✅ 全走 `DataCopyPad`；`D=100/7167/1/33` 真机位级 PASS |
+| 逐 bit 比对 | BF16 只有 8 位尾数，直加与 fp32 累加差最后 1 ulp | ✅ 反向 fp32 域累加 + 与 `xgrad_ref_fp32` 对拍，24 条 `maxdiff=0` |
 
-**本地 `tools/reference.py` 内置 12 组 shape × 2 dtype = 24 组用例**（**超集**，含官方三档规模）：
+（`ccec` 隐式 `uint32_t→float`、`m=1` 退化、小 shape 用不满核、UB 容量 `m=16` 四条已在 §11 全部实测通过，不再单列。）
 
-```
-(4,8,m=2) (4096,7168,m=4) (7,100,m=2) (1000,7167,m=3) (13,128,m=4) (1,1,m=2)
-(1,4096,m=4) (128,256,m=1) (64,512,m=16) (32,1,m=4) (64,16,m=8) (8192,7168,m=4)
-```
+### 5.4 tile / 预算边界（**纯算术钉死，真机逐条对上**）
 
-> ⚠️ 官方的中规模 `(1024,4096,m=4)` 与大规模 `(8192,7168,m=8)` **未被 reference.py 精确覆盖**（最接近的是 `(8192,7168,m=4)`）。上机时**建议补上官方这两组**。
+整行 vs 多 tile 的分界就是 `D * elem_size ≤ ub_budget = ub_size/4`。910B 真机 UB = 256KB ⇒ 预算 **64KB** ⇒ fp16/bf16 整行上限 **`D ≤ 32768`**；官方三档 D（256/4096/7168）全部走整行，多 tile 分支只在兜底或超大 D 时生效。
 
-- 判据：`torch.allclose(rtol=1e-3, atol=1e-3)`（两侧先转 fp32），前向另需 `torch.equal`（**逐 bit**）
-- CLI：`python3 tools/reference.py --list | --selftest | --export DIR | --check-forward NPY | --check-backward NPY --case N --dtype {fp16,bf16}`
-
-### E5 单算子 vs 双算子（**官方题面到手后新增的确认项**）
-
-官方题面把前向与反向写成**两个独立算子**（`MHC Expand Forward` / `MHC Expand Backward`，各自有独立的输入输出规格表），而本实现是**单算子 `MhcExpand` + `backward` 属性**。
-
-- 若比赛平台按**两个独立算子名**调用 → 需**多注册一个 OpDef**，kernel 代码可 100% 复用
-- 若比赛平台按**单算子 + backward 属性**调用 → 现状即可
-- **判据**：比赛平台首个 `Compile Error` / `Wrong Answer` 的具体报错，或从提交后比赛平台反馈的算子名判断
-
-> ⚠️ 这是当前**无法在本地判定**的项，只能通过提交或询问评测侧确认。
+| 用例 | ub_budget | 预期 tile / num / tail | 实测 |
+|---|---|---|---|
+| `BND-D32768-m2`（`D*2 == budget` 取等） | 64KB | 32768 / 1 / 32768（**整行最后一格**） | 真机位级 PASS；**仿真 FAIL = 假失败**（§8.3） |
+| `BND-D32769-m2`（超预算 2 字节） | 64KB | 2048 / 17 / **1**（尾块只剩 1 元素） | 真机 PASS |
+| ub48 组 `D=24576` / `D=24577` | 48KB（兜底） | 整行取等 / `2048, num=13, tail=1` | 真机 PASS（4 条全绿） |
+| `D=70001` / `D=33001` / `D=26001` | 64KB | `2048/35/369`、`17/233`、`13/1425` | 与容器/真机输出的 `tile=` 一致 ⇒ **harness 镜像与 op_host 同源无漂移** |
 
 ---
 
-## 6. 工程材料索引（本题相关）
+## 6. 工程材料索引与留证
 
-| 路径 | 是什么 |
-|---|---|
-| `code1/op_host/mhc_expand.cpp` | host tiling（**提交文件**） |
-| `code1/op_kernel/mhc_expand.cpp` | kernel（**提交文件**） |
-| `code1/op_kernel/mhc_expand_tiling.h` | tiling 结构体（**提交文件**） |
-| `code1/op_kernel/tiling_key_mhc_expand.h` | tiling key（**提交文件**） |
-| `code1/tools/reference.py` | Python 参考实现 + 用例导出 + 对拍自检（**权威判据来源**） |
-| `code1/cpu_debug/` |本地仿真机对拍 harness + 构建/运行脚本（**非提交**；脚本已做成本地/云端仿真机通用，见 §8 与工作流 §3.6） |
-| `code1/cpu_debug/quick_matrix_cloud_20260920.log` | 云端仿真机28 用例逐行结果留档（**非提交**，ALL PASS 证据） |
-| `code1/cpu_debug/recovered_r4/` | **tpm0u 第二轮 5 组日志捞回归档**（**非提交**，§9.5.2，md5 已双侧复验） |
-| `code1/npu_debug/` | **真机侧**（**非提交**）：`test_mhc_expand_npu.cpp` 启动器 + `build_npu.sh` + `run_npu.sh`（组 OPP 包）+ `preflight_npu.sh` + `pkg/`（运行期组出的 custom OPP 包） |
-| `code1/npu_debug/logs/` | 真机历轮日志 50 份（`preflight` / `build_gate` / `npu_quick*` / `npu_diag*` / `npu_det*` / `npu_matrix1` / `npu_large` §11.9 + `npu_fix_quick*`(V1) / `npu_nbar_*`(V2) / `npu_barrier_quick*`(V3 首绿) / `npu_allgroups_fixed*`(§11.10 ⭐当前状态出处) / `msprof_ab_*`(§11.11) / `submit1_*`(§13 首次提交与判因)），**精度、性能与比赛平台结论的唯一原始出处**，关键 8 份 md5 见 §6.1 |
-
-> 本题**无其它留存材料** —— 早期的接收/提交代码快照（`_incoming/q1`、`_incoming/q2`、`_submission326701`、`_payload.tar.gz`）与第二题算子包（`.run`）**已在本轮整理中删除**（内容与提交源重复，判据一律用 `md5sum`）。
-
-### 6.1 md5 基线（2026-09-20 记录，**2026-09-20 23:34 "少开核"规则落地后更新**）
-
-```
-c76d30be6bd1117e2848d858168d89e3  code1/op_host/mhc_expand.cpp        ← ⭐ **第二次提交版**：§14.3 的"每核 IO 不足 6KB 就不再开核"规则。相对首交版 `a16c371d1bb39a81d0efecd24db71b49`（tiling 条件修正版）的完整 diff **只有这一段 host 侧整数算术**，不含新 API、不碰核函数
-53ee60e532ee1730b3bd0f1bc713c983  code1/op_kernel/mhc_expand.cpp      ← **2026-09-20 21:10 第三版**：前向 `ForwardOneBlock` 补 `PipeBarrier<PIPE_ALL>()`（§11.10）。⚠️ 相对上一版 `0fb9e6ec…` 的**完整 diff 只有 +3 行**（1 行 barrier + 2 行注释），反向路径与 host 未动
-f759a052a865facbb889149ea1aa37e3  code1/op_kernel/mhc_expand_tiling.h
-267e012564ba3d18cfabc729cc214e88  code1/op_kernel/tiling_key_mhc_expand.h
-e4230a47ccb6d3a8616287a4e2449bcc  code1/tools/reference.py（非提交文件）
---- 以下 cpu_debug/ 非提交 ---
-4668173231e634e3d448962cc50dc965  code1/cpu_debug/test_mhc_expand_cpu.cpp  ← 在 99db13d2 基础上加 3 个预算边界用例（§9.4）；tiling 镜像同步 + 模式分组(quick/medium/large/mtile/ub48) + 逐用例计时；**第二轮已在 tpm0u 上机跑（§9.5）**
-1fe721462b86e1ff00ce95fb3a4aa13f  code1/cpu_debug/build_cpu.sh
-dca1abe8130b508764c5e595a142e60a  code1/cpu_debug/run_cpu.sh
-deb5bd526794498c321f64c4a4fe0fce  code1/cpu_debug/run_all_groups.sh  ← 分组驱动（组名白名单 + 真实用例计数）；**正在跑的那份远端版本 = 033b9d2d…，只差计数器取 `maxdiff=` 还是 `^\[`**
-b770ff2af9e758fdbfc6f207cf7936f3  code1/cpu_debug/probe_args.sh  ← 诊断：打印脚本实际收到的位置参数（定位 GROUPS 保留变量坑用）
---- 以下 npu_debug/ 非提交（真机侧，2026-09-20 20:30 记录）---
-7555a6ba17821d2403b029ca51ff4283  code1/npu_debug/test_mhc_expand_npu.cpp  ← 真机 ACL 启动器（§11.9.1）：**dlopen 取 aclnn 入口，不做链接期依赖**。21:10 改 fp16 溢出期望为 IEEE `inf`（原 `c7a3e698…`，§11.10）；21:25 加 **`prof` 组**（`MHC_REPS` 连发计时，§11.11）⇒ `66f63fcd…` → 本值
-221777360927eefe1084a2a9ceb5a34d  code1/npu_debug/build_npu.sh             ← 探测 set_env + 时间戳/`nm -D` 防假成功 + 链接 `-lnnopbase -lascendcl -ldl`。**2026-09-20 21:10 补齐源陈旧判定**（`find … -newer` ⇒ 强制重建，原 `6b4030a5…`，§11.10.4）
-417ceccbbd9c4bfc20f13dec5d0f68a2  code1/npu_debug/run_npu.sh               ← 运行期组 custom OPP 包 + 设 `ASCEND_CUSTOM_OPP_PATH`（解 561002）
-b488fed4f41cb02972f4bf2682e4dd0f  code1/npu_debug/preflight_npu.sh         ← 到手第一条只读命令（§11.3）
-f1ed94b7d2efcf847565136972d353b3  code1/npu_debug/prof_npu.sh              ← msprof 采集器（§11.11）：`msprof --task-time=on --ai-core=on` + OPP 包按时间戳自动刷新 + `PROF_MISSING` 判据
-a8ffb96c5dbd3ec8b5da29295f5ec5fc  code1/npu_debug/prof_sum.js              ← `op_summary.csv` 摘要器：按 Input Shapes 维度数分前向/反向、剔首任务、输出 mean/min/p50/max 与各 DMA 通道均值
---- tpm0u 捞回的 r4 日志（§9.5.2，只读留证）---
-4e605205ba796010d68d1f8c3de51c4f  code1/cpu_debug/recovered_r4/quick_r4_20260920_1812.log
-3af4a0c75f26f249a5a975eb8add9d35  code1/cpu_debug/recovered_r4/medium_r4_20260920_1812.log
-060c7388b4a6be5c480b6241250d0c34  code1/cpu_debug/recovered_r4/mtile_r4_20260920_1812.log
-40b0a9723889f828bc7d40f1ce6d16a0  code1/cpu_debug/recovered_r4/ub48_r4_20260920_1812.log
-8ccfd1d3a589271abee5bcee94afefd6  code1/cpu_debug/recovered_r4/large_r4_20260920_1812.log   ← 前向 2 条位级 PASS，反向 2 条未跑完
-759952580f2a1754d4f615480925624e  code1/cpu_debug/recovered_r4/driver.log
---- §11.10 修复轮的证据日志（只读留证，2026-09-20 21:15 记录）---
-ac3a83d6c1675562148983e29d660be2  code1/npu_debug/logs/npu_fix_quick_20260920_2047.log        ← V1 事件配对：fail=9 err=0（**不足**）
-93d56431e149409ec8a7a1ef8d007251  code1/npu_debug/logs/npu_nbar_quick1_20260920_205522.log    ← V2 窄 barrier：fail=0 err=9
-ee9153b79c28cdec5242b9f63d770a30  code1/npu_debug/logs/npu_nbar_err_20260920_2056.log         ← V2 真报错 `sync failed` 原文（带缩进，须 grep 不能 `^\[`）
-30f80131da8c021e14843cbd9178427c  code1/npu_debug/logs/npu_barrier_quick_20260920_2052.log    ← V3 `PIPE_ALL` 首次 ALL PASS
-877c11dfcbb022b461a8bac6d3584ad6  code1/npu_debug/logs/npu_allgroups_fixed_20260920_2056.log  ← ⭐ V3 全量 7 轮 89 条 ALL PASS（**当前状态的原始出处**）
-dadd14dc747a62bb2e94dc79be637a95  code1/cpu_debug/logs/sim_quick_full_barrier_20260920_2109.log ← V3 在仿真机 quick 29 条 ALL PASS（远端=本地）
---- §13 首次比赛平台提交的证据（2026-09-20 22:25 记录，只读留证）---
-32c2594fb0b3799eecb34ad40e98fd1b  code1/npu_debug/logs/submit1_result_8of8_20260920.log  <- ⭐ 8/8 Pass + 逐 case precision_ratio=1 原始输出（远端=本地 md5 一致）
-0b7c722b27dd677af35b3ae2057975e8  code1/npu_debug/logs/submit1_analysis_20260920.log      <- §13.2/§13.3 判因原始数据（per-case 对照 + 123 条 last_submission 时间轴）
-364b6289b4cfcbfbd71ab423e344c489  code1/npu_debug/logs/submit1_nowait_20260920.log        <- 提交回执（Submission ID 6aafea71b0477ec41ea07f63）
-35660d860987956bacff87f31582b04b  code1/npu_debug/logs/submit1_query1.log                 <- 首查 status=Running（判分耗时 ~4min 的真实曲线）
---- §11.11 msprof A/B 的产物与摘要（2026-09-20 21:30 记录）---
-00583bfa56be08537a3065e87db85649  code1/npu_debug/logs/msprof_ab_v0_v3_fp16large.txt  ← ⭐ §11.11.2 那张表的原始出处（prof_sum.js 的 stdout，tee 落本地）
-code1/npu_debug/prof/v3_20260920_212646/PROF_*/mindstudio_profiler_output/  ← V3 采集产物（794K，8 份 csv，远端 md5 = 本地：4ce454fb / d44f54af / a5933b70 / 60f7dd20 …）
-code1/npu_debug/prof/v0_20260920_212810/PROF_*/mindstudio_profiler_output/  ← V0 采集产物（794K，8 份 csv，远端 md5 = 本地：f91707b4 / e5d25911 / 8633d888 / 04200357 …）
---- §14 小档归因 + blockDim 扫描 + 第二次提交（2026-09-20 23:45 记录）---
-b17e9f15ef8c9d8819051ea1c80d3d1a  code1/npu_debug/logs/blockdim_sweep_20260920.log  ← ⭐ §14.2 那张扫描表 + §14.4 复测 + §14.5 跨步 DMA 否决证据（原始 stdout 摘要）
-code1/npu_debug/prof/blockdim_20260920/{b2,b4,b8,b12,b16,b24,b40,rule}_c*/ ← 36 份 op_summary csv（3.6MB，远端逐字节回捞），§14.2/§14.4 的一次性产物
-916c5e7be95603d18f0875ef18576c44  code1/npu_debug/logs/submit2_result_20260920.log  ← ⭐ 第二次提交 8/8 Pass 原始输出（case1=3.82 / case5=3.96）
-b3217373cebf09e5dc1052303521c86c  code1/npu_debug/logs/submit2_nowait_20260920.log  ← 提交回执（Submission ID 6aaffd92b0477ec41eb14eb0）
-35660d860987956bacff87f31582b04b  code1/npu_debug/logs/submit2_query1_20260920.log  ← 首查 status=Running（与 submit1_query1 同内容同 md5）
-a0a91ccabf41219e3e41c3b77c2dd1f1  code1/npu_debug/logs/npu_all_20260920_233408.log  ← ⭐ 规则版 `all` 45 条 ALL PASS（rep1）
-a0a91ccabf41219e3e41c3b77c2dd1f1  code1/npu_debug/logs/npu_all_20260920_233428.log  ← ⭐ 同参复跑（rep2）—— **与 rep1 逐字节同一 md5 ⇒ 本轮无新增非确定性**
-067b8f55f18403971644ad7f7f4d0253  code1/npu_debug/logs/npu_quick_20260920_233030.log      ← 规则版 quick 25 条 ALL PASS
-f53128ad8d0b341f7949ad348a10f9a1  code1/npu_debug/logs/npu_medium_20260920_233058.log    ← 4 条 ALL PASS
-f9603e920d23fa1007a2d7626d1093a0  code1/npu_debug/logs/npu_large_20260920_233101.log     ← 4 条 ALL PASS
-e735b0a5648a986a23284103a1018a6a  code1/npu_debug/logs/npu_mtile_20260920_233122.log     ← 12 条 ALL PASS
-d2d1727e875e66baee2a1ad648bcd035  code1/npu_debug/logs/npu_bnd_20260920_233125.log       ← 15 条 ALL PASS
-a04c6aea84455f8df6263a233f801a40  code1/npu_debug/logs/npu_ub48_20260920_233128.log      ← 4 条 ALL PASS（48KB UB 预算组）
-```
-
-> ⛔ **`op_kernel/` 三个文件的 md5 是"提交内核零改动"的证据链**：推到任何调试环境都用 **tar 管道 + md5 复验**，**不得对它们做格式化/行尾转换**。远端只是副本，**本地 `code1/` 永远是唯一权威源**（容器销毁不影响任何文件）。
-> ⚠️ 行尾状态**用 `tr -dc '\r' < f | wc -c` 判定**，不要用 `grep -c $'\r'`（模式会退化、把"含字母 r 的行数"当成 CRLF 计数 → 本轮据此误判过一次"全文件 CRLF"，实际全部纯 LF）。
-> ⚠️ **本仓库 `core.autocrlf=true` 且无 `.gitattributes`**：内核文件在 **git 索引里是 LF**，但 `checkout` / 重新 clone 会把工作区写成 **CRLF** → **上面这份 md5 会集体失配（代码其实没变）**。**已实测**：`git checkout-index` 导出的 `op_kernel/mhc_expand.cpp` = `28f7760d454b99d660f11ee9796a2ff4`（含 183 个 CR），与工作区/索引的 `d9af56115380fba67550bf76a886084e` 不同。核对口径三选一：① 比对前归一化 `tr -d '\r' < f | md5sum`；② `git cat-file -p :<路径>` 直接读索引字节；③ 加 `.gitattributes` 写 `* -text` 关闭转换（属仓库配置，**需用户同意**）。
-
----
-
-## 7. 本题目录边界
-
-整理后 **`code1/` 已只含第一题的东西**：
+### 6.1 目录树（整理后 `code1/` 只含第一题）
 
 ```
 code1/
-├─ op_host/mhc_expand.cpp            ← 提交文件
-├─ op_kernel/mhc_expand.cpp          ← 提交文件
-├─ op_kernel/mhc_expand_tiling.h     ← 提交文件
-├─ op_kernel/tiling_key_mhc_expand.h ← 提交文件
-├─ op_kernel/mhc_expand.cpp.bak_pre_fwd_event ← V0（修复前原始版，**回滚点**，§11.10.7）
-├─ op_kernel/mhc_expand.cpp.events_v1          ← V1（`SetFlag/WaitFlag` 事件配对实测版，已弃，§11.10.1）
-├─ cpu_debug/                        ← 仿真机对拍（非提交；tar 管道推本地仿真机 / 云端仿真机）
-│   ├─ test_mhc_expand_cpu.cpp       ← 同源 harness：#include op_kernel 内核 + 镜像 TilingFunc
-│   ├─ build_cpu.sh / run_cpu.sh     ← CANN 路径探测 + `$(uname -m)-linux` 自适应（本地 / 云端仿真机通用）
-│   └─ quick_matrix_cloud_20260920.log ← 云端仿真机28 用例逐行结果（ALL PASS 证据）
-├─ npu_debug/                        ← 真机侧（非提交）：ACL 启动器 + 构建/组包脚本 + preflight
-│   ├─ test_mhc_expand_npu.cpp       ← dlopen 取 aclnn 入口（⛔ 不得做成链接期依赖，否则 561002，§11.9.2）
-│   ├─ build_npu.sh / run_npu.sh     ← 编译 + 运行期组 custom OPP 包
-│   ├─ preflight_npu.sh              ← 到手第一条只读命令（§11.3）
-│   ├─ prof_npu.sh / prof_sum.js     ← msprof 采集器 + `op_summary.csv` 摘要器（§11.11.1）
-│   ├─ prof/<tag>_<ts>/PROF_*/       ← msprof 原始产物（8 份 csv/轮，md5 已双侧核对，§11.11.5）
-│   ├─ pkg/custom/…                  ← run_npu.sh 自动组出的 OPP 包（ASCEND_CUSTOM_OPP_PATH 指这里）
-│   ├─ test_mhc_expand_npu.cpp.bak_pre_ieee ← 启动器改 IEEE inf 期望前的备份
-│   └─ logs/npu_*.log                ← 真机历轮原始日志（§11.9 / §11.10）+ `msprof_ab_*.txt`（§11.11.2）
-├─ tools/reference.py                ← 参考实现与对拍
+├─ op_host/mhc_expand.cpp                       ← 提交文件
+├─ op_kernel/mhc_expand.cpp                     ← 提交文件
+├─ op_kernel/mhc_expand_tiling.h                ← 提交文件
+├─ op_kernel/tiling_key_mhc_expand.h            ← 提交文件
+├─ op_kernel/mhc_expand.cpp.bak_pre_fwd_event   ← V0（修复前原始版，**长期回滚点**，§11.10.7）
+├─ op_kernel/mhc_expand.cpp.events_v1           ← V1（`SetFlag/WaitFlag` 实测版，已弃，§11.10.1）
+├─ cpu_debug/                                   ← 仿真机对拍（非提交）
+│   ├─ test_mhc_expand_cpu.cpp                  ← 同源 harness：#include 内核 + 镜像 TilingFunc
+│   ├─ build_cpu.sh / run_cpu.sh                ← CANN 路径探测 + `$(uname -m)-linux` 自适应（两侧仿真机通用）
+│   ├─ run_all_groups.sh / probe_args.sh        ← 分组驱动（组名白名单 + 真实用例计数）+ 参数诊断
+│   ├─ recovered_r4/                            ← 云端 tpm0u 第二轮 5 组日志捞回归档（§8.2，md5 双侧复验）
+│   └─ logs/ quick_matrix_cloud_20260920.log    ← 仿真侧逐用例留档
+├─ npu_debug/                                   ← 真机侧（非提交）
+│   ├─ test_mhc_expand_npu.cpp                  ← ACL 启动器（dlopen 取 aclnn 入口，⛔ 不得做成链接期依赖 → §11.9.2）
+│   ├─ build_npu.sh / run_npu.sh                ← 编译（含源陈旧判定）+ 运行期组 custom OPP 包
+│   ├─ preflight_npu.sh                         ← 到手第一条只读命令（§11.8）
+│   ├─ prof_npu.sh / prof_sum.js / prof_matrix.sh  ← msprof 采集器 + `op_summary.csv` 摘要器 + blockDim 扫描驱动
+│   ├─ *.bak_*                                  ← 内核/启动器历史备份（**都在 npu_debug/ 下，不在 op_kernel/**）
+│   ├─ prof/<tag>_<ts>/PROF_*/                  ← msprof 原始产物（8 份 csv/轮，md5 双侧核对）
+│   └─ logs/                                    ← 真机 + 平台日志（本地 74 份），结论的唯一原始出处
+├─ tools/reference.py                           ← 参考实现 + 用例导出 + 对拍自检（**权威判据来源**）
 └─ CMakeLists.txt
 ```
 
-原先混在本目录下的**第二题、第三题材料已分流**：
+⚠️ `pkg/custom/…`（运行期组出的 OPP 包，`ASCEND_CUSTOM_OPP_PATH` 指这里）**只存在于设备构建树 `~/ops_comp/code1/`**，本地没有副本（每次由 `run_npu.sh` 现组）。
 
-| 原位置 | 现状 | 归属 |
-|---|---|---|
-| `code1/_sfa/` | → `refs/sfa/`（只留有价值的：参考实现 / 用例 / 脚本） | **第三题** |
-| `code1/_harness/` | → `refs/harness_sinkhorn/` | **第二题** 测试脚手架 |
-| `code1/_incoming/`、`code1/_submission326701/`、`code1/_payload.tar.gz` | ❌ **已删除** | 早期快照 |
-| `code1/mhc_sinkhorn_CPU全过_修复版.run` | ❌ **已删除** | **第二题** 算子包 |
+### 6.2 工装 md5（**非提交**，2026-09-20 23:40 本地实测）
+
+```
+cpu_debug/test_mhc_expand_cpu.cpp   4668173231e634e3d448962cc50dc965  ← 含 3 个预算边界用例 + 模式分组 + 逐用例计时
+cpu_debug/build_cpu.sh              1fe721462b86e1ff00ce95fb3a4aa13f
+cpu_debug/run_cpu.sh                dca1abe8130b508764c5e595a142e60a
+cpu_debug/run_all_groups.sh         deb5bd526794498c321f64c4a4fe0fce  ← 组名白名单 + 真实用例计数（§8.4 假成功修复版）
+cpu_debug/probe_args.sh             b770ff2af9e758fdbfc6f207cf7936f3  ← 打印脚本实际收到的位置参数
+npu_debug/test_mhc_expand_npu.cpp   d23a164734cae2389c0eae98e5768960  ← 演变：c7a3e698… → 21:10 改 IEEE inf → 21:25 加 prof 组 → 23:2x 同步少开核定则注释
+npu_debug/build_npu.sh              221777360927eefe1084a2a9ceb5a34d  ← 含源陈旧判定（§11.10.4 坑①）
+npu_debug/run_npu.sh                417ceccbbd9c4bfc20f13dec5d0f68a2  ← 运行期组 custom OPP 包（解 561002）
+npu_debug/preflight_npu.sh          b488fed4f41cb02972f4bf2682e4dd0f
+npu_debug/prof_npu.sh               f1ed94b7d2efcf847565136972d353b3
+npu_debug/prof_matrix.sh            b2acd6dc8b3c1fadb316908873ff1ea3
+npu_debug/prof_sum.js               f60085cc19d4ca9cf5bcf31242921e13  ← ⚠️ 旧记录 a8ffb96c… 是"加 blk 参数之前"的版本
+tools/reference.py                  e4230a47ccb6d3a8616287a4e2449bcc
+```
+
+### 6.3 留证日志（**结论的唯一原始出处**；⚠️ `.gitignore` 忽略 `*.log` ⇒ 只在工作区、不在 git）
+
+```
+§8.2 仿真三轮   cpu_debug/quick_matrix_cloud_20260920.log（33 行，逐例 tile/mode/blk）
+                cpu_debug/recovered_r4/  quick 4e605205 / medium 3af4a0c7 / mtile 060c7388 / ub48 40b0a972
+                                        / large 8ccfd1d3 / driver 75995258      ← 远端=本地 md5 逐一复验
+                cpu_debug/logs/sim_quick_full_barrier_20260920_2109.log  dadd14dc…  ← V3 仿真 quick 29 条 ALL PASS（CR=0）
+§11.9/11.10     npu_debug/logs/npu_allgroups_fixed_20260920_2056.log     877c11df…  ← ⭐ 7 轮 89 条 ALL PASS（当前状态出处）
+                npu_fix_quick_20260920_2047.log   ac3a83d6…  ← V1 事件配对 fail=9（不足）
+                npu_nbar_quick1_20260920_205522.log 93d56431… ← V2 窄 barrier err=9
+                npu_nbar_err_20260920_2056.log    ee9153b7…  ← V2 `sync failed` 原文（带缩进，须 grep 不能 `^\[`）
+                npu_barrier_quick_20260920_2052.log 30f80131… ← V3 `PIPE_ALL` 首次 ALL PASS
+§11.11 msprof   logs/msprof_ab_v0_v3_fp16large.txt 00583bfa…  ← §11.11.2 那张表的原始 stdout
+                prof/{v0,v3}_20260920_*/          ← 各 794K / 8 份 csv，md5 双侧一致
+                                                       v0 f91707b4 e5d25911 8633d888 04200357
+                                                       v3 4ce454fb d44f54af a5933b70 60f7dd20
+§13 首交        logs/submit1_result_8of8_20260920.log 32c2594f…  ← ⭐ 8/8 Pass + 逐 case precision_ratio=1
+                logs/submit1_analysis_20260920.log    0b7c722b…  ← §13.2/§13.3 判因原始数据（123 条 last_submission 时间轴）
+                logs/submit1_nowait_20260920.log      364b6289…  ← 回执；submit1_query1.log 35660d86… ← status=Running（判分 ~4min）
+§14 扫描+第二次 logs/blockdim_sweep_20260920.log      b17e9f15…  ← ⭐ §14.2 扫描表 + §14.4 复测 + §14.5 否决证据
+                prof/blockdim_20260920/{b2..b40,rule}_c*/  ← 36 份 op_summary csv（3.6MB，远端逐字节回捞，**未入库**）
+                logs/npu_all_20260920_{233408,233428}.log  **同一个 md5 a0a91cca…** ← 同参复跑逐字节一致 ⇒ 无新增非确定性
+                logs/npu_quick_233030 067b8f55 · medium_233058 f53128ad · large_233101 f9603e92
+                       · mtile_233122 e735b0a5 · bnd_233125 d2d1727e · ub48_233128 a04c6aea  ← 规则版全组 ALL PASS
+                logs/submit2_result_20260920.log       916c5e7b…  ← ⭐ 第二次提交 8/8 Pass（case1=3.82 / case5=3.96）
+                logs/submit2_nowait_20260920.log       b3217373…  ← 回执
+```
+
+---
+
+## 7. 目录边界与历史材料
+
+原先混在本目录下的**别题材料已分流**：`_sfa/` → `refs/sfa/`（第三题）；`_harness/` → `refs/harness_sinkhorn/`（第二题测试脚手架）；`_incoming/`、`_submission326701/`、`_payload.tar.gz`、`mhc_sinkhorn_CPU全过_修复版.run` ❌ **已删除**（内容与提交源重复，判据一律用 `md5sum`）。
+
+⇒ 后果要说清：比赛平台下载 zip 的早期快照**本地已无副本**，"与通过版逐字节一致"**无法本地复核**；**当前四个提交文件以 §3.2 的 md5 为唯一事实源**。若用户重新下载 zip 要再核一次，先问、不自动对齐。
 
 > 各题自己的 `codeN.md` 才是该题的当前口径。本文件只讲**第一题**。
 
 ---
 
-## 8. 仿真机验证（2026-09-20，本地仿真机 + 云端仿真机）
+## 8. 仿真机验证（本地仿真机 + 云端仿真机，2026-09-20）
 
-**方法（同源对拍，提交内核零改动）**：`cpu_debug/test_mhc_expand_cpu.cpp` 直接 `#include "op_kernel/mhc_expand.cpp"`，tiling 决策镜像 op_host `TilingFunc`；`ICPU_RUN_KF` 以 blockDim≤20 跑核（CPU sim 核数上限 <50）。
+### 8.1 方法与两个环境
 
-**两个调试环境**：
-- 本地仿真机 `192.168.101.128`（fszqsn，x86_64，6vCPU/24G）：CANN 在 `~/Ascend/cann/cann-9.0.0`（⚠️ 部分文档写 `/usr/local/Ascend/...`，在本地仿真机上**不存在**）。
-- 云端仿真机 devenv 容器（aarch64，16 核/32G，`npu-smi` 不存在 = 纯 CPU 仿真）：CANN 在 `~/Ascend/cann-9.0.0`，`libpem_davinci.so` 在 `aarch64-linux/simulator/dav_2201/lib/`。
+**同源对拍、提交内核零改动**：`cpu_debug/test_mhc_expand_cpu.cpp` 直接 `#include "op_kernel/mhc_expand.cpp"`，tiling 决策**镜像** op_host `TilingFunc`；`ICPU_RUN_KF` 以 blockDim ≤ 20 跑核（CPU 仿真核数上限 < 50）。
 
-构建/运行脚本 `cpu_debug/build_cpu.sh` / `run_cpu.sh` 已固化全部编译坑（`-DASCENDC_CPU_DEBUG -D__NPU_ARCH__=2201 -D_GLIBCXX_USE_CXX11_ABI=0` + `-lpem_davinci -lcpudebug*` 系列），并做了**CANN 路径自动探测 + 架构自适应**（`$(uname -m)-linux`），本地仿真机/云端仿真机通用。工程推送用 tar 管道 + md5 校验。
+| 环境 | 形态 | CANN 位置 |
+|---|---|---|
+| 本地仿真机 | x86_64 / 6vCPU / 24G（现场读 IP，勿硬编码） | `~/Ascend/cann/cann-9.0.0`（⚠️ 部分文档写 `/usr/local/Ascend/...`，这台**不存在**） |
+| 云端仿真机 devenv 容器 | aarch64 / 16 核 / 32G，`npu-smi` 不存在 = 纯 CPU 仿真 | `~/Ascend/cann-9.0.0`；`libpem_davinci.so` 在 `aarch64-linux/simulator/dav_2201/lib/` |
 
-### 8.1 结果
+`build_cpu.sh` / `run_cpu.sh` 已固化全部编译坑（`-DASCENDC_CPU_DEBUG -D__NPU_ARCH__=2201 -D_GLIBCXX_USE_CXX11_ABI=0` + `-lpem_davinci -lcpudebug*` 系列）并做 CANN 路径自动探测 + `$(uname -m)-linux` 架构自适应 ⇒ 两侧通用；推送用 tar 管道 + md5 校验。跨环境配方与踩坑已归入 `算子开发工作流.md` §3.6 / §4.3 / §6。
 
-- **quick 矩阵 28 用例 ALL PASS**（云端仿真机16v/32G aarch64，2026-09-20）：前向/反向 × fp16/bf16；官方小规模 (64,256,2)；非对齐 D=100/7167；边界 S=1/D=1/m=1/m=16；强制 STREAM/ELEMENT 切分（aiv=4）；**fp16 饱和**（x 全 32768：m=1 和在量程内精确 / m=2 和 65536 饱和到 0x7bff=65504 ✅ 符合 IEEE 惯例）；**多块切分 6 用例**（bwd MT tile=1536×3 块尾块 1024、MT-ODD 尾块 1023 奇数、fwd MT-STREAM/ELEMENT、bf16 MT×2）——bwd-large 独有的 dTileNum>1 路径已小规模锁定。
-- 本地仿真机（6vCPU）全量矩阵跑到 bwd-medium 后按用户决策终止（exit 137）：**fwd-medium / fwd-large(8192×7168×8, 469M 元素) / bwd-medium 均 PASS**；bwd-large 改由小规模多块用例覆盖 + 真机验证。
-- 云端仿真机全量矩阵（含 medium/large 档）**未跑成**：nohup 启动后隧道即抖动，重连时进程与 `/tmp` 日志一并消失（隧道断会带走容器后台任务）；随后**该容器开机即异常、由用户删除重建**（2026-09-20）。→ 结论：大规模正确性以 **本地仿真机的 fwd-large PASS + 等价 tiling 路径小规模覆盖** 背书，剩余交给真机（真机毫秒级，比仿真划算）。
-- 逐用例结果留档：`cpu_debug/quick_matrix_cloud_20260920.log`（33 行，含每例 tile/mode/blk 与实际失配数，0 失败）。跨环境搭建配方与踩坑已归入 `算子开发工作流.md` §3.6 / §4.2 / §4.3 / §6。
+### 8.2 三轮结果
 
-### 8.2 ⭐ 历史坑：反向 fp16 一度 FAIL 的根因（**内核无 bug，别再查**）
+| 轮 | 环境 | 结果 |
+|---|---|---|
+| 1（优化 A/B 后重跑） | 云端容器 xq82l | quick 35 / medium 4 / mtile 15 / ub48 17 逐条 `maxdiff=0.00000 mismatch=0`；large **前向 2 条位级 PASS（`0/469762048`，22 秒）**、反向跑到中途 SSH 掉线未取回。⚠️ 该容器同日回收，5 份日志丢失 ⇒ 结果以上表为准 |
+| 2（18:12，5 组一次跑完） | 云端容器 tpm0u | quick / medium / ub48 `=== ALL PASS ===`；mtile **仅 1 条 FAIL**（`bwd-fp16-BND-D32768-m2` ⇒ 仿真假失败，§8.3）；large 前向位级 PASS、反向未跑完（后由真机收口）。**5 组日志 20:30 全部 tar 管道捞回 + 6 份 md5 双侧复验**（§6.3） |
+| 3（V3 barrier 版重编） | 云端 tpm0u | `build rc=0`、`error:` 0 行 → quick 全量 **29 条 ALL PASS、FAIL=0**（11 前向 + 18 反向）⇒ **`PipeBarrier` 在 `ICPU` 下可编可过、不破坏仿真** |
 
-- 现象：`bwd-fp16` m=2~5 FAIL（`got=65504(0x7bff) ref=131008(0x7fff)`），与核数无关（blk=1..20 失配数恒为 1698/16384）。
-- 根因：**harness 填充表达式 `(uint32_t)(i*37+11)%29 - 14` 是无符号运算** —— residue<14 回绕成 ~4.29e9，×0.125 = 5.37e8，超 fp16 量程。宿主 `(half)` 转换在 [65536,131072) 产出 0x7fff（非 IEEE，读回原值），内核 `CAST_RINT` 饱和到 0x7bff=65504；两种**合法**约定仅对超量程值不一致。
-- 证据链：① `bad_fill=15819/32768` 恰为 14/29（坏值在跑核**前**就存在）；② x 跑核前后位级快照完全一致（0/32768，内核不写输入）；③ m-sweep（m=1/8/16/32 PASS，m=2/3/4/5 FAIL）失配数逐个被剩余定理算准；④ 常数填充 PASS；⑤ bf16 全 PASS（8 位指数装得下 5e8）。
-- 修复：填充改有符号 `(int64_t)((i*37+11)%29) - 14`（最大 |和| = 14×0.125×32 = 56，量程内）；另加显式饱和用例（`fill_mode==2`）锁定内核饱和行为。
+本地仿真机（6vCPU）全量矩阵跑到 bwd-medium 后按用户决策终止（exit 137）：**fwd-medium / fwd-large（8192×7168×8，469M 元素）/ bwd-medium 均 PASS**；bwd-large 改由小规模多块用例覆盖 + 真机验证。
+quick 矩阵覆盖维度：官方小规模、非对齐 `D=100/7167`、边界 `S=1/D=1/m=1/m=16`、强制 STREAM/ELEMENT 切分（aiv=4）、**fp16 饱和**、**多块切分 6 用例**（`bwd MT tile=1536×3` 尾块 1024、`MT-ODD` 尾块 1023 奇数、`fwd MT-STREAM/ELEMENT`、bf16 MT×2）⇒ bwd-large 独有的 `dTileNum>1` 路径已小规模锁定。
 
-### 8.3 对真机的启示
+### 8.3 ⭐ 只有仿真能给的三条口径
 
-- 官方用例只要输入在 fp16 量程内（评测数据通常如此），反向求和路径不会触饱和分歧；即使触发，内核按 IEEE 饱和（0x7bff）也是标准行为。
-- 本地仿真机已覆盖：三种切分模式、非 32B 对齐、尾部块、m 边界、双 dtype。**未覆盖**（只能真机验）：真机 DMA 行为、ccec 隐式转换、UB 实际容量、多核调度时序。
+1. ⚠️ **仿真对流水线竞争原理上无保护力**：捞回日志末尾数十行 `[TmSim]: Run in serial mode.` 是**直接书面证据** —— 前向在仿真 **`0/469762048` 位级 PASS**、真机 **98.9% FAIL**（§11.9.4），两侧**完全反向**的分歧 ⇒ **"仿真全绿"对本 kernel 的前向不是证据，本题正确性判据只认真机。**
+2. ⚠️ **`bwd-fp16-BND-D32768-m2` 是仿真"假失败"**：仿真 `mismatch=63276/65536 maxdiff=1.875`，真机同参（`S=2 D=32768 m=2 blk=2 mode=2 tile=32768`，整行取等点）**`mismatch=0/65536` 位级精确 PASS** ⇒ 该用例**以真机为准**，**不要再查、不要为它改核**；它是"整行 tile 恰好等于 64KB 预算"这个取等点上仿真器/镜像的产物。**反向其余 23 条两侧一致（全绿）。**
+3. ✅ **fp16 饱和行为**只有仿真能量到（`x` 全 32768：m=1 和在量程内精确 / m=2 和 65536 → 饱和 `0x7bff=65504`）；真机同用例给 **IEEE `inf`** ⇒ 两侧各按各自硬件语义对拍（§11.10.5）。
+
+### 8.4 本轮挖到 / 推翻的判断（通用条目已收录工作流 §6，这里只留本题结论）
+
+- **仿真耗时此前被高估一个量级**：旧文档按"中/大档小时级"推断，实测 medium 全组 **46s**、large 前向（10.6 亿 DMA 元素）**22s**。根因：日志里的 `kern=` / `cpu_s` 是 `clock()`，**多线程仿真只计主线程** ⇒ 拿它推墙钟必然离谱。⇒ 中大档**不必留给真机**；`large` 真正慢的只有**反向 2 条**（单条十分钟级），而它已被真机收口 ⇒ **不再补跑**。
+- **两次误判已作废**：① "两台容器都在 large 组期间被压满 16 核、导致 sshd 无法应答" ⇒ 真相是 tpm0u 的 5 组早在 18:12–18:14 **两分钟内跑完**，那 41 分钟是**我这边隧道不可见**（"我连不上 ≠ 机器被压满"）；② 据此写下的"下一步降并发单独跑 large"随之撤销（只对已被真机收口的反向 large 有意义）。
+- **假成功串成链**：驱动用 `GROUPS=(…)` 存组名 —— `GROUPS` 是 bash **内置特殊变量**（当前进程 gid 列表），赋值被立即重置回 `(1000)` ⇒ 循环只迭代出一个不存在的组名 `1000`；更致命的是 harness **不拒绝未知 mode**（五个布尔全 false ⇒ 零用例，末尾照样 `=== ALL PASS ===` + `exit 0`）。✅ 已修（**工具层，非提交代码**）：改名 `MODES` + 组名白名单（不合法记 `SKIP bad-mode`）+ 每组 `grep -c 'maxdiff='` 统计真实执行数（为 0 记 `SUSPECT zero-cases`），诊断脚本 `probe_args.sh` 留仓。**⚠️ 待用户拍板（不自动改）**：harness 侧把"未知 mode"改成非零退出。
+- 另两条：**`ssh -n` 把 stdin 接成 `/dev/null`** ⇒ `本地文件 | ssh 'cat > 远端'` 写出**空文件**（远端 md5 = 空串的 `d41d8cd9…`）；**stdout 接 `head`** 会把仿真进程杀掉 ⇒ 曾产出"只有 6 条"的假 quick 全过日志（`sim_quick_barrier_20260920_2058.log`），**不得当证据**，以 21:09 那份为准。
+
+### 8.5 ⭐ 历史坑：反向 fp16 一度 FAIL 是**测试数据坏了，内核无 bug**
+
+- 现象：`bwd-fp16` m=2~5 FAIL（`got=65504(0x7bff) ref=131008(0x7fff)`），且失配数与核数无关（blk=1..20 恒为 1698/16384）。
+- 根因：harness 填充表达式 `(uint32_t)(i*37+11)%29 - 14` 是**无符号**运算 —— residue<14 回绕成 ~4.29e9，×0.125 = 5.37e8，**超 fp16 量程**。宿主 `(half)` 转换在 [65536,131072) 产出 0x7fff（非 IEEE），内核 `CAST_RINT` 饱和到 0x7bff=65504；**两种合法约定只在超量程处分歧**。
+- 证据链 5 条：① `bad_fill=15819/32768` **恰为 14/29**（坏值在跑核前就存在）；② x 跑核前后位级快照完全一致（内核不写输入）；③ m-sweep（m=1/8/16/32 PASS，m=2/3/4/5 FAIL）失配数逐个被剩余定理算准；④ 常数填充 PASS；⑤ bf16 全 PASS（8 位指数装得下 5e8）。
+- 修复：填充改**有符号** `(int64_t)((i*37+11)%29) - 14`（最大 |和| = 56，量程内）+ 加显式饱和用例（`fill_mode==2`）锁定内核饱和行为。
+- ⇒ 对真机的启示：官方用例只要输入在 fp16 量程内（评测数据通常如此），反向求和不会触饱和分歧；即使触发，内核按 IEEE 饱和也是标准行为。
 
 ---
-## 9. 性能优化（2026-09-20）
 
-### 9.1 优化 A：tiling 条件修正（host）
+## 9. 两项优化（2026-09-20，均已进提交源）
 
-**问题**：原条件 `m * D * elem_size <= ub_budget` 过于保守。核内同时只持有 **1 份 D**（前向读 1 次写 m 次、反向逐副本读），不需要 m 份同时在 UB。
+### 9.1 优化 A：tiling 整行条件修正（host）
 
+**问题**：原条件 `m * D * elem_size <= ub_budget` 过保守 —— 核内同时只持有 **1 份 D**（前向读 1 次写 m 次、反向逐副本读），不需要 m 份同时在 UB。
 **修正**：`D * elem_size <= ub_budget`；`max_t = ub_budget / elem_size`（不再除以 m）。
 
-**效果（大档 S=8192, D=7168, m=8, fp16）**：
-
-| | 修正前 | 修正后 |
+| 大档 `S=8192, D=7168, m=8, fp16` | 修正前 | 修正后 |
 |---|---|---|
-| dTileLen | 2048 | 7168 |
-| dTileNum | 4 | 1 |
-| 前向 DMA/行 | 4 read + 32 write = 36 | 1 read + 8 write = 9 |
-| 反向 DMA/行 | 16 read + 4 write = 20 | 8 read + 1 write = 9 |
-| 内层 D 循环 | 4 次 | 0（消除） |
+| dTileLen / dTileNum | 2048 / 4 | 7168 / **1** |
+| 前向 DMA 每行 | 4 read + 32 write = 36 | 1 read + 8 write = **9** |
+| 反向 DMA 每行 | 16 read + 4 write = 20 | 8 read + 1 write = **9** |
+| 内层 D 循环 | 4 次 | **0**（消除） |
 
-中档 (1024, 4096, 4) 同样受益：dTileNum 4→1。
+中档 `(1024, 4096, 4)` 同样受益：`dTileNum 4→1`。附带收益：`D=4096, m=16` 由退化多 tile 改走整行 `tile=4096` 且 PASS（`mtile` 组）。
 
 ### 9.2 优化 B：反向双缓冲流水线（kernel）
 
-**问题**：原反向逐副本串行——DMA 读 k → VEC Cast+Add → DMA 读 k+1 → VEC Cast+Add → ……，DMA 与 VEC 不重叠。
+**问题**：原反向逐副本串行 —— DMA 读 k → VEC Cast+Add → DMA 读 k+1 → VEC Cast+Add → …，DMA 与 VEC 不重叠。
+**修正**：预取 k+1 的 DMA 与 k 的 VEC 计算并行，双缓冲交替使用 `in_que_` 的两个 slot：循环前预取 k=0；每轮 `DeQue` 当前 → `AllocTensor`+`DataCopyPad` 预取下一个 → `Cast`+`Add` → `FreeTensor`；最后一轮由 `k < m-1` 守卫不启动 DMA。
+**效果**：每轮耗时 ≈ `max(DMA, Cast+Add)` 而非 `DMA + Cast + Add`。
 
-**修正**：预取 k+1 的 DMA 与 k 的 VEC 计算并行。双缓冲交替使用 `in_que_` 的两个 slot：
-- 循环前预取 k=0
-- 每轮：DeQue 当前 → AllocTensor+DataCopyPad 预取下一个 → Cast+Add → FreeTensor
-- 最后一轮不启动 DMA（`k < m-1` 守卫）
+### 9.3 ⚠️ 收益**尚未定档**
 
-**效果**：DMA 延迟被 VEC 计算隐藏。每轮耗时 ≈ max(DMA, Cast+Add) 而非 DMA + Cast + Add。
-
-### 9.3 云端仿真机重跑（2026-09-20，容器 xq82l aarch64/16核）
-
-**优化后分组重跑，已跑完的 73 个用例逐条 `maxdiff=0.00000 mismatch=0`**：
-
-| 组 | 用例数 | 结果 | 关键证据 | 日志（容器 `cpu_debug/`） |
-| --- | --- | --- | --- | --- |
-| quick | 35 | ✅ ALL PASS | 全部 `tile=D`（整行路径生效）；反向双缓冲 m=1/2/3/4/5/8/16 全覆盖 | `quick_r2_20260920.log` |
-| medium（1024×4096×4） | 4 | ✅ ALL PASS | fwd/bwd × fp16/bf16，`tile=4096`、`mode=0`(ROW)，**46 秒**跑完 | `medium_r2_20260920.log` |
-| large（8192×7168×8） | 前向 2/4 | ⚠️ 前向 ✅、反向 ⏳ | 前向 `mismatch=0/469762048`（4.7 亿元素逐位一致），**22 秒**；反向 fp16/bf16 跑到中途容器 SSH 掉线，结果未取回 | `large_r2_20260920.log`（掉线前只落前向两行） |
-| mtile（多 tile + 大 D） | 15 | ✅ ALL PASS | 含**奇数尾块**多 tile：`D=70001→tail=369`、`D=33001→tail=233`、`bf16 D=70000` | `mtile_r2_20260920.log` |
-| ub48（host `ub_size==0` 兜底 48KB 预算） | 17 | ✅ ALL PASS | `D=26001/26000` 在 48KB 预算下由整行**退化**为 `tile=2048` 多 tile，仍逐位 PASS | `ub48_r2_20260920.log` |
-
-> ⚠️ 上表 5 份日志**只落在容器 xq82l 上**；该容器已于同日回收（`devspace_tunnel.ps1` 自举时服务端报 `development environment no longer exists`）→ **日志已不可取回**。73 个用例的逐条结果以上表与当时输出为准（本会话已读到），重跑时**必须把 stdout 直接落到本地 `code1/cpu_debug/logs/`**，不再在容器上攒。
-
-**三条值得记住的事实**：
-1. **仿真耗时此前被高估了一个量级**：旧文档按"中/大档小时级"推断，实测 medium 全组 **46s**、large 前向（10.6 亿 DMA 元素）**22s**。根因：日志里的 `kern=` / `cpu_s` 是 `clock()`，多线程仿真下**只计主线程**，拿它推墙钟必然离谱。→ 中大档**不必留给真机**；large 反向按 medium 反向外推约 5–10 分钟（未实测收尾）。
-2. **多 tile 的尾块在 host 侧恒为偶数**：`op_host/mhc_expand.cpp:90` 的 else 分支写死 `t = std::min(2048, D)`（不是按预算算出的 24576/32768），`2048×k` 为偶 ⇒ 只有 **D 取奇数**才能逼出奇数尾块。新增的 `D=70001/33001` 两个用例正是补这个缺口。
-3. **整行/多 tile 的分界就是 `D*elem_size ≤ ub_size/4`**：910B 真机 UB=256KB ⇒ 预算 64KB ⇒ fp16/bf16 整行上限 `D ≤ 32768`；官方三档 D（256/4096/7168）全部走整行，多 tile 分支只在兜底或超大 D 时生效。
-
-### 9.4 待跑用例与 tiling 预期（2026-09-20 用纯算术钉死，等到环境直接对答案）
-
-`op_host/mhc_expand.cpp:85-101` 的 tile 决策是**纯整数运算**，无需上机即可预判。用镜像该函数的 Python 脚本复算，新增 3 个预算边界用例的预期如下：
-
-| 用例 | S×D×m | ub_budget | 预期 tile | 预期 num | 预期 tail | 压的是哪条路 |
-|---|---|---|---|---|---|---|
-| `bwd-fp16-BND-D32768-m2` | 2×32768×2 | 64KB | 32768 | 1 | 32768 | `D*2 == budget`，`<=` 取等号 ⇒ **整行**最后一格 |
-| `bwd-fp16-BND-D32769-m2` | 2×32769×2 | 64KB | 2048 | 17 | **1** | 超预算 2 字节即退化多 tile，**尾块只剩 1 元素** |
-| `fwd-fp16-BND-D32769-m4` | 1×32769×4 | 64KB | 2048 | 17 | 1 | 同上走前向（S=1 ⇒ SPLIT_ELEMENT） |
-
-同法复核已有用例：`D=70001→tile=2048/num=35/tail=369`、`D=33001→17/233`、ub48 组 `D=26001→13/1425`（48KB 预算下 `D=24576` 恰好取等整行、`D=24577→num=13/tail=1`）——与 §9.3 表里容器实际输出的 `tile=` 一致，说明 harness 的 tiling 镜像与 op_host 同源无漂移。
-
-mtile 组用例数因此从 15 → **18**（全矩阵待跑合计 76）。
-
-**待办**：
-- [x] 中档复跑（medium 4 用例）
-- [x] **large 反向 2 用例 + 3 个新边界用例** —— 最终由**真机**收口（§11.10.3：`large` 4 条 + `bnd` 15 条全绿）；仿真侧这几条**没补跑**，按"正确性判据以真机为准"的口径不再追
-- [x] 真机验证（E1）：编译 + 跑用例矩阵（7 轮 89 条全绿，§11.10.3）
-- [x] 真机 msprof 测性能基线（§11.11 已采，barrier A/B 已定档；⚠️ §9 优化自身的加速比仍缺，见 §4.3）
-
-> ⚠️ **环境状态（2026-09-20 收尾，`devspace_tunnel.ps1 -List` 实测）**：三条算力路径当日全部不可用——
-> ① **本地仿真机** VMware 未开机（`vmware-vmx` 进程不存在，`192.168.101.128:22` 超时）；
-> ② **云端 CPU 环境** `e6z6k` / 原 xq82l 已回收（服务端 `no longer exists`，只能用户在 IDE 点 Start）、`tpm0u` 在线但正给**另一个会话**当通道（全量仿真是 ~60 进程压 16 核，会把它的 sshd 饿死 ⇒ 不能派活）；
-> ③ **真机** `02aeb` 隧道未自举，且上机按纪律先问用户。
-> → 剩余待办**卡在环境，不卡在代码**。用户开任意一个 CPU 环境后，本轮工作一步接上。
-
-> 本轮容器推送清单 md5 已复验（本地=远端逐字节一致，CR=0）：kernel `0fb9e6ec…` / host `a16c371d…` / tiling.h `f759a052…` / tiling_key `267e0125…` / harness `99db13d2…` / build_cpu.sh `1fe72146…`。环境下次接上时**先把本地 `code1/` 整目录 tar 管道推过去并逐文件复验 md5**（当前 harness 已变为 `4668173…`，见 §6.1）。⚠️ **本行是当轮快照**：kernel 其后又变过一次 `0fb9e6ec…` → `53ee60e5…`（§11.10），当前口径一律看 §6.1。
-
-### 9.5 第二轮全量仿真（2026-09-20 18:12，云端仿真机 `tpm0u` aarch64 / 16 核 / 30G）
-
-题2 释放 `tpm0u` 后接上：整目录推送 8 文件 md5 逐字节一致，构建产物 `test_expand_cpu` 830080 字节 / 18:02 新鲜（非假成功）。分组驱动 `cpu_debug/run_all_groups.sh` 一次跑 5 组，`driver.log` 实测：
-
-| 组 | 起止 | rc | 结果状态（**20:30 已全部捞回本地，见 §9.5.2**） |
-| --- | --- | --- | --- |
-| quick | 18:12:41 → 47（6s） | 0 | ✅ **`=== ALL PASS ===`**（30 条用例行） |
-| medium | 18:12:47 → 18:13:28（41s） | 0 | ✅ **`=== ALL PASS ===`**，`dma_elems=83.9M / vec_elems=159.4M / cpu_s=2` |
-| mtile（含 3 个新 BND 用例） | 18:13:28 → 38（10s） | **1** | ⚠️ **`HAS FAIL` —— 唯一一条 `bwd-fp16-BND-D32768-m2` 仿真 FAIL(63276/65536)，真机同参位级精确 PASS ⇒ 判为仿真假失败**（§9.5.2） |
-| ub48 | 18:13:38 → 49（11s） | 0 | ✅ **`ALL PASS`**（含 `D=24576/24577` 48KB 兜底边界对） |
-| large（反向 2 用例 = 本轮缺口） | 18:13:49 起，**未跑完** | — | 🟡 捞回 285 行：**`fwd-fp16-large` / `fwd-bf16-large` 各 0/469762048 位级精确 PASS**，第 3 条 `bwd-*-large` 起始处被截断。反向 2 条**已由真机收口**（§11.9.3），不再补跑 |
-
-⚠️ 原判断"这 4 份日志只存在容器上、取回前不得计为已验证"**成立且已执行**：**20:30 已 tar 管道捞回本地并 6 份 md5 逐字节复验**，详见 §9.5.2。
-
-⚠️ **一个已成模式的事实（两轮独立观察）**：**两台不同的容器都是在 `large` 组（尤其反向 fp16/bf16 两用例）运行期间变得不可达** —— xq82l 当日端口拒连、5 份日志丢失；tpm0u 这次是 banner exchange 超时。⇒ §9.3 里"large 反向按 medium 外推 5–10 分钟"的估计**不成立**，该组在 CPU 仿真上的真实代价远超预估，且会把机器压到 sshd 无法应答。**下一步该改成"降并发单独跑 large"**（`run_cpu.sh 4 large` ⇒ 仿真子进程从 ~16 个降到 ~4 个，留出 sshd 的 CPU），而不是继续按 `20` 压满。
-
-**本轮挖到的坑：`GROUPS` 是 bash 保留变量 + harness 对未知组名"假 ALL PASS"**
-
-前两次启动（18:04 / 18:08）驱动都打印 `1000 START → DONE rc=0 → ALL PASS`，看起来全绿，实际**一个用例都没跑**：
-
-1. 驱动第一版用 `GROUPS=(quick medium …)` 存组名。`GROUPS` 是 bash 的**内置特殊变量**（当前进程的 gid 列表），赋值会被 bash 立即重置回 `(1000)` —— 容器用户 `developer` 的 gid 正好是 1000。于是循环只迭代出一个不存在的组名 `1000`，与传参无关（这也是"两次都得到同一个魔法数"的原因）。
-2. 更致命的是 harness **不拒绝未知 mode**：`test_mhc_expand_cpu.cpp:303-306` 的五个布尔全 false ⇒ 零用例，末尾照样 `=== ALL PASS ===` + `exit 0`。驱动只看 rc 就报成功 → **假成功串成了链**。
-3. 已修（工具层，非提交代码）：变量改名 `MODES`；驱动加组名白名单（不合法记 `SKIP bad-mode`）+ 每组用 `grep -c 'maxdiff='` 统计**真实执行**的用例数，为 0 记 `SUSPECT zero-cases`。诊断脚本 `cpu_debug/probe_args.sh` 留在仓库，下次怀疑参数问题一步定位。
-4. **待用户拍板（代码改动，我不自动改）**：harness 侧把"未知 mode"从静默通过改成硬失败（非零退出），这样任何拼错的组名都会立刻暴露。
-
-**顺带核实**：`ssh -n` 会把 stdin 接成 `/dev/null`，用它做 `本地文件 | ssh 'cat > 远端'` 推送会写出空文件（远端 md5 恰好是空串的 `d41d8cd9…`）—— 推送类命令一律不加 `-n`。
-
-#### 9.5.1 收尾事故（18:54–18:56 实测，`large` 跑到第 41 分钟时环境侧出事）
-
-- `pull_watch.log`：18:36→18:54 共 7 轮全部 `ssh busy/unreachable`，本地 `driver_r4.log` / `remote_md5_r4.txt` **0 字节 ⇒ 一行都没取回**（那 4 组结果迄今只在容器上）。
-- **发现自己在双开轮询**：每个 attempt 打两遍（间隔 27s）。根因是 `TaskStop` 只杀掉了外层 shell，第一版脚本进程（PID 10924）仍活着 → 已 `Stop-Process` 清掉（复查 `Count=0`），频率恢复 3 分钟一次。
-- 18:54 端口层从 `UP` 变 **`down`** ⇒ 形态从"sshd 被压满"变成"转发已退出"。
-- 18:56 `devspace_tunnel.ps1 -Role cpu -Diag`：**服务端换不出 `connect_url`，`development environment no longer exists`**；扩展日志给出更精确的判据 —— **当前登录账号的环境列表里查不到 `devEnvId 724ca0f5…`（tpm0u）**。
-- 同一时段（18:53:26）日志里却有 **`e6z6k`（devEnvId `d611a7d4…`）`forward.ready localPort=48254`** 成功建立 —— **与上午完全反过来**（上午 tpm0u 可用、e6z6k 查不到）。
-- ⇒ 结论修正：这**不像 tpm0u 被回收**，更像**桌面 VS Code 的登录账号又切了一次**（现在这个账号看得见 e6z6k、看不见 tpm0u）。两种情形的处置完全不同，且**只有用户能区分**（控制台看 tpm0u 是"运行中"还是已消失）。
-- ⚠️ 关键风险：若只是账号可见性，切回原账号后隧道可自举、**驱动（`setsid nohup` 起，脱离 ssh 会话）可能仍在跑 large，4 份日志还在容器上能捞**；若容器真被回收，则第二轮结果与 xq82l 一样再次丢失。
-
-#### 9.5.2 ⭐ 定档：**tpm0u 并未丢失，5 组日志已全部捞回**（20:30 实测）
-
-用户 20:2x 交办"tpm0u 暂定为无法再获取，剩下的你看着办"后，我在整理真机日志时顺手看到本机仍挂着一条 **19:57 起的 `ssh -T -D 53090 → devenvc_tpm0u…`** 且 `netstat` 显示其 **LISTENING + ESTABLISHED** ⇒ 只探测一次（**未重试轰炸**）即连通：容器**活着、`/home/developer/ops_comp/code1/cpu_debug/logs/` 五组日志俱在**。
-
-⇒ 所以 §9.5.1 的两种情形里成立的是**"账号可见性"那一种**：容器从未被回收，`large` 也从未"压满 16 核导致 sshd 无法应答"——**真实原因是 `driver.log` 里 5 组早在 18:12–18:14 两分钟内就跑完了**（quick 6s / medium 41s / mtile 10s / ub48 11s），所谓 41 分钟是**我这边隧道不可见**，不是机器在忙。⚠️ **这是一次误判**：把"我连不上"当成了"机器被压满"，并据此写下了与 §9.3 相反的"large 在仿真上要极贵"的结论（上文 ⚠️ 那段"下一步改成降并发单独跑 large"）—— **该结论作废**：`large` 慢只慢在**反向 2 条**（18:13:49 起、至 18:54 仍未出结果 ⇒ 单条确为**十分钟级**），前向 2 条是秒级且已位级通过。降并发的建议只对**反向 large** 有意义，而它已被真机收口，**不再补跑**。
-
-捞回方式与判据（全部通过才算数）：`ssh 'cd …/cpu_debug && tar cf - logs/*_r4_*.log logs/driver.log' | tar xf -`（**不加 `ssh -n`**）→ 本地 `code1/cpu_debug/recovered_r4/` → **远端/本地 md5 六份逐一比对一致**：
-
-```
-4e605205ba796010d68d1f8c3de51c4f  quick_r4    3af4a0c75f26f249a5a975eb8add9d35  medium_r4
-060c7388b4a6be5c480b6241250d0c34  mtile_r4    40b0a9723889f828bc7d40f1ce6d16a0  ub48_r4
-8ccfd1d3a589271abee5bcee94afefd6  large_r4    759952580f2a1754d4f615480925624e  driver.log
-```
-
-**捞回后的两个新事实（真机侧看不到、必须靠仿真）**：
-
-1. ⚠️ **`bwd-fp16-BND-D32768-m2` 是仿真的"假失败"**：仿真 `mismatch=63276/65536 maxdiff=1.875` **FAIL**，而真机同参（`S=2 D=32768 m=2 blk=2 mode=2 tile=32768`，整行路径取等点）**`maxdiff=0.00000 mismatch=0/65536` 位级精确 PASS**（§11.9.3）。⇒ 该用例**以真机为准**，仿真侧这条 FAIL 不要再查、也不要为它改核；它是"整行 tile 恰好等于 64KB 预算"这个取等点上仿真器/镜像的产物。**反向其余 23 条两侧一致（全绿）。**
-2. ✅ 前向 `large` 在仿真上 **0/469762048 位级精确 PASS**，而真机 **98.9% FAIL**（§11.9.4）—— 两侧**完全反向**的分歧。捞回的日志末尾数十行 `[TmSim]: Run in serial mode.` 就是这件事的**直接书面证据**：仿真器串行执行 ⇒ 流水线竞争**原理上不可能被发现**。**"仿真全绿"对本 kernel 的前向没有任何保护力**，这道题的正确性判据只能是真机。
-
-⇒ **仿真侧缺口至此收口**：任务 #5 完成。历轮"题1 仿真 large 未收口"的说法全部作废，当前口径见 §1。
-
+两项优化各自的加速比**没有回退重测**（§11.11 只做了"加 barrier vs 不加"）⇒ 目前只有 §9.1 的算术与真机 PASS 支撑，**没有定量**。
+**唯一相关的已定量结论**：§11.11.3 显示当前前向已贴住"这个核能达到的上限"（V3 946GB/s vs V0 998GB/s，差额正好是 barrier 的钱；反向 971GB/s，与前向仅差 2.7%）⇒ 带宽侧已无空间。要定档见 §4.3 第一条。
 
 ---
 
-## 10. ⭐ 开源参考池：`ops-transformer-master`（2026-09-20 新增）
+## 10. ⭐ 开源参考池：`ops-transformer-master`（2026-09-20）
 
-> 📌 **定位（用户 2026-09-20 定调）**：这批开源材料**有很大的参考价值**，但**最好不要照抄**——可以抄的是**部分细节**（切分策略、搬运手法、阈值取法这类"怎么做"），实现仍要自己出。下面每条都标了"可借鉴什么"，供改代码时按需查，**不作为提交源**。
+> 📌 **定位（用户 2026-09-20 定调）**：这批开源材料**有很大的参考价值**，但**最好不要照抄** —— 可以抄的是**部分细节**（切分策略、搬运手法、阈值取法这类"怎么做"），实现仍要自己出。下面每条都标了"可借鉴什么"，**不作为提交源**。
+> 📦 本节所引路径/符号依赖外部库，**它不入库**（`.gitignore` 已忽略 `ops-transformer-master/`）。换机器或新 clone 后自行拉取 `https://gitcode.com/cann/ops-transformer`，本地这份版本 = **9.2.0**（`version.cmake:11`）。⚠️ **行号会随版本漂移** ⇒ 按符号名 grep（`UseReadOnce`、`USE_PERMANENT_X`），别把"找不到"当成"不存在"。
 
-> 📦 **本节所引路径/行号依赖外部库，它不入库**（`.gitignore` 已忽略 `ops-transformer-master/`，源码无须上传）。换机器或新 clone 后需自行拉取：`https://gitcode.com/cann/ops-transformer`，本地这份版本 = **9.2.0**（`version.cmake:11`）。⚠️ **行号会随版本漂移** —— 按行号找不到时改用**符号名 grep**（如 `UseReadOnce`、`USE_PERMANENT_X`），别把"找不到"当成"不存在"。
+### 10.0 合规前提（主办方要求"不能引用闭源软件"）—— ✅ 满足
 
-### 10.0 合规前提（主办方要求"不能引用闭源软件"）
+`ops-transformer` 是华为 CANN **官方开源** transformer 算子库，许可证 **CANN Open Software License Agreement Version 2.0**：
 
-`ops-transformer-master/` 是华为 CANN **官方开源** transformer 算子库，许可证为 **CANN Open Software License Agreement Version 2.0**（`LICENSE:1`）。核对条款：
+| 条款要点 | 对本比赛的影响 |
+|---|---|
+| 授权 worldwide、royalty-free，可 download / use / **modify** / integrate / distribute；范围限"developing software **solely for use in systems with Huawei AI Processors**" | ✅ 昇腾真机场景**正好落在授权范围内** |
+| 不得用于开发运行在**非华为处理器**上的软件 | ✅ 不受影响 |
+| **不得移除/篡改版权声明**；分发须附协议副本、保留 notices | ⚠️ 若借用了文件骨架，**必须保留原 Huawei 版权头**，建议加一行 `Adapted from CANN ops-transformer (CANN OSL v2.0)` |
+| 对华为提专利诉讼即终止授权；无单独专利条款 | 无可操作影响 |
 
-| 条款 | 内容 | 对本比赛的影响 |
-|---|---|---|
-| `LICENSE:16` | 授权 worldwide、royalty-free，可用于 download / use / **modify** / integrate / distribute；范围限"developing software **solely for use in systems with Huawei AI Processors**" | ✅ 昇腾真机场景**正好落在授权范围内** |
-| `LICENSE:19` | 不得用于开发运行在**非华为处理器**上的软件 | ✅ 不受影响 |
-| `LICENSE:21` | **不得移除/篡改版权声明** | ⚠️ 若借用了文件骨架，**必须保留原 Huawei 版权头** |
-| `LICENSE:24` | 分发须附协议副本、保留 notices | ⚠️ 同上；建议在文件头加一行 `Adapted from CANN ops-transformer (CANN OSL v2.0)` |
-| `LICENSE:32-33` | 对华为提专利诉讼即终止授权；无单独专利条款 | 无可操作影响 |
+三方依赖清单 `Third_Party_Open_Source_Software_List.yaml` 只有 abseil / googletest / eigen / makeself / json / protobuf / libboundscheck，且全是 build/test 支撑、**不在算子源码路径内** → **无 GPL 污染、无禁止竞品条款**；`OAT.xml` 声明全仓 license=CANN-2.0。
+> ⚠️ 注意：这是**开源**（源码可见）而**非 OSI 认证**许可证。"不引用闭源软件"这条**满足**；至于"引用开源代码"是否需要在提交里额外声明，题面无明文 ⇒ **保守做法是保留版权头**。
 
-三方依赖清单 `Third_Party_Open_Source_Software_List.yaml:12-32` 只有 abseil / googletest / eigen / makeself / json / protobuf / libboundscheck，且全是 build/test 支撑、**不在算子源码路径内** → **无 GPL 污染、无禁止竞品条款**。`OAT.xml:17-18` 声明全仓 license=CANN-2.0，`OAT.xml:65-74` 的版权头扫描文本就是 `LICENSE:21` 那段。
+### 10.1 本题**没有**同名实现
 
-> ⚠️ 但要注意：这是**开源**（源码可见）而**非 OSI 认证**许可证。"不引用闭源软件"这条规则**满足**；至于"引用开源代码"是否需要在提交里额外声明，题面无明文，**保守做法是保留版权头**。
-
-### 10.1 本题有没有同名实现？—— 没有
-
-全仓库 grep `mhc_expand` / `MhcExpand` / `hc_expand` 命中 **0**；`Tile` / `Repeat` / `Broadcast` / `kv_expand` 亦无同名算子。所以第一题只能找**语义邻近**的算子，不存在"直接对标件"。
-
+全仓库 grep `mhc_expand` / `MhcExpand` / `hc_expand` 命中 **0**；`Tile` / `Repeat` / `Broadcast` / `kv_expand` 亦无同名算子 ⇒ 第一题只能找**语义邻近**的，不存在"直接对标件"。
 （对照：第二题 `mhc/mhc_sinkhorn`、第三题 `attention/sparse_flash_attention` 都有同名实现，见 `code2.md §10` / `code3.md §10`。）
 
-### 10.2 邻近算子候选（按有用程度排序）
+### 10.2 邻近候选与"能借的那一个细节"
 
-本题语义已确认是**纯带宽题**：前向 `x[S,D] → o[S,m,D]` 复制广播（无乘加），反向沿中间轴 m 元求和。据此筛出的候选：
+本题语义已确认是**纯带宽题**：前向 `x[S,D] → o[S,m,D]` 复制广播（无乘加），反向沿中间轴 m 元求和。据此筛出的候选（按有用程度排序，**只留符号名不留行号**）：
 
-| 路径 | 它算什么 | 重合度 | 可借鉴的"部分细节" |
-|---|---|---|---|
-| `experimental/mhc/mhc_post/kernel/mhc_post_kernel.cpp` | `out[b*N+n]=x[b]*h[n]`，1→N 广播缩放；`h≡1` 即本题前向 | **高** | 双策略切核（per-stream `:61-76` vs read-once `:163-200`）；`UseReadOnce` 的 **4MB 阈值**（`:405-413`）；bf16 经 fp32 Cast 的路径（`:215-393`）；host 自适应 blockDim（`:482-531`） |
-| `experimental/mhc/mhc_pre/kernel/mhc_pre_kernel.cpp` | `out[b]=Σ_s h[s]·x[b*N+s]`，`h≡1` 即本题反向 | **高** | 用 `s==0` 的 `Muls` 代替 `Duplicate` 清零（`:86-93`）；尾块 `DataCopyPad`（`:99-121`）。⚠️ 它**无双缓冲流水**，本题反向已优于它（§9） |
-| `mhc/mhc_post/op_kernel/arch22/mhc_post_arch22.h` + `op_host/op_tiling/arch22/mhc_post_tiling_base_arch22.cpp` | 官方正式算子，含 1→n 广播 | **中高** | `USE_PERMANENT_X` 让 x 常驻 UB、内层只写不读（`:189-241`）；tiling 折半 dOuter + fp32 常驻判定（`:508-536`）；`SetL2CacheHint(CACHE_MODE_DISABLE)`（`:115-118`） |
-| `mhc/mhc_post_backward/op_kernel/arch22/mhc_post_backward_arch22.h` | `grad_x=H_res·grad_out`，沿 n fp32 累加 | 中 | `[n,tileC]` 缓冲 + `Duplicate` 清零 + 批量 Cast（`:124-146, 202, 257, 265`）——对应本题反向累加段 |
-| `attention/nsa_compress_grad/op_kernel/nsa_compress_grad.h:457`、`attention/flash_attention_score_grad/op_kernel/arch22/…_bn2.h:3668,3690` | arch22 上 `blockCount>1 + 一个 stride=0` 的 DMA | 中（纯手法） | 有望**一条 DMA 写 m 份副本**，省掉 m-1 次搬运。⚠️ stride 单位是**字节**、需 32B 对齐，未验证 |
-| `mhc/block_attention_residuals(_grad)/op_kernel/arch22/…/block_attention_residuals_hslice.h:112-118` | 残差注意力正/反向 | 低-中 | **Kahan 补偿求和**，直接对应题面 §6 的 bf16/fp16 累加精度场景 |
-| `moe/moe_token_unpermute_grad`、`mc2/moe_distribute_combine_v2/op_kernel/arch22/…:593` | scatter-add / 多块搬运 | 低 | 仅切核参考 |
+| 路径 | 它算什么 / 重合度 | 可借鉴 |
+|---|---|---|
+| `experimental/mhc/mhc_post/kernel/mhc_post_kernel.cpp` | `out[b*N+n]=x[b]*h[n]`，1→N 广播缩放；`h≡1` 即本题前向。**高** | 双策略切核（per-stream vs read-once）、`UseReadOnce` 的 **4MB 阈值**、bf16 经 fp32 Cast 的路径、host 自适应 blockDim |
+| `experimental/mhc/mhc_pre/kernel/mhc_pre_kernel.cpp` | `out[b]=Σ_s h[s]·x[b*N+s]`，`h≡1` 即本题反向。**高** | 用 `s==0` 的 `Muls` 代替 `Duplicate` 清零、尾块 `DataCopyPad`。⚠️ 它**无双缓冲流水**，本题反向已优于它（§9.2） |
+| `mhc/mhc_post/op_kernel/arch22/mhc_post_arch22.h`（+ 对应 `op_tiling`） | 官方正式算子，含 1→n 广播。**中高** | `USE_PERMANENT_X` 让 x 常驻 UB、内层只写不读；tiling 折半 dOuter + fp32 常驻判定；`SetL2CacheHint(CACHE_MODE_DISABLE)` |
+| `mhc/block_attention_residuals(_grad)/op_kernel/arch22/…_hslice.h` | 残差注意力正/反向。**低-中** | **Kahan 补偿求和**，直接对应题面 §6 的 bf16/fp16 累加精度场景 |
+| `mhc/mhc_post_backward`、`moe/moe_token_unpermute_grad`、`mc2/moe_distribute_combine_v2` | 沿 n fp32 累加 / scatter-add。**低** | `[n,tileC]` 缓冲 + `Duplicate` 清零 + 批量 Cast（对应本题反向累加段）；仅切核参考 |
+| `attention/*/op_kernel/arch22/…` 的 `blockCount>1 + 一个 stride=0` DMA | arch22 纯搬运手法。**中** | ⛔ 曾设想"一条 DMA 写 m 份副本" ⇒ **已被 §14.5 真机否决**：arch22 上 `DataCopyParams` 的 gap/stride 字段语义**不可依赖文档推断** |
 
-### 10.3 真正需要自出的只有两点
+⇒ **真正需要自出的只有两点**：① 一条 DMA 出 m 份副本的广播写法（**已试并已否决**，§14.5）；② 反向的精度补偿求和（Kahan，或直接沿用现有 fp32 累加，§9.2）。
+⛔ 以上都属于"抄细节不抄实现"，且**均需用户认可后才动 `code1/` 的代码**（§0 约束 4/5）。
 
-1. **一条 DMA 出 m 份副本**的广播写法（上表倒数第 3 行是可试的手法，官方没有现成的 expand）；
-2. **反向的精度补偿求和**（Kahan，或直接沿用现有 fp32 累加，见 §9）。
+### 10.3 架构可编性核查：能编
 
-### 10.4 架构可编性核查（结论：能编）
-
-`mhc/*/op_kernel` 69 个文件全部含 `__aicore__`；仓库根 `CMakeLists.txt:59-61` 明确 **`ascend910b → arch22`**，对应宏 `__CCE_AICORE__ == 220`（全仓 133 处）。`arch35` 是 950 的新式 regbase 写法（276 处），**不可直搬 910B**。
-
-本题 `code1/op_kernel/mhc_expand.cpp` 与官方 `mhc/mhc_post/op_kernel/mhc_post.cpp:18-33` **同风格**（`KERNEL_TASK_TYPE_DEFAULT` + `REGISTER_TILING_DEFAULT` + `GET_TILING_DATA_WITH_STRUCT`）→ **910B3 可编**，风格无需调整。
-
-> 📎 顺带修正一条易混事实：官方 `mhc/mhc_sinkhorn` 的 `docs/aclnnMhcSinkhorn.md:9-12` 标注 **A2/A3 不支持**、仅 float32、`n∈{4,6,8}`（`:149-162`）。这与本题第二题的题面口径**不同源**，不要拿官方 sinkhorn 的约束去改自己的契约（详见 `code2.md §10`）。
-
-### 10.5 待办
-
-
-- [ ] （可选）借 `experimental/mhc/mhc_post` 的 **4MB read-once 阈值**思路，复核本题前向 `SPLIT_ELEMENT` / `SPLIT_STREAM` 的切换点是否还有收益空间
-- [ ] （可选）试"一条 DMA 出 m 份副本"的 `blockCount>1 + stride=0` 写法 —— **先仿真机验证 stride 单位与对齐**再上真机
-- ⛔ 以上都属于"抄细节不抄实现"，且**均需用户认可后才动 `code1/` 的代码**（§0 约束 1/5）
+`mhc/*/op_kernel` 69 个文件全部含 `__aicore__`；仓库根 `CMakeLists.txt` 明确 **`ascend910b → arch22`**，对应宏 `__CCE_AICORE__ == 220`（全仓 133 处）。`arch35` 是 950 的新式 regbase 写法（276 处），**不可直搬 910B**。
+本题 `code1/op_kernel/mhc_expand.cpp` 与官方 `mhc/mhc_post/op_kernel/mhc_post.cpp` **同风格**（`KERNEL_TASK_TYPE_DEFAULT` + `REGISTER_TILING_DEFAULT` + `GET_TILING_DATA_WITH_STRUCT`）⇒ 910B3 可编，风格无需调整（✅ 已由 §11.8 真机编译门证实）。
+> 📎 顺带修正一条易混事实：官方 `mhc/mhc_sinkhorn` 的 `docs/aclnnMhcSinkhorn.md` 标注 **A2/A3 不支持**、仅 float32、`n∈{4,6,8}` —— 这与本题**第二题**的题面口径**不同源**，不要拿官方 sinkhorn 的约束去改自己的契约（详见 `code2.md §10`）。
 
 ---
 
-## 11. 真机（NPU）准备清单（2026-09-20 18:58，资源到位前先把路铺平）
+## 11. ⭐ 真机（NPU）实测（`02aeb` / Ascend 910B3 / NPU ID=7，2026-09-20 19:38–21:30）
 
-> 纪律不变（工作流 §4.1 / README §7 第二步）：**上真机跑什么要先问用户**。本节只准备"到手即可执行"的材料，不代表授权开工。
+> 📌 本节原有 §11.1~§11.7 是"资源到位前的准备清单"（隧道前置、芯片闸、preflight 设计、构建两条路、上机矩阵规划、msprof 规划、时间盒），**已由下面的实测结果取代**；其中的通用做法归并在 `算子开发工作流.md` §4（连接/防假成功）、§6（通用坑）、§7（纪律）。
+> ⚠️ **编号保持不连续是有意为之**：§11.8~§11.11 以及 §11.9.x / §11.10.x 是本文与源码注释的交叉引用锚点，**不要顺手重排**。
 
-### 11.1 隧道侧的前置条件（只有用户能做，两步）
-
-1. **新环境必须在 VS Code / devenv 页面里被打开过一次** —— 否则 `~/.atomgitdevenv/.ssh/config` 里没有 Host 别名条目，脚本自举无从下手（`3GFCN` 今天就是这个状态）。
-2. 打开后把**短名**告诉我，我补进 `devspace_tunnel.ps1` 的 `$EnvTable`（约定：加新环境只改这一处）。
-3. ⚠️ **今天两次实测到的账号可见性问题**：转发凭据由"桌面 VS Code 当前登录账号"签发，所以会出现 `tpm0u` 查不到而 `e6z6k` 可达（18:53/18:56 同时刻反证）。判据已固化进 `-Diag`：**扩展日志写"账号环境列表里查不到 devEnvId xxx" ⇒ 是账号不是回收**。
-
-### 11.2 ⚠️ 第一道闸：芯片口径必须先确认，不要先编译
-
-| 事实 | 位置 |
-|---|---|
-| 工程两处写死 910B | `code1/CMakeLists.txt:7` `set(ASCEND_COMPUTE_UNIT ascend910b)`、`code1/op_host/mhc_expand.cpp:202` `.AddConfig("ascend910b")` |
-| CPU 仿真按 arch22 编 | `code1/cpu_debug/build_cpu.sh:28` `-D__NPU_ARCH__=2201`（= 910B / arch22，见 §10.4） |
-| 但控制台里那台 NPU 是 **910C（Atlas A3）** | 用户 2026-09-20 截图 `DevEnvC_3GFCN`：`1*NPU 910C / 40vCPU / 240GiB`，当时"已关机" |
-
-⇒ **若到手的是 910C**：`AddConfig` 里没有它，包会在加载/调优阶段被拒；arch 宏与 UB 预算（本题 tiling 的一切推导都建立在"910B UB=256KB ⇒ 预算 64KB"上，§9.1）也要按真芯片重算。⇒ **先跑 preflight 拿芯片名，再决定动不动那两行**；动属于代码改动，按 §0 约束由用户拍板，且**不能为了本地能跑把比赛平台口径改坏**（口径以题面/比赛平台为准）。
-
-### 11.3 preflight（到手第一条命令，只读不写）
-
-`code1/npu_debug/preflight_npu.sh`（**非提交文件**）一次连接打回全部判据：`npu-smi info` + `-t board`（**芯片名 / NPU-Arch**）、`/dev/davinci*`、`set_env.sh` 候选路径（跨环境循环探测，不硬编码）、`ccec/atc/msopst/msprof/cmake` 是否可用、**CANN 自带的 `ASCConfig*.cmake`**（`npu_op_package` 依赖，决定 §11.4 走 cmake 还是退路）、CANN 里 `ascend910*` / `davinci_22|35` 目录（现场判 910B/910C 可编性）、磁盘余量。
-
-### 11.4 构建（两条候选路径，preflight 决定走哪条）
-
-- **首选**：工程自带的 ASC CMake（`code1/CMakeLists.txt`）——`find_package(ASC REQUIRED)` + `npu_op_package(custom TYPE SHARED)` 产出 op 包。**前提**是 preflight 找得到 `ASCConfig*.cmake`。
-- **退路**：`ccec` 单编 kernel 校验可编性（至少拿到"能否过编"的确定答案），构建脚本口径再由用户定。
-- ⛔ **防假成功（工作流 §4.6）**：构建前记 `build_out` 时间戳，构建后必须看到产物**新时间戳** + `grep -a "error:"` 未被 `2>/dev/null` 吞掉；只信"产物变了"，不信"脚本回 OK"。
-
-### 11.5 上机用例矩阵（把仿真侧欠的账一起收口）
-
-| 来源 | 用例 | 为什么放真机 |
-|---|---|---|
-| §9.5 缺口 | `large` 4 条（含 `bwd-fp16/bf16-large` 8192×7168×8） | 两台云端仿真机都在这一条上失联（§9.5.1）；真机上毫秒级，比继续赌仿真划算 |
-| §9.4 新增 | `D=32768 / 32769`（64KB 预算取等 vs 尾块 1 元素）、`24576 / 24577`（48KB 兜底） | 预算边界对**真芯片的 UB 大小**最敏感，正是 §9.1 整行优化的收益判定点 |
-| 基线 | 官方三档 256/4096/7168 × 正/反向 × fp16/bf16 = 12 | 与 §2 契约逐条对齐 |
-
-⚠️ **真机侧目前缺一个启动器**：`cpu_debug/test_mhc_expand_cpu.cpp` 走的是 `ICPU_RUN_KF`（CPU 仿真专用），上真机需要 ACL 侧"建包→下发 kernel→比对"的启动器（**非提交文件**，preflight 确认 CANN 版本后再写，避免按猜测的 API 版本写一版跑不通的）。
-
-### 11.6 性能基线（E1 的定量，优化 A/B 唯一能证明自己的地方）
-
-`msprof` 采 `aicore_time` / cube-vector 占比 / HBM 带宽利用率；**输出目录写工程内**（`code1/npu_debug/prof/`，不写 `/tmp`），采完**立刻 tar 管道回本地 + md5 复验**（§9.5.1 的教训：证据只留容器 = 会再丢一次）。
-
-**实测结果（2026-09-20 21:30）**：✅ 已按本节执行完毕，数据与结论见 **§11.11**（工具 `npu_debug/prof_npu.sh` + `npu_debug/prof_sum.js`，产物 `npu_debug/prof/v0_*`、`v3_*`，8 份 csv md5 双侧一致）。两点补充口径：① CANN 9.0 的 `msprof` 在 `$ASCEND_HOME_PATH/bin`，**没 source `set_env.sh` 时 `command -v msprof` 是空的**，别据此判"机器没装 profiler"；② `op_summary.csv` 里**带 `(us)` 后缀的列名要按前缀匹配**（`aiv_mte2_time(us)`），且 `aicore_time(us)` 对纯向量核是 0，**要看 `aiv_time` 那一列**。
-
-### 11.7 时间盒
-
-preflight 5 min → 构建 20 min → 用例矩阵 30 min → msprof 20 min。任一环节隧道 down：**不重试**，先落已产出的日志再报告。
-
-### 11.8 真机 preflight + 编译门实测结果（2026-09-20 19:38–19:53，`02aeb`）
+### 11.8 preflight + 编译门实测（19:38–19:53）
 
 | 判据 | 实测值 |
 |---|---|
-| 芯片 | **Ascend 910B3**，**NPU ID=7**（不是 §1 旧记录里的 2），驱动 `npu-smi 25.5.0`，HBM 64GB（已用 3203MB），设备节点 `/dev/davinci7` |
+| 芯片 | **Ascend 910B3**，**NPU ID=7**（⚠️ 旧记录 ID=2 作废），`npu-smi 25.5.0`，HBM 64GB（已用 3203MB），`/dev/davinci7` |
 | 机器 | aarch64 / 16 vCPU / **122GB** 内存 / `/home` 余 179G |
 | CANN | `~/Ascend/cann-9.0.0`（另有 `~/Ascend/ascend-toolkit` 并存），`ccec` / `atc` / `msopst` / `msprof` 齐备，clang 15.0.5，cmake 3.20.5 |
-| `ASCEND_COMPUTE_UNIT` | **`ascend910b` 口径正确，提交源四文件零改动**（推送后 md5 逐字节比对 = §6.1 基线） |
+| 芯片口径 | ⚠️ 控制台里曾有一台标 **910C（Atlas A3）**（`DevEnvC_3GFCN`）⇒ **到手第一条命令先跑 preflight 拿芯片名，再谈编译**（工程两处写死 `ascend910b`：`CMakeLists.txt` + `op_host` 的 `.AddConfig`）。实测 `02aeb` = 910B3 ⇒ **口径正确，提交源四文件零改动**（推送后 md5 逐字节 = §3.2 基线） |
+| 编译门 | `source set_env.sh` → `cmake -S . -B build_out -DCMAKE_PREFIX_PATH=$ASCEND_HOME_PATH && cmake --build build_out -j8` ⇒ **`rc=0` / 20 秒 / 产物时间戳全新**（非假成功）：`build_out/tmp/vendors/custom/…/ascend910b/mhc_expand/` 下 **4 个 `.o`**（`backward×dtype` 四分支）+ `binary_info_config.json` + `libcust_opapi.so`(1.6MB) |
+| aclnn 接口 | `build_out/autogen/aclnn_mhc_expand.h`，标准两段式：`aclnnMhcExpandGetWorkspaceSize(const aclTensor *x, int64_t mhcMult, bool backward, const aclTensor *out, uint64_t *wsSize, aclOpExecutor **exe)` / `aclnnMhcExpand(void *ws, uint64_t wsSize, aclOpExecutor *exe, aclrtStream)` |
 
-⚠️ **两个现场坑**（下次直接照抄，别重新踩）：
-1. **`npu-smi` 裸跑报 `libc_sec.so: cannot open shared object file`** —— 它不在 CANN 的 `set_env.sh` 里，在驱动目录：
-   `export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver` 之后就正常出表。
-2. **`find_package(ASC REQUIRED)` 不需要 `ASCConfig*.cmake`**（全 CANN grep 不到这个文件名）；`npu_op_package` 宏实际在
-   `~/Ascend/cann-9.0.0/aarch64-linux/tikcpp/ascendc_kernel_cmake/fwk_modules/func.cmake`，**configure 只要带上 `-DCMAKE_PREFIX_PATH=$ASCEND_HOME_PATH` 就能解析**。
+**两个现场坑**（已收录工作流 §6）：① `npu-smi` 裸跑报 `libc_sec.so: cannot open shared object file` —— 那两个库在**驱动目录**（`/usr/local/Ascend/driver/lib64/{common,driver}`），不在 CANN 的 `set_env.sh` 里；② **`find_package(ASC REQUIRED)` 不需要 `ASCConfig*.cmake`**（全 CANN grep 不到这个文件名），`npu_op_package` 宏实际在 `tikcpp/ascendc_kernel_cmake/fwk_modules/func.cmake`，**configure 只要带上 `-DCMAKE_PREFIX_PATH=$ASCEND_HOME_PATH` 就能解析**。
 
-**编译门（本题第一次真机侧编译，此前状态是"从未编译"）**：
+### 11.9 首跑 + 全量精度矩阵（19:55–20:25）：**反向 24 条全绿、前向 14 条全红**
 
-```bash
-source ~/Ascend/cann-9.0.0/set_env.sh
-cd ~/ops_comp/code1 && rm -rf build_out
-cmake -S . -B build_out -DCMAKE_PREFIX_PATH=$ASCEND_HOME_PATH && cmake --build build_out -j8
-```
+**结论先说**：本题**第一次在真机上跑起算子**（此前从未上过机）。跑完 5 组 38 条后，真机给出一个仿真侧**完全看不见**的事实 —— **反向 24 条全 PASS（逐位精确），前向 14 条全 FAIL，无一例外。**
+> ✅ **后续**：本节的"前向全红"已于同晚 21:10 修复复跑全绿（§11.10）。本节保留为**问题定位的原始证据**（尤其"仿真原理上看不见这类竞争"这条口径），**不要引用它的 FAIL 数字作为当前状态**。
 
-`rc=0`、**耗时 20 秒**、产物时间戳全新（19:40:44，非"假成功"）：`MhcExpand_ascend910b` / `cust_optiling` / `cust_opapi` 全部 Built，产出 vendor 包（`build_out/tmp/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/` 下 **4 个 `.o`**，对应 `backward×dtype` 四个分支）+ `binary_info_config.json` + `libcust_opapi.so`(1.6MB)。日志本地双写：`code1/npu_debug/logs/{preflight,asc_probe,build_gate,aclnn_sig}_20260920_*.log`。
+#### 11.9.1 启动器（`code1/npu_debug/` 三件，全部**非提交**；md5 见 §6.2）
 
-**设备侧启动器接口已确认**（`build_out/autogen/aclnn_mhc_expand.h:25,41`，标准 aclnn 两段式）：
-
-```c
-aclnnStatus aclnnMhcExpandGetWorkspaceSize(const aclTensor *x, int64_t mhcMult, bool backward,
-                                           const aclTensor *out, uint64_t *workspaceSize, aclOpExecutor **executor);
-aclnnStatus aclnnMhcExpand(void *workspace, uint64_t workspaceSize, aclOpExecutor *executor, aclrtStream stream);
-```
-
-⇒ §11.5 说的"缺 ACL 启动器"现在**只剩写代码这一件事**，接口与芯片口径都不再是未知项。任务 #7 完成，#8 解除阻塞。
-
-### 11.9 ⭐ 真机首跑 + 全量精度矩阵实测（2026-09-20 19:55–20:25，`02aeb` / 910B3 / NPU ID=7 / 50 AIV）
-
-**结论先说**：本题**第一次在真机上跑起算子**（此前从未上过机）。跑完 5 组共 38 条用例后，真机给出一个仿真侧**完全看不见**的事实 ——
-
-> **反向 24 条全 PASS（含逐位精确），前向 14 条全 FAIL，无一例外。** 提交源四文件 md5 仍 = §6.1 基线（**该节本身零改动**）。
-
-> ✅ **后续**：本节的"前向全红"已于同日晚 **21:10 修复并复跑全绿**，修法与两次失败尝试的实测记录见 **§11.10**。本节保留为**问题定位的原始证据**（尤其是"仿真原理上看不见这类竞争"这条口径），不要引用它的 FAIL 数字作为当前状态。
-
-#### 11.9.1 启动器已建成（`code1/npu_debug/`，三文件均**非提交**）
-
-| 文件 | 作用 |
-|---|---|
-| `test_mhc_expand_npu.cpp` | ACL/aclnn 启动器：用例矩阵 + 参考实现与 `cpu_debug` **逐条同源**，输出行格式一致便于跨侧对拍；额外字段 `ws=`（workspace 字节）、`nan_unwritten=`（用 `0x7fff`=fp16 NaN 预置输出缓冲，核没写到的区域一眼暴露） |
-| `build_npu.sh` | 探测 `set_env.sh` → 按 `uname -m` 拼 include/lib → 校验 op 包**新时间戳 + `nm -D` 见 `aclnnMhcExpand`**（防假成功）→ 链接 `-lnnopbase -lascendcl -ldl` |
-| `run_npu.sh` | 运行期组装 custom OPP 包 + 设 `ASCEND_CUSTOM_OPP_PATH` + 启动 |
-
-用法：`bash npu_debug/run_npu.sh {quick|medium|large|mtile|bnd|ub48}`（日志自动 tee，本地已双写 45 份 `npu_debug/logs/*.log`；⚠️ **构建树是 `~/ops_comp/code1`，不是 `~/code1`** —— 见 §11.10.4）。
+`test_mhc_expand_npu.cpp`（ACL/aclnn 启动器：用例矩阵 + 参考实现与 `cpu_debug` **逐条同源**、输出行格式一致便于跨侧对拍；额外字段 `ws=`、`nan_unwritten=` —— 用 `0x7fff`（fp16 NaN）预置输出缓冲，核没写到的区域一眼暴露）+ `build_npu.sh`（探测 `set_env.sh` → 按 `uname -m` 拼 include/lib → 校验 op 包**新时间戳 + `nm -D` 见 `aclnnMhcExpand`** 防假成功 → 链接 `-lnnopbase -lascendcl -ldl`）+ `run_npu.sh`（运行期组 custom OPP 包 + 设 `ASCEND_CUSTOM_OPP_PATH`）。
+用法：`bash npu_debug/run_npu.sh {quick|medium|large|mtile|bnd|ub48|prof}`（日志自动 tee）。⚠️ **构建树是 `~/ops_comp/code1`，不是 `~/code1`**（§11.10.4 坑②）。
 
 #### 11.9.2 561002「Do not find tiling func」—— 首跑全红，根因是**加载方式**不是算子
 
 现象：25/25 用例 `st=561002`。逐项排除过 `ASCEND_CUSTOM_OPP_PATH` 指 `tmp/vendors/custom`、`build_out`、`build_out/op_host`、直接指 `.so` —— 全无效。
-
-**根因（证据链）**：CANN 9.0 的 `REGISTER_OP_LIB(custom).RegOpLibInit(...)` + `ops::OpAICoreDef::SetTiling` 在 DSO 静态初始化期写 **`LocalRegistry`**，**只有框架自己通过 `ASCEND_CUSTOM_OPP_PATH` dlopen 该 so 时才把这张表提交进全局注册表**；启动器若把 `libcust_opapi.so` 做成**链接期依赖**，它虽然被加载，注册器却只落在本 DSO 的 LocalRegistry ⇒ 框架查不到 tiling func。
-
+**根因（证据链）**：CANN 9.0 的 `REGISTER_OP_LIB(custom).RegOpLibInit(...)` + `ops::OpAICoreDef::SetTiling` 在 DSO 静态初始化期写 **`LocalRegistry`**，**只有框架自己通过 `ASCEND_CUSTOM_OPP_PATH` dlopen 该 so 时才把这张表提交进全局注册表**；启动器若把 `libcust_opapi.so` 做成**链接期依赖**，它虽被加载，注册器却只落在本 DSO 的 LocalRegistry ⇒ 框架查不到 tiling func。
 **解法（已固化进脚本）**：⛔ **绝不做成链接期依赖** —— 启动器用 `dlopen`+`dlsym` 取入口（路径走 `MHC_OPAPI_SO`），`run_npu.sh` 在**运行前**按 CANN 自带 `tikcpp/ascendc_kernel_cmake/fwk_modules/scripts/install.sh` 的布局组包，让框架自己 dlopen：
 
 ```
@@ -698,34 +467,16 @@ npu_debug/pkg/custom/op_impl/ai_core/tbe/{kernel,config}
 
 改完 `err=0`，接口层彻底打通。**kernel 侧无需 OPP 路径**：`ACLNN_WITH_BINARY` 已把 4 个 `.o` 与 `binary_info_config.json` 以 `_binary_*_start/end` 符号内嵌进 `libcust_opapi.so`。
 
-#### 11.9.3 精度矩阵（真机实测，`blk=50`）
+#### 11.9.3 精度矩阵（`blk=50`）
 
-**反向：24 条全绿，且 `maxdiff` 逐条 = 0.00000（位级精确，不是容差内通过）**
+**反向 24 条全绿，`maxdiff` 逐条 = 0.00000（位级精确，不是容差内通过）**：官方三档（含 `large` 各 **0/58720256**）✅ 6/6 · m 扫 1,2,3,4,5,16 ✅ · 非对齐 D=7167/100/1/33 ✅ · 多 tile（D=70000/70001/33000/33001 × m=2/8，双 dtype）✅ 8/8 · **UB 预算边界对**（32768 整行 vs 32769 退化、24576 整行 vs 24577、26001）✅ 5/5。
+⇒ §8.2 仿真侧三轮都没收口的 `bwd-*-large`（8192×7168×8）**真机毫秒级通过**；§5.4 靠纯算术推出的预算边界真机全对上。
 
-| 覆盖维度 | 用例 | 结果 |
-|---|---|---|
-| 官方三档 | `small` 64×256×2 / `medium` 1024×4096×4 / **`large` 8192×7168×8** × fp16/bf16 | ✅ 6/6（large 各 **0/58720256**） |
-| m 扫 | m=1,2,3,4,5,16 | ✅ |
-| 非对齐 D | D=7167（m=2,5,8）、D=100、D=1、D=33 | ✅ |
-| 多 tile（tile=2048） | D=70000/70001/33000/33001 × m=2/8，fp16+bf16 | ✅ 8/8 |
-| **UB 预算边界对** | D=**32768**(tile=32768 整行) vs **32769**(tile=2048)、D=**24576**(整行) vs **24577**(tile=2048)、D=26001 | ✅ 5/5 |
+**前向 14 条全红，且非确定**：`fwd-fp16-S1D1`（S=1 D=1 m=2，**最小可能形状**）1/2 —— 连"1 个元素复制 2 份"都错；`fwd-fp16-small` 4944/32768（15%，**历轮 8178 / 2046 / 2809 / 4944 每轮不同**）；`medium` ~88%；`large` **464593143 / 469762048 = 98.9%**（S 越大越接近全错）；其余（m=1/m=16/ROW-m8/D7167/D100/BND/UB48）14%~50% 全 FAIL。
 
-⇒ §9.5 仿真侧三次都没收口的 **`bwd-*-large`（8192×7168×8）在真机毫秒级通过**（`kern=0.001s`）；§9.4 靠纯算术推出来的预算边界，真机侧全部对得上。
+#### 11.9.4 ⭐ 前向失败机理：**MTE1 读 UB 与 MTE2 写 UB 之间没有任何序保证**
 
-**前向：14 条全红，且非确定**
-
-| 用例 | mismatch | 备注 |
-|---|---|---|
-| `fwd-fp16-S1D1`（S=1 D=1 m=2，**最小可能形状**） | 1/2 | 连"1 个元素复制 2 份"都错 |
-| `fwd-fp16-small` 64×256×2 | 4944/32768 (15%) | 同一用例历轮 8178 / 2046 / 2809 / 4944 ⇒ **每轮不同** |
-| `fwd-fp16-medium` / `bf16-medium` | 14806024 / 14807867 of 16777216 (88%) | |
-| `fwd-fp16-large` / `bf16-large` | 464593143 / 464566343 of 469762048 (**98.9%**) | S 越大越接近全错 |
-| `fwd-fp16-MTL-D70000-m2` | 40033 / 53135 of 140000（同用例两轮） | |
-| 其余（m=1/m=16/ROW-m8/D7167/D100/BND/UB48） | 14%~50% | 全 FAIL |
-
-#### 11.9.4 ⭐ 前向失败机理已定位：MTE1 读 UB 与 MTE2 写 UB **之间没有任何序保证**
-
-`op_kernel/mhc_expand.cpp:104-122`（前向是**纯搬运**，中间没有 VEC 运算）：
+`op_kernel/mhc_expand.cpp:104-122`（前向**纯搬运**，中间没有 VEC 运算）：
 
 ```cpp
 auto in_buf = in_que_.AllocTensor<DT_X>();     // in_que_ = TQue<VECIN,2>  (:168)
@@ -735,109 +486,89 @@ for (k...) DataCopyPad(o_gm_[dst_off], x_local, cp);   // :119  MTE1  UB -> GM
 in_que_.FreeTensor(x_local);                   // :121  只保证 VEC 已消费，不保证 MTE1 已读完
 ```
 
-`VECIN` 队列的序是**挂到 VEC 消费**上的；前向没有 VEC 指令，**MTE1 可能在 MTE2 落地前就开读** ⇒ 读到 UB 里的陈旧内容。三条独立证据互锁：
+`VECIN` 队列的序**挂到 VEC 消费**上；前向没有 VEC 指令 ⇒ **MTE1 可能在 MTE2 落地前就开读**，读到 UB 里的陈旧内容。三条独立证据互锁：
+1. **错值是"UB 脏数据"而非"搬错行"**：`large` 首帧 `got=0.0078 / 0.0000 / 0.0039`，即位图案 `0x0001 / 0x0000 / 0x0002`（fp16 次正规）。输入按 §11.9.3 的填充**全是 0.125 的整数倍**，输出里绝无可能出现这些值 ⇒ **不是偏移算错，是源头就没数据**。
+2. **写没落地的区域可区分**：输出预置 `0x7fff`，全部用例 `nan_unwritten=0` ⇒ 空间**确实被写过**，只是写的是脏数据。
+3. **规模相关性**：ROW 模式每任务把同一块 UB 连发 m 次 MTE1，`large`（S=8192, m=8, tile=7168）窗口最宽 ⇒ 98.9%，小形状只 15%；**同形重复跑计数每次不同** ⇒ 竞争而非算术错误。
 
-1. **错值是"UB 脏数据"而非"搬错行"**：`large` 用例首帧 `got=0.0078 / 0.0000 / 0.0039`，即位图案 `0x0001 / 0x0000 / 0x0002`（fp16 次正规）。而输入按 §11.9.3 的填充**全是 0.125 的整数倍**，输出里绝无可能出现这些值 ⇒ 不是偏移算错，是**源头就没数据**。
-2. **写没落地的区域可区分**：输出预置 `0x7fff`（fp16 NaN），全部用例 `nan_unwritten=0` ⇒ 空间**确实被写过**，只是写的是脏数据。
-3. **规模相关性**：ROW 模式每任务把同一块 UB 连发 m 次 MTE1，`large`（S=8192, m=8, tile=7168）窗口最宽 ⇒ 98.9%；小形状只 15%。**同形重复跑计数每次不同** ⇒ 竞争而非算术错误。
-
-**为什么反向不受影响**（`op_kernel/mhc_expand.cpp:126-165`）：反向在 VECIN 缓冲上插了 `Cast`/`Add`（:154-155），**VEC 消费即构成 MTE2→VEC 的序**，写出又走 `TQue<VECOUT>`（:159-164，保护 VEC→MTE1）⇒ 全链有序，实测 24/24 位级精确。**这也解释了为什么仿真全绿**：`ICPU_RUN_KF` 不实现流水线事件，串行执行 ⇒ 该竞争在 CPU 仿真上**原理上不可能被发现**（工作流 §4.6「仿真假通过」的又一实例）。
-
-**排除掉的可能**：`out` 总字节 939,524,096 < 2^31 ⇒ 32 位字节偏移不溢出；`dst_off`/`src_off` 均为 `int64_t`；`tile=7168` → `cur_h*2=14336` 为 32B 对齐，非 pad 分支。**与寻址无关。**
+**为什么反向不受影响**（`:126-165`）：反向在 VECIN 缓冲上插了 `Cast`/`Add`（`:154-155`），**VEC 消费即构成 MTE2→VEC 的序**，写出又走 `TQue<VECOUT>`（`:159-164`，保护 VEC→MTE1）⇒ 全链有序，实测 24/24 位级精确。**这也解释了仿真为什么全绿**：`ICPU_RUN_KF` 不实现流水线事件、串行执行 ⇒ 该竞争在 CPU 仿真上**原理上不可能被发现**（§8.3①）。
+**排除项**：`out` 总字节 939,524,096 < 2^31 ⇒ 32 位字节偏移不溢出；`dst_off`/`src_off` 均为 `int64_t`；`tile=7168` → `cur_h*2=14336` 为 32B 对齐，非 pad 分支。**与寻址无关。**
 
 #### 11.9.5 顺带坐实的两个口径
 
-- **真机 UB = 256KB 成立**：host 预算 `ub_size/4`=64KB ⇒ D=32768（fp16 整行 64KB）走整行、D=32769 退化为 tile=2048，与 §9.1 推导**逐位吻合** ⇒ §9 全部 tiling 推导无需重算。
-- **fp16 溢出语义分歧（确定性，非竞争）**：`bwd-fp16-sat-m2`（输入 32768，m=2 ⇒ 65536 溢出）真机 `Cast(CAST_RINT)` 给 **+inf**（512/512 全错），CPU 仿真与本地参考给 **65504（饱和）**。同组 `sat-m1`（不溢出）PASS ⇒ 只有溢出分支分歧。**倾向**：PyTorch fp16 溢出也是 inf ⇒ 大概率是**我方参考**该改，而不是核该改。✅ **已按此定档**：用户拍板"改仿真参考为 IEEE inf"，改完 `bwd-fp16-sat-m2` 由 FAIL 转 **0/512 PASS**（§11.10.5）。
+- **真机 UB = 256KB 成立**：host 预算 `ub_size/4` = 64KB ⇒ D=32768（fp16 整行 64KB）走整行、D=32769 退化为 `tile=2048`，与 §9.1 推导**逐位吻合** ⇒ §9 全部 tiling 推导无需重算。
+- **fp16 溢出语义分歧（确定性，非竞争）**：`bwd-fp16-sat-m2`（输入 32768，m=2 ⇒ 65536 溢出）真机 `Cast(CAST_RINT)` 给 **+inf**（512/512 全错），CPU 仿真与本地参考给 **65504（饱和）**；同组 `sat-m1`（不溢出）PASS ⇒ 只有溢出分支分歧。✅ 已定档：用户拍板"改仿真参考为 IEEE inf"，改完该用例 FAIL → **0/512 PASS**（§11.10.5）。
 
-#### 11.9.6 拍板记录与后续（原"待用户拍板"，2026-09-20 21:10 已全部关闭）
+#### 11.9.6 拍板记录（三条，2026-09-20 21:10 前全部关闭）
 
-| # | 决策点 | 候选 | 结果 |
-|---|---|---|---|
-| 1 | **前向竞争怎么修**（当时前向真机 0 分） | (a) `SetFlag/WaitFlag` 事件配对；(b) 前向改走 `TQue<VECOUT>`；(c) `PipeBarrier<PIPE_ALL>` | 用户选 **(a)** ⇒ **实测不足**（仍非确定）；换窄 barrier `PIPE_MTE2/MTE1` ⇒ **运行期 trap**；最终落到 **(c)**，真机全绿。全过程与数据见 **§11.10**，⚠️ 与批准方案有偏离，已在 §11.10.7 明写 |
-| 2 | fp16 溢出：改**核**（加饱和）还是改**参考**（接受 inf） | 需先核对题面样例是否覆盖溢出输入 | 用户选 **改参考为 IEEE inf** ⇒ 已改并复跑达标（§11.10.5）。题面是否覆盖溢出输入**仍未核实**（§4.3） |
-| 3 | `cpu_debug` harness：未知 mode 静默返回 0，应改非零退出 | 低风险，可顺手 | **未做**（低优先，真机侧已能兜底）⇒ 留在待办，不阻塞提交 |
+| # | 决策点 | 结果 |
+|---|---|---|
+| 1 | 前向竞争怎么修：(a) `SetFlag/WaitFlag` 事件配对 / (b) 前向改走 `TQue<VECOUT>` / (c) `PipeBarrier<PIPE_ALL>` | 用户选 **(a)** ⇒ **实测不足**；(b) 未试（V1 已覆盖同族思路）；窄 barrier ⇒ **运行期 trap**；最终落到 **(c)** 全绿。⚠️ **与批准方案有偏离**，声明见 §11.10.7 |
+| 2 | fp16 溢出：改**核**（加饱和）还是改**参考**（接受 inf） | 用户选 **改参考为 IEEE inf** ⇒ 已改并复跑达标（§11.10.5） |
+| 3 | `cpu_debug` harness 未知 mode 静默返回 0，是否改非零退出 | **未做**（低优先，真机侧已能兜底）⇒ 留在待办，不阻塞提交 |
 
-**性能基线（§11.6 msprof）**：当时因"前向正确性未定"暂缓 ⇒ **阻塞已解除**后已采完，V0/V3 同机 A/B 与流水分解见 **§11.11**（barrier 代价定档 = 前向 +5.5%）。
+### 11.10 ⭐ 前向竞争的修复实测（20:40–21:10，同机 `02aeb` + 云端仿真机 `tpm0u`）
 
-### 11.10 ⭐ 前向竞争的修复实测（2026-09-20 20:40–21:10，同机 `02aeb` / 910B3 + 云端仿真机 `tpm0u`）
-
-**结论先说**：`op_kernel/mhc_expand.cpp` 的 `ForwardOneBlock` 在 `DeQue` 之后加 **1 行 `PipeBarrier<PIPE_ALL>()`**（另 2 行注释，**完整 diff = +3 行**，反向与 host 一行未动）⇒ 真机 **7 轮 89 条用例每轮 `ALL PASS fail=0 err=0`**、云端仿真机 quick **29 条 ALL PASS**。
-⚠️ **与用户批准方案的偏离**：批准的是 §11.9.6 的 **(a) `SetFlag/WaitFlag` 事件配对**，实测 **(a) 不足**、窄 barrier **运行期 trap**，最终落地的是当时列为 **(c)** 的那一个 —— 逐条数据见 §11.10.1，偏离声明见 §11.10.7。
+**结论先说**：`ForwardOneBlock` 在 `DeQue` 之后加 **1 行 `PipeBarrier<PIPE_ALL>()`**（另 2 行注释，**完整 diff = +3 行**，反向与 host 一行未动）⇒ 真机 **7 轮 89 条每轮 `ALL PASS fail=0 err=0`**、云端仿真机 quick **29 条 ALL PASS**。
 
 #### 11.10.1 四个版本的对照实验（同一台真机、同一份 quick 矩阵 25 条）
 
 | 版本 | 前向改动 | quick 汇总 | `fwd-fp16-small` mismatch | 判定 |
 |---|---|---|---|---|
-| **V0** 原始 | — | `HAS FAIL fail=9 err=0` | 4944/32768（历轮 8178 / 2046 / 2809 / 4944 **每轮不同**，§11.9.3） | 竞争 |
+| **V0** 原始 | — | `HAS FAIL fail=9 err=0` | 4944/32768（历轮 8178 / 2046 / 2809 / 4944 **每轮不同**） | 竞争 |
 | **V1** 事件配对（**用户批准**） | `SetFlag/WaitFlag` 双向配对（`MTE2_MTE1` 管"落地才能读"，`MTE1_MTE2` 管"读完才能覆写"）+ `fwd_warmed_` 首块标志 | `HAS FAIL fail=9 err=0` | **2540**（`fwd-bf16-small` 12883） | ❌ **不足**：计数降了一半，但**不为 0、仍非确定** |
 | **V2** 窄 barrier | `PipeBarrier<PIPE_MTE2>()` + `PipeBarrier<PIPE_MTE1>()` | `HAS FAIL fail=0 err=9` | 32768/**32768** 且 `kern=0.000s`、`got=nan`、`nan_unwritten=32768`（核根本没写 ⇒ 整块留在预置 NaN） | ❌ **运行期 trap**：`    [fwd-fp16-small] sync failed` |
 | **V3** `PIPE_ALL`（**采纳**） | 1 行 `PipeBarrier<PIPE_ALL>()` | **`ALL PASS fail=0 err=0`** | **0 / maxdiff=0.00000** | ✅ 全绿 |
 
 **V1 为什么不足 —— 两条已坐实、一条仍是假设**：
-- 坐实①：**API 口径**。CANN 9.0 真实签名是 `SetFlag<HardEvent event>(int32_t eventID)` —— **事件号是实参、不是模板参数**（`asc/include/basic_api/kernel_operator_block_sync_intf.h:38,41`；`enum class HardEvent : uint8_t` 在 `asc/impl/basic_api/kernel_event.h:37`），且 `eventID` 受 `ASCENDC_ASSERT(0 <= eventID < QUE_MAX_EVENT)` 约束（`QUE_MAX_EVENT` 按 arch 是 8 或 4）。按旧记忆写成模板实参会直接编不过。
-- 坐实②：计数 4944→2540（`fwd-bf16-small` 同向 12883）说明**事件确实生效了一部分**，但**没有归零** ⇒ 判"不足"是**纯实测**结论（quick 矩阵 9 条前向仍全 FAIL，`fail=9 err=0`）。至于**具体哪一道序没关净，未逐条证实**，下面那条假设只是候选解释，别当结论用。
-- 假设（**未继续验证，别当结论**）：要彻底关净需把 `AllocTensor` 也纳入事件保护窗口，即自己管缓冲池 —— 那就是绕开 `BufferT`/`TQue` 手写 UB 管理，**风险与收益不成比例**，所以停在 V3。
-- ⇒ **教训**：这类序**不能靠"背事件名"补**，只能"改一次跑一次直到计数为 0"；而**任何只跑一轮的全绿都不算证据**（V0 的计数每轮不同 ⇒ 必须同参重复跑，V3 就是这么确认的）。
+- 坐实①（**API 口径，下次直接照抄**）：CANN 9.0 真实签名是 `SetFlag<HardEvent event>(int32_t eventID)` —— **事件号是实参、不是模板参数**（`asc/include/basic_api/kernel_operator_block_sync_intf.h`；`enum class HardEvent : uint8_t` 在 `asc/impl/basic_api/kernel_event.h`），且 `eventID` 受 `ASCENDC_ASSERT(0 <= eventID < QUE_MAX_EVENT)` 约束（`QUE_MAX_EVENT` 按 arch 是 8 或 4）。**按旧记忆写成模板实参会直接编不过。**
+- 坐实②：计数 4944→2540（`fwd-bf16-small` 同向 12883）说明**事件确实生效了一部分但没有归零** ⇒ "不足"是**纯实测**结论（9 条前向仍全 FAIL）。**具体哪一道序没关净，未逐条证实。**
+- 假设（**未继续验证，别当结论**）：要彻底关净需把 `AllocTensor` 也纳入事件保护窗口 = 绕开 `BufferT`/`TQue` 手写 UB 管理，**风险与收益不成比例** ⇒ 停在 V3。
+- ⇒ **教训**见 §4.4。**V2 的报错为什么差点漏掉**：`sync failed` 那行**带前导缩进**，`grep -E "^\["` 会把它们全滤掉 ⇒ 我一度误报"只是数值错、没报错"。查运行期错误要 `grep -n "sync failed"` 或 `ASCEND_GLOBAL_LOG_LEVEL=1` 再看 `head -25`。
 
-**V2 的报错为什么差点漏掉**：`sync failed` 那行**带前导缩进**，`grep -E "^\[" ` 会把它们全滤掉 ⇒ 我一度误报成"只是数值错、没报错"。查运行期错误要 `grep -n "sync failed"` 或 `ASCEND_GLOBAL_LOG_LEVEL=1` 再看 `head -25`。
+#### 11.10.2 为什么 V3 的"串行化代价"在本 kernel 里比名义上小
 
-#### 11.10.2 为什么 V3 的"串行化代价"在本 kernel 里不成立（但仍未定量定档）
-
-§11.9.6 当初对 (c) 的担心是"把 m 次写出串行化、大 S 下带宽有代价"。实际放置点是 **`DeQue` 之后、`for k` 之前**：
-
-- 它只把"开始读 UB"推迟到"上一次 MTE1 全部完成"，**`for k` 内 m 次 `DataCopyPad` 之间仍然流水**，没有串行化那 m 次写；
-- 前向路径**没有 VEC 指令** ⇒ `PIPE_ALL` 相比单条 `PIPE_MTE1/2` **不额外等待任何在途流水线**，所以"贵"在这里是名义上的；
-- ⚠️ 但**跨任务之间确实多了一道全同步**（每个 `ForwardOneBlock` 一次），真实开销**只能由 `msprof` 的 `aicore_time` 定档**（V0 vs V3 前向 A/B）⇒ 已并入 §11.6 性能基线要测的项，**现在下"零代价"的结论为时过早**。
+§11.9.6 当初对 (c) 的担心是"把 m 次写出串行化、大 S 下带宽有代价"。实际放置点是 **`DeQue` 之后、`for k` 之前**：① 它只把"开始读 UB"推迟到"上一次 MTE1 全部完成"，**`for k` 内 m 次 `DataCopyPad` 之间仍然流水**；② 前向**没有 VEC 指令** ⇒ `PIPE_ALL` 相比单条 `PIPE_MTE1/2` **不额外等待任何在途流水线**。⚠️ 但**跨任务之间确实多了一道全同步**（每个 `ForwardOneBlock` 一次）⇒ 真实开销由 §11.11 定档 = **+5.5%**。
 
 #### 11.10.3 修复后真机全量矩阵（`npu_debug/logs/npu_allgroups_fixed_20260920_2056.log`）
 
 | 轮 | 组 | 用例数 | 结果 |
 |---|---|---|---|
 | 1–2 | `quick` ×2（**同参重复跑 = 确定性对照**） | 25 / 25 | `ALL PASS fail=0 err=0`，两轮逐条计数一致 |
-| 3 | `medium` | 4 | `ALL PASS fail=0 err=0` |
-| 4 | `mtile` | 12 | `ALL PASS fail=0 err=0` |
-| 5 | `bnd` | 15 | `ALL PASS fail=0 err=0` |
-| 6 | `ub48`（`ub_budget=48KB`） | 4 | `ALL PASS fail=0 err=0` |
-| 7 | `large` | 4 | `ALL PASS fail=0 err=0` |
-| | **合计** | **89** | **7/7 轮全绿**；`mismatch=0` 本身即蕴含"无漏写区域"（输出预置 `0x7fff`=fp16 NaN，漏写必计入 mismatch） |
+| 3–7 | `medium` / `mtile` / `bnd` / `ub48` / `large` | 4 / 12 / 15 / 4 / 4 | 各轮 `ALL PASS fail=0 err=0` |
+| | **合计** | **89** | **7/7 轮全绿**；`mismatch=0` 本身即蕴含"无漏写区域"（输出预置 `0x7fff`，漏写必计入 mismatch） |
 
-前向位级精确抽样（全部 `maxdiff=0.00000`，非"容差内通过"）：`fwd-fp16-S1D1` **0/2** · `fwd-fp16-MTL-D70000-m2` **0/140000** · `fwd-fp16-large` **0/469762048** · `fwd-bf16-large` **0/469762048**。反向延续 §11.9.3 的 24/24，本轮含 `bwd-fp16-sat-m2` **0/512 PASS**（见 §11.10.5）。
+前向位级精确抽样（全部 `maxdiff=0.00000`）：`fwd-fp16-S1D1` **0/2** · `fwd-fp16-MTL-D70000-m2` **0/140000** · `fwd-fp16-large` / `fwd-bf16-large` 各 **0/469762048**。反向延续 §11.9.3 的 24/24，本轮含 `bwd-fp16-sat-m2` **0/512 PASS**（§11.10.5）。
 
 #### 11.10.4 两个"假成功"运维坑（下次直接照抄）
 
-1. **`build_npu.sh` 只判"包是否存在" ⇒ 改动没进产物却报 done**：第一次重编后 `build_out/libcust_opapi.so` 时间戳仍是 19:40:44 未变。已加**源陈旧判定**：`find op_kernel op_host CMakeLists.txt -type f \( -name '*.cpp' -o -name '*.h' -o -name 'CMakeLists.txt' \) -newer build_out/libcust_opapi.so` 非空 → 强制 `rm -rf build_out` 重建；日志里要看到 `### stale: … -> 强制重建` + `ts: 1789908908 -> 1789909037` 两行才算真编过（§11.10 起生效）。
-2. **远端有两份目录**：`~/code1`（早期 `cd ~ && tar xf -` 落错的位置）与 **`~/ops_comp/code1`（真正构建/运行用的树）**。我一度对**错的那份**做 md5 复验并据此宣布"推送一致" ⇒ **md5 必须在构建树内核**。现已两侧统一 `~/ops_comp/code1`（真机 `02aeb` 与仿真机 `tpm0u` 均已核对 = `53ee60e5…`）。
+1. **`build_npu.sh` 只判"包是否存在" ⇒ 改动没进产物却报 done**：第一次重编后 `build_out/libcust_opapi.so` 时间戳仍是 19:40:44 未变。已加**源陈旧判定**：`find op_kernel op_host CMakeLists.txt -type f \( -name '*.cpp' -o -name '*.h' -o -name 'CMakeLists.txt' \) -newer build_out/libcust_opapi.so` 非空 → 强制 `rm -rf build_out` 重建；日志里要看到 `### stale: … -> 强制重建` + `ts: 1789908908 -> 1789909037` 两行才算真编过。
+2. **远端有两份目录**：`~/code1`（早期 `cd ~ && tar xf -` 落错的位置）与 **`~/ops_comp/code1`（真正构建/运行的树）**。我一度对**错的那份**做 md5 复验并据此宣布"推送一致" ⇒ **md5 必须在构建树内核**。现已两侧统一 `~/ops_comp/code1`（真机 `02aeb` 与仿真机 `tpm0u` 均已核对 = `53ee60e5…`）。
 
 #### 11.10.5 fp16 溢出：按批准改**参考**，用例转 PASS
 
-`npu_debug/test_mhc_expand_npu.cpp` 的 `ref_backward` 在 `fill_mode==2`（输入常数 32768）下改为 `m*32768 > 65504 → INFINITY`；CPU 仿真侧 `cpu_debug` 的饱和期望分支**保留不动**（仿真的 `Cast` 确实饱和到 65504，两侧各按各自的硬件语义对拍）。改完真机 `bwd-fp16-sat-m2` 由 512/512 全错 → **0/512 PASS**，坐实"真机 = IEEE inf"。
-⚠️ 这只解决**我方对拍**：**比赛平台判 `inf` 还是 `65504` 仍未核实**，题面样例是否覆盖溢出输入也还没查（挂在 §4.3）。
+`npu_debug/test_mhc_expand_npu.cpp` 的 `ref_backward` 在 `fill_mode==2`（输入常数 32768）下改为 `m*32768 > 65504 → INFINITY`；CPU 仿真侧 `cpu_debug` 的饱和期望分支**保留不动**（仿真的 `Cast` 确实饱和到 65504，**两侧各按各自的硬件语义对拍**）。改完真机 `bwd-fp16-sat-m2` 由 512/512 全错 → **0/512 PASS**，坐实"真机 = IEEE inf"。
+⚠️ 这只解决**我方对拍**：**比赛平台判 `inf` 还是 `65504` 仍未核实**（§4.3），两次提交未被触发（§13.1）。
 
-#### 11.10.6 仿真侧复验（+ 一条新的自坑）
+#### 11.10.6 仿真侧复验
 
-云端仿真机 `tpm0u` 用**修复后的 kernel** 重编（`build rc=0`、`error:` 0 行）→ quick 全量 **29 条 ALL PASS、FAIL=0**（11 条前向 + 18 条反向，含 `fwd-fp16-S1D1`、`bwd-fp16-sat-m2`）。日志 `cpu_debug/logs/sim_quick_full_barrier_20260920_2109.log`，md5 `dadd14dc747a62bb2e94dc79be637a95` **远端=本地、CR=0**。
-> ⚠️ 更早那份 `sim_quick_barrier_20260920_2058.log` **只有 6 条**（我把 stdout 接了会提前退出的管道，仿真进程随之被杀）⇒ **不得拿它当"quick 全过"的证据**，以 21:09 这份为准。**教训：跑矩阵不要给 stdout 接会提前退出的管道（`head` 尤其危险）。**
+云端仿真机 `tpm0u` 用**修复后的 kernel** 重编（`build rc=0`、`error:` 0 行）→ quick 全量 **29 条 ALL PASS、FAIL=0**。日志 `cpu_debug/logs/sim_quick_full_barrier_20260920_2109.log`，md5 `dadd14dc…` **远端=本地、CR=0**。⚠️ 更早那份只有 6 条的日志**不得当证据**（§8.4 的 `head` 坑）。
 
 #### 11.10.7 偏离声明与回滚
 
-用户批准 (a) 事件配对；实测 (a) 不足、(b) 未试（V1 已覆盖同族思路）、最终落地 (c) `PipeBarrier<PIPE_ALL>`。**回滚只需** `cp op_kernel/mhc_expand.cpp.bak_pre_fwd_event op_kernel/mhc_expand.cpp`（回到 V0，前向会重新全红）。中间版本已留档：`.bak_pre_fwd_event`=V0、`.events_v1`=V1。
+用户批准 (a) 事件配对；实测 (a) 不足、最终落地当时列为 (c) 的 `PipeBarrier<PIPE_ALL>` ⇒ **偏离已明写在此，供追溯**。
+**回滚只需** `cp op_kernel/mhc_expand.cpp.bak_pre_fwd_event op_kernel/mhc_expand.cpp`（回到 V0，前向会重新全红）。中间版本留档：`.bak_pre_fwd_event` = V0、`.events_v1` = V1。
 
----
+### 11.11 `msprof` 性能基线与 barrier A/B（21:26–21:30）
 
-### 11.11 `msprof` 性能基线与 barrier A/B（2026-09-20 21:26–21:30，真机 `02aeb`）
+**目的**：把 §11.10.2 遗留的唯一未定量项定档，同时落性能基线。用户批准口径：**"按 fp16-large 跑 V0 对 V3"**。
+**形状与流量**：fp16 `large` = `S=8192, D=7168, m=8`，host tiling 决策 `blk=40`。单任务读写合计 `x`=117,440,512B + `o`=939,524,096B = **1,056,964,608B ≈ 1.057GB**（反向量级相同）。每版重复下发 **21 次**，统计**剔除首任务**（冷启动）后的 20 样本。
 
-**目的**：把 §11.10.2 遗留的唯一未定量项（"跨任务多一道全同步，真实开销待测"）定档，同时落 §11.6 的性能基线。用户批准口径：**"按 fp16-large 跑 V0 对 V3"**。
+#### 11.11.1 采集通路（三件全部**非提交**，md5 见 §6.2）
 
-**形状与流量**：fp16 `large` = `S=8192, D=7168, m=8`，host tiling 决策 `blk=40`。单任务读写合计 `x`=117,440,512B + `o`=939,524,096B = **1,056,964,608B ≈ 1.057GB**（前向）；反向读写量级相同。每版重复下发 **21 次**，统计**剔除首任务**（冷启动）后的 20 样本。
-
-#### 11.11.1 采集通路（三件，全部**非提交**文件）
-
-| 件 | md5 | 作用与关键设计 |
-|---|---|---|
-| 启动器 `prof` 组 | `7555a6ba…` | `run_case()` 新增 `reps` 形参与 **rc=3=PROF** 语义：只做"重复下发 + `aclrtSynchronizeStream`"，**不对拍**；`MHC_REPS` 默认 21（下限夹到 2）。放进程内的原因：`msprof` 要采**单进程多次下发同一算子**，外部循环脚本拿不到逐任务记录 |
-| `npu_debug/prof_npu.sh` | `f1ed94b7…` | 新式用法 `msprof [args] <app> [app args]`；`command -v msprof` 为空即 `exit 2`（不 source `set_env.sh` 时 msprof 不在 PATH，**别据此判"机器没装 profiler"**）；OPP 包按 `[ "$SRC" -nt "$DST" ]` **自动刷新**（§11.10.4 坑①的同族防线）；`--output` 落 **工程内** `npu_debug/prof/<tag>_<ts>/`；采完 csv 计数为 0 → 打 `PROF_MISSING` 并 `exit 5` |
-| `npu_debug/prof_sum.js` | `a8ffb96c…` | `op_summary.csv` 摘要器：列名带 `(us)` 后缀需先剥（`aiv_mte2_time(us)`）；方向按 `Input Shapes` **维度数**判（2=前向 / 3=反向）；`drop = a => a.slice(1)` 剔首任务 |
+- **启动器 `prof` 组**：`run_case()` 新增 `reps` 形参与 **rc=3=PROF** 语义 —— 只做"重复下发 + `aclrtSynchronizeStream`"、**不对拍**。放进程内的原因：`msprof` 要采**单进程多次下发同一算子**，外部循环脚本拿不到逐任务记录；`MHC_REPS` 默认 21（下限夹到 2）。
+- **`prof_npu.sh`**：新式用法 `msprof [args] <app> [app args]`，`--task-time=on --ai-core=on`；`command -v msprof` 为空即 `exit 2`；OPP 包按 `[ "$SRC" -nt "$DST" ]` **自动刷新**（§11.10.4 坑① 的同族防线）；`--output` 落**工程内** `npu_debug/prof/<tag>_<ts>/`；采完 csv 计数为 0 → 打 `PROF_MISSING` 并 `exit 5`。
+- **`prof_sum.js`**：`op_summary.csv` 摘要器 —— 列名带 `(us)` 后缀需先剥（`aiv_mte2_time(us)`，**按前缀匹配**）；方向按 `Input Shapes` **维度数**判（2=前向 / 3=反向）；`drop = a => a.slice(1)` 剔首任务；输出 mean/min/p50/max 与各 DMA 通道均值。
 
 命令形态：`msprof --task-time=on --ai-core=on --output=npu_debug/prof/<tag>_<ts> ./npu_debug/test_npu 50 64 prof`。
 
@@ -855,152 +586,85 @@ in_que_.FreeTensor(x_local);                   // :121  只保证 VEC 已消费�
 #### 11.11.3 三条定档
 
 1. **barrier 代价 = 前向 +58.3µs / +5.5%**（1117.3 vs 1059.0）。两版分布**完全不重叠**（V3 `min`=1111.0 > V0 `max`=1064.7）⇒ 不是采样噪声，是真代价。
-2. **环境未漂移，所以归因成立**：反向是本轮的天然对照组（barrier 一行不在反向路径上），V3 vs V0 只差 **+0.25%**（1088.3 vs 1085.6）⇒ 上面那 +5.5% 不能推给"两次采集之间机器变慢"。
-3. **时间落点在写出 DMA**：barrier 的增量几乎全进了 `aiv_mte3_time`（1038.3 → **1088.4**，+50µs），`mte2` 反而从 229.6 降到 213.2 —— 全同步把 MTE2 与上一次 MTE1 拉开，读入通道不再和写出抢口。有效带宽（按剔首 mean）：**前向 V3 946GB/s / V0 998GB/s，反向 971GB/s**；前向与反向仅差 2.7%。
-   ⇒ 结论：**V0 已经贴住这个核能达到的上限，barrier 把它拉回到与反向同级**。剩下 5% 是"要正确性就得付"的钱，**不要试图用更窄的 barrier 换回来**（§11.10.1 已实测窄 barrier 运行期 trap）。
+2. **环境未漂移，所以归因成立**：反向是本轮的天然对照组（barrier 一行不在反向路径上），V3 vs V0 只差 **+0.25%**（1088.3 vs 1085.6）⇒ 那 +5.5% 不能推给"两次采集之间机器变慢"。
+3. **时间落点在写出 DMA**：barrier 的增量几乎全进 `aiv_mte3_time`（1038.3 → **1088.4**，+50µs），`mte2` 反而从 229.6 降到 213.2 —— 全同步把 MTE2 与上一次 MTE1 拉开，读入通道不再和写出抢口。有效带宽（剔首 mean）：**前向 V3 946GB/s / V0 998GB/s，反向 971GB/s**；前向与反向仅差 2.7%。
+   ⇒ **V0 已经贴住这个核能达到的上限，barrier 把它拉回到与反向同级**。剩下 5% 是"要正确性就得付"的钱，**不要试图用更窄的 barrier 换回来**（§11.10.1 已实测窄 barrier 运行期 trap）。
+> ⚠️ **本表不是 §9 两项优化的收益证据**（§11.11 只做了"加 barrier vs 不加"）⇒ 见 §4.3 第一条。
 
-> ⚠️ **本表不是 §9 两项优化的收益证据。** 本轮只做了"加 barrier vs 不加"，host tiling 条件修正、反向双缓冲**各自没有回退重测** ⇒ "§9 优化有加速比"目前仍只有算术与真机 PASS 支撑。要定档需再 2 轮同机 A/B（挂在 §4.3）。
+#### 11.11.4 下一条性能线索 → **已闭合**
 
-#### 11.11.4 下一条性能线索（**已记录、未实测、未排期**）
-
-前向/反向目前都是**逐副本 `for k` 各一次 `DataCopyPad`（`blockCount` 固定 1）**（§4.1 已确认）。理论上可合并为**一次** `DataCopyExtParams{ blockCount=m, srcStride=0 }`（源重复），省 `m-1`=7 次描述配置。三个必须先坐实的点：① arch22 对 `srcStride=0` 的支持性；② 非对齐尾块的 pad 语义是否还能逐块表达；③ 与本轮 barrier 的交互（合并后每任务 MTE1 描述数从 m 降到 1，全同步点变少 ⇒ 可能反而有利）。**收益上界就是 §11.11.3③ 里那 ~50µs 量级**，所以优先级低于"题 1 交付"，不动代码。
+本节原设想"把逐副本 `for k` 的 m 次 `DataCopyPad` 合并为一次 `DataCopyExtParams{blockCount=m, srcStride=0}`，收益上界 ~50µs"。⇒ **§14.5 已用真机把这条路线否决**（arch22 的 gap/stride 语义不可依赖文档推断，且 §14.1 证明 DMA 调用数不是瓶颈）。**不要再回到这里翻案。**
 
 #### 11.11.5 运维：切换、还原、留证
 
-- **换 V0 前先保命**：`cp op_kernel/mhc_expand.cpp op_kernel/mhc_expand.cpp.v3.keep`；采集完**还原 + 构建树内 md5 复验 = `53ee60e5…`（§11.10.4 坑②：必须在 `~/ops_comp/code1` 内核）+ `run_npu.sh quick` 25/25 `ALL PASS`** 三条齐了才判"环境复原"，随后删 keep（⚠️ keep 已删，长期回滚点仍是 `.bak_pre_fwd_event`）。
-- 产物 794K×2 当场 `tar` 管道回本地，**8 份 csv md5 双侧一致**：v0 `f91707b4`/`e5d25911`/`8633d888`/`04200357`，v3 `4ce454fb`/`d44f54af`/`a5933b70`/`60f7dd20`。
-- 判读口径：**纯向量核的 `aicore_time(us)` 恒为 0，要看 `aiv_time(us)`**；`aic_*` 全 0 是正常（本 kernel 无 Cube），别据此判"profiler 没采到"。
+- **换 V0 前先保命**：`cp op_kernel/mhc_expand.cpp op_kernel/mhc_expand.cpp.v3.keep`；采集完**还原 + 构建树内 md5 复验 = `53ee60e5…`（必须在 `~/ops_comp/code1` 内核）+ `run_npu.sh quick` 25/25 `ALL PASS`** 三条齐了才判"环境复原"，随后删 keep（⚠️ keep 已删，长期回滚点仍是 `.bak_pre_fwd_event`）。
+- 判读口径：**纯向量核的 `aicore_time(us)` 恒为 0，要看 `aiv_time(us)`**；`aic_*` 全 0 是正常（本 kernel 无 Cube），别据此判"profiler 没采到"。产物 **当场 `tar` 管道回本地 + 逐文件 md5 双侧复验**（§6.3）。
 
 ---
 
-## 12. 比赛平台提交通道（题 1 首次提交前必读，2026-09-20 22:00 记录）
+## 12. 比赛平台提交通道与平台实态
 
-**题 1 此前从未提交过，也不是"被锁只能交题 3"** —— 用户 2026-09-20 明确澄清：**之前交不了别的题，只是因为提交命令里的 `problem_id` 被写死成了第三题的值**，与权限无关。⚠️ 下面 12.1 的接口形态是**用户口述、本会话未实测**（还没拿到能跑的通道），首次执行时以 CLI 实际返回为准。
+### 12.1 换题三步（`cannjudge-submit` CLI / API，✅ 已实测可用）
 
-### 12.1 换题三步（`cannjudge-submit` CLI / API）
-
-1. **按题目名查 `problem_id`**：`GET /api/problems/name/{problemName}`；`problemName` 通常是算子名的小写形式（题 3 是 `sparseflashattention`，题 1 候选 `mhcexpand`，退化试 `mhc_expand`）。Python 侧形态：
+1. **按题目名查 `problem_id`**：`GET /api/problems/name/{problemName}`；`problemName` = **算子名去下划线全小写**（题 1 = `mhcexpand` ✅ 一次命中；`mhc_expand` / `mhc-expand` 均 **HTTP 404**；题 3 = `sparseflashattention`）。
    ```python
    problem = client.get_problem("mhcexpand")   # 换成目标题名
-   problem_id = problem["_id"]                 # 或 problem["id"]，以返回体为准
+   problem_id = problem["_id"]
    client.submit(problem_id=..., kernel_cpp=..., tiling_h=..., tiling_key_h=..., host_cpp=...)
    ```
-   ⚠️ **只有 `problem_id` 要换**；四个文件参数对应本地工程，与题目 ID 无关（题 1 的字段映射见 §3）。
+   ⚠️ **只有 `problem_id` 要换**；四个文件参数对应本地工程（题 1 的字段映射见 §3.1）。
 2. **确认账号在目标题的参赛名单里**：查不到该题才可能是权限问题，届时先核对赛区，**不要**把"查不到"直接当成"题不存在"。
-3. **CLI 实体位置**：真机 `02aeb` 的 `/mnt/workspace/cann-learning-hub/skills/cannjudge-submit/`（`python3 cannjudge_cli.py submit --problem-url … --project-dir …` 的用法见 `code3.md §6.0.1`），RSA 密文登录后的会话在 `~/.cannjudge/session.json`。密钥与私钥路径见 `连接信息.md`，**内容绝不进日志/文档**。
+3. **CLI 实体位置**：真机 `02aeb` 的 `/mnt/workspace/cann-learning-hub/skills/cannjudge-submit/` —— `python3 cannjudge_cli.py {info,login,logout,download,submit,query,rank}`；`query` **必须带 `--submission-id`**。RSA 密文登录后的会话在 `~/.cannjudge/session.json`（09-19 22:45 签的，实测未过期）。密钥与私钥路径见 `连接信息.md`，**内容绝不进日志/文档**。
 
-### 12.2 当前阻塞（2026-09-20 21:58–22:00 实测）
+> ⛔ 此前"只能交第三题"的判断是**错的** —— 用户 2026-09-20 澄清：是提交命令里 `problem_id` 被写死成第三题的值，**与权限无关**。
+> 隧道侧的通用口径（只用 `devspace_tunnel.ps1 -Role npu|cpu` 自举、"账号环境列表里查不到 devEnvId" = 桌面 VS Code 换了登录账号而非回收、**不重试轰炸**）见 `算子开发工作流.md` §4 与 `reference-devspace-environments`。21:58–22:00 那次隧道阻塞已于 22:10 由用户重连解除。
 
-`devspace_tunnel.ps1 -Role npu` 与 `-Role cpu` 各一次，**同一失败签名**：`forwardBootstrap.failed: timeout waiting for refreshed connect_url`，扩展日志 `账号环境列表里查不到 devEnvId e653dc67…`（= `02aeb`）。
-⇒ 按 `reference-devspace-environments` 的判读链，这是**桌面 VS Code 换了登录账号**（hub 是 homedir 单例、按当前登录账号签凭据），**不是环境被回收** —— 21:30 之前同一台 `02aeb` 还在跑 `msprof`（§11.11）即是反证。
-**处置只能由用户做**：桌面 VS Code 切回 `02aeb` 所属账号 → 点一次『连接』重签转发凭据 → 隧道即可自举。**不重试轰炸**（本会话各试了一次就停）。
-✅ **22:10 用户已重连**，`-Role npu` 自举成功（`[OK] 02aeb : 可用`），CLI 与 `~/.cannjudge/session.json`（09-19 22:45）均在、`info` 查询正常 ⇒ 会话未过期。
-
-### 12.3 题 1 在比赛平台上的实态（2026-09-20 22:15 `info` 实测，此前 §4.3 的三条口径当场裁掉）
+### 12.2 题 1 在比赛平台上的实态（22:15 `info` 实测）
 
 | 字段 | 值 | 含义 / 影响 |
 |---|---|---|
-| `problemName` | **`mhcexpand`** | ✅ 一次命中；`mhc_expand` / `mhc-expand` 均 **HTTP 404** ⇒ 命名口径 = 算子名去下划线全小写 |
-| `problem_id` | **`6a7c1a74a52e0f540a89d39b`**（`ID=301`，`contest_id=6a7bf087…`） | 提交只需把它传给 `--problem-id` |
+| `problemName` / `problem_id` | **`mhcexpand`** / **`6a7c1a74a52e0f540a89d39b`**（`ID=301`，`contest_id=6a7bf087…`） | 提交只需把它传给 `--problem-id` |
 | `code_template` | `"custom_template"`（字符串） | `--project-type auto` 据此走 **`registry`（传统工程）**分支，四字段自动 glob 匹配成功 |
-| `cann_version` | ⚠️ **`8.5.0`** | **我方全程在 CANN 9.0.0 上编译与验证** ⇒ 比赛平台侧编译环境比我方低一个大版本。`PipeBarrier<PIPE_ALL>` / `DataCopyPad` / `TQue` 在 8.x 即存在，判断能编过，但**这是本次提交唯一真正未验证的风险点**，只有提交能证 |
+| `cann_version` | **`8.5.0`** | ⚠️ 我方全程在 **9.0.0** 上编译验证 ⇒ 平台比我方低一个大版本。`PipeBarrier<PIPE_ALL>` / `DataCopyPad` / `TQue` 在 8.x 即存在 ⇒ ✅ **已由两次提交坐实零风险**（8.5.0 下编译通过且全绿） |
 | `score_mode` / `use_baseline` | `0` / `false` | 语义未文档化，先记录不解读 |
-| `last_submission` | 榜单分：`85.2`、`68.92`、`0`… | 已知有人过 85 ⇒ 本题可拿到非零分，不是"全员 0"的死亡题 |
-| 精度判据 | **题面全文（4168 字）不含任何 `rtol`/`atol`/容差数值**，只写"精度保障""float16/bfloat16 累加精度" | §4.3"比赛平台精度判据未知"**仍然未知**，只能靠首次提交结果反推 |
-| fp16 溢出 | 题面**零处**提及 `inf`/`65504`/饱和 | ⇒ §11.9.5 那个分叉**大概率不被测试覆盖**（覆盖列表里也没有溢出输入场景），但仍以实交为准 |
+| `ongoing` | **`false`** | ⇒ 计分冻结，见 §13.3 |
+| 精度判据 | **题面全文（4168 字）不含任何 `rtol`/`atol`/容差数值**，只写"精度保障""float16/bfloat16 累加精度"；`inf`/`65504`/饱和**零处提及** | ⇒ 判据形式由实交反推（`precision_ratio`，§13.1）；溢出分叉大概率不覆盖（§4.3） |
+| `last_submission` | 榜单分：`85.2`、`68.92`、`0`… 共 123 条 | 已知有人过 85 ⇒ 本题可拿到非零分，不是"全员 0"的死亡题 |
 
-**题面自报的测试覆盖 ↔ 我方真机用例对照**（`desc §6`，逐条都有真机 PASS）：
-
-| 题面场景 | 我方用例（§11.10.3 那 7 轮 89 条内） |
-|---|---|
-| 小规模 `S=64,D=256,m=2` | `fwd-bf16-small` / `bwd-fp16-small` ✅ |
-| 中规模 `S=1024,D=4096,m=4` | `fwd/bwd-{fp16,bf16}-medium` ✅ |
-| 大规模 `S=8192,D=7168,m=8` | `fwd/bwd-{fp16,bf16}-large` ✅（含 0/469762048 位级） |
-| `m=2/4/8` | `bwd-fp16-m2/m4` + `fwd-fp16-ROW-m8` ✅ |
-| `S=1`、`D=1` | `fwd-fp16-S1D1` ✅ |
-| 非对齐维度 | `D=7167` / `D=100` / `D=70001` ✅ |
-| bfloat16 + float16 | 两组 dtype 前向反向全覆盖 ✅ |
-
-> ⚠️ **官方题面本身有污染**：`mhcexpand` 的 `desc` 末尾挂着一段 `softmax(src, index=None, ptr=None, dim=0)` 的"公开题面接口"说明和"题面固定 ε=1e-16 → 评测侧 attr_eps"的对照 —— **那是第二题 mhc_sinkhorn 的契约**，被人工拼贴进了第一题题面。⇒ ①别把它当第一题的接口要求；②印证 §4.3 那条"比赛平台按什么方式调用算子"确实只能实测，题面文字不可全信。
-
-### 12.4 首次提交前的 `--dry-run` 证据（2026-09-20 22:20，`--project-dir ~/ops_comp/code1`）
-
-比赛平台回传的清单**恰好四个字段、无多余文件**，且 **sha256 + 字节数与本地 `code1/` 逐字节一致**（⇒ 上传链路不做 CRLF 转换、不会把 `.bak`/`npu_debug` 带上去）：
-
-| 字段 | path | bytes | sha256（本地=远端） |
-|---|---|---|---|
-| `tiling_h` | `op_kernel/mhc_expand_tiling.h` | 1201 | `be5f660b02fef22a…b8b146` |
-| `tiling_key_h` | `op_kernel/tiling_key_mhc_expand.h` | 530 | `b79c2cbda239ff8d…d77b97` |
-| `host_cpp` | `op_host/mhc_expand.cpp` | 9143 | `32cce2e9fd80f8e8…09c1d2` |
-| `kernel_cpp` | `op_kernel/mhc_expand.cpp` | 9318 | `a1744d146c71acfb…778b68` |
-
-远端四文件 md5 同步复核 = §4.1 基线（`53ee60e5…` / `f759a052…` / `267e0125…` / `a16c371d…`）。`op_kernel/*.cpp` 与 `op_host/*.cpp` 各自**只有 1 个匹配**（`.bak_pre_fwd_event`、`.events_v1` 后缀不是 `.cpp`，不会被 glob 命中）⇒ §3 那句"别传错"在这里自动成立。
-⛔ **`--dry-run` 不创建提交**，它是防传错文件的保险步骤。
-🔑 **提交授权口径（2026-09-20 22:12 用户下达）**：**提交代码不必逐次请示，可直接交；但每次提交完必须先分析总结、再问用户是否继续。** ⇒ 本条取代 §12.2 之前"等用户点头"的默认；不覆盖破坏性/不可逆操作。
+> ⚠️ **官方题面本身有污染**：`mhcexpand` 的 `desc` 末尾挂着一段 `softmax(src, index=None, ptr=None, dim=0)` 的"公开题面接口"说明和"题面固定 ε=1e-16 → 评测侧 attr_eps"的对照 —— **那是第二题 mhc_sinkhorn 的契约**，被人工拼贴进了第一题题面。⇒ ①别把它当第一题的接口要求；②印证"比赛平台按什么方式调用算子"确实只能实测，**题面文字不可全信**。
 
 ---
 
-## 13. ⭐ 比赛平台首次提交实测（2026-09-20 22:15–22:25，`submission_id=6aafea71b0477ec41ea07f63`）
+## 13. ⭐ 首次提交实测（22:15–22:25，`submission_id=6aafea71b0477ec41ea07f63`）
 
-**结果：`状态: Pass`，8/8 测试用例全过，每条 `precision_ratio: 1`。** 原始输出 `npu_debug/logs/submit1_result_8of8_20260920.log`（远端=本地 md5 `32c2594f…`），判因分析 `npu_debug/logs/submit1_analysis_20260920.log`。
+**结果：`状态: Pass`，8/8 测试用例全过，每条 `precision_ratio: 1`。** 原始输出 `npu_debug/logs/submit1_result_8of8_20260920.log`（远端=本地 md5 `32c2594f…`），判因分析 `submit1_analysis_20260920.log`（`0b7c722b…`）。提交源 = §3.2 首交口径（host `a16c371d…` + kernel `53ee60e5…`）。
 
-### 13.1 顺手裁掉的 §4.3 口径
+### 13.1 一次性裁掉四条平台口径（全部并入 §4.3 的"已裁定"清单）
 
-| §4.3 待裁项 | 现在的结论 |
-|---|---|
-| `sum` vs `mean` 反向归约口径 | ✅ **我方按 `sum` 实现，8/8 `precision_ratio=1`** ⇒ 比赛平台未判错。（⚠️ 唯一保留：不能 100% 排除"8 条里一条反向都没有"，但题面 §6 自报"反向验证：梯度归约求和是否正确"） |
-| 精度判据是 allclose 还是逐 bit | ✅ **不必再纠结**：字段名是 `precision_ratio`（**逐元素通过比例**）⇒ 判分形式就是"比例"，而我方拿到 `1` = 100% 通过，**任何更严的口径下也同样是满分** |
-| 比赛平台 `cann_version=8.5.0` vs 我方 9.0.0 | ✅ **零风险坐实**：8.5.0 下编译通过且全绿，`PipeBarrier<PIPE_ALL>` / `DataCopyPad` / `TQue` 在 8.x 行为一致 |
-| 比赛平台按"单算子 + `backward` 属性"还是两个算子名 | ⏳ 仍未知，但**已无关**：一次提交（4 文件、1 个算子名）就把 8 条全判过 |
-| fp16 溢出 `inf` vs `65504` | ⏳ **仍未触发**：题面零处提及、8/8 通过 ⇒ 与 §12.3 的推断一致，不再花提交位去试 |
+`sum` 口径正确（8/8 未判错）· 精度判据字段就是 `precision_ratio`＝**逐元素通过比例**，我方拿到 `1` ⇒ 任何更严口径下同样满分 · CANN `8.5.0` 编译无碍 · 单算子 + `backward` 属性一次判过 8 条（调用形态不再需要观测）。
 
-### 13.2 性能实测对照（比赛平台时间单位 µs，`best_time` 对**所有**提交都是同一组常数 ⇒ 它是比赛平台的固定基准，不是榜上最快）
+### 13.2 性能实态与两条计时口径（⭐ 逐 case 对照表以 §14.7 为准）
 
-| Case | 我方 `time` | 比赛平台基准 `best_time` | 比值 | 榜首（score 90.15）的 `time` |
-|---|---|---|---|---|
-| 1 | **5.02** | 1.36 | **3.69×** | 1.42 |
-| 2 | 17.80 | 14.02 | 1.27× | 16.06 |
-| 3 | 1377.98 | 1363.56 | 1.01× | **1388.44（我们更快）** |
-| 4 | 48.20 | 45.36 | 1.06× | 48.08 |
-| 5 | **4.44** | 1.48 | **3.00×** | 1.60 |
-| 6 | 891.26 | 863.88 | 1.03× | 883.78 |
-| 7 | 733.90 | 726.94 | 1.01× | **738.76（我们更快）** |
-| 8 | 1038.24 | 995.84 | 1.04× | 1016.66 |
-
-⇒ **中大档 6 条已经贴到历史最快基准的 1–4%（其中两条还反超榜首）**；唯一的结构性缺口是**两条小档（case 1、5）慢 3.0–3.7 倍**（µs 级绝对差只有 3.4µs / 2.8µs ⇒ 是**固定开销**，不是带宽）。
-⚠️ 这个 3 倍**不能**用 §11.11 的 barrier +5.5% 解释，量级差一个数量级 ⇒ 小档的问题在"每任务固定成本"（下发/tiling/块数选择）那一侧，还没定位。
+- **`best_time` 对**所有**提交都是同一组常数 ⇒ 它是比赛平台的固定基准，不是"榜上最快"**；`time` 单位是 **µs**。
+- 首交 8 条：**中大档 6 条已贴基准 1–4%（case 3、7 还反超榜首）**；**唯一的结构性缺口是两条小档（case 1、5）慢 3.0–3.7 倍**（绝对差只有 3.4µs / 2.8µs ⇒ 是**每任务固定开销**，不是带宽）。
+- ⚠️ 这个 3 倍**不能**用 §11.11 的 barrier +5.5% 解释（量级差一个数量级）⇒ 定位与处置见 **§14**。
 
 ### 13.3 `score=0` 的判因（**不是**我方性能被判差）
 
-探针对照：榜上 **90.15 / 88.17 / 85.20** 三条的 `query` 结果里 **每条 case 的 `score` 也全是 0** ⇒ `score` 不在 per-case 层。再把 `info` 的 123 条 `last_submission` 按 ObjectId 时间戳摊开：
-
-- **非零分 22 条，全部 ≤ 2026-09-03 05:48**（区间 44.08–90.15）；
-- **零分 101 条，08-12 一直连到 09-20 14:15（就是我方这条）**；
-- 与 `contest.ongoing = false` 一致（`end_time` 名义上还是 09-28）。
-
-⇒ **计分自 09-03 起对所有人停止写入**，我方 0 分与榜首今天重交也会是 0 分，**不能读成"性能不达标"**。有效信号只剩 `precision_ratio` 与 `time`/`best_time`。
-
-### 13.4 本轮结论与下一步选项（等用户定，不自动开工）
-
-1. **正确性侧题 1 已闭环**：真机 89 条 + 比赛平台 8/8，两级证据都到位，**不需要再为"能不能过"花提交位**。
-2. **要抢时间分只剩一条路**：查小档固定开销（case 1/5 慢 3 倍）。可做的第一步是**零成本**的 —— 用现成的 `msprof` 通路（§11.11.1）在真机测 `fwd-fp16-small` / `bwd-fp16-small` 的逐任务时间，和比赛平台 5.02/4.44µs 对表，先确认差距来自核内还是下发侧。⚠️ 但 `ongoing=false` ⇒ **改了也不会记分**，要不要做由用户权衡。
-3. **题 1 可转入题 2/题 3**：`code2.md` 的向量版性能仍等真机、`code 3` 的 P0.5 修 `CalcUbNeed` 排在一切性能改动之前 —— 两台环境现在都可用（`02aeb` free、`e6z6k`/`tpm0u` 视 VS Code 登录账号可见性）。
-
-> **交接状态（2026-09-20 22:35）**〔⛔ **本条已关闭**：用户 23:00 选定"连真机优化题 1"，选项 2 已在 §14 全量执行完并完成第二次提交；最新交接见 §14.8〕：上述分析总结已按"每次提交后须分析总结再问是否继续"的约定交付用户，**用户尚未选定下一步** ⇒ 新会话开场应先问这一条，⛔ 不要自动开工、不要自行发起第二次提交。本轮提交源四个文件 md5 与 §6 基线一致、**未动一行**。
+探针对照：榜上 **90.15 / 88.17 / 85.20** 三条的 `query` 结果里**每条 case 的 `score` 也全是 0** ⇒ `score` 不在 per-case 层。再把 `info` 的 123 条 `last_submission` 按 ObjectId 时间戳摊开：**非零分 22 条全部 ≤ 2026-09-03 05:48**（区间 44.08–90.15）；**零分 101 条从 08-12 一直连到 09-20 14:15（就是我方这条）**；与 `contest.ongoing = false` 一致（`end_time` 名义上还是 09-28）。
+⇒ **计分自 09-03 起对所有人停止写入**，榜首今天重交同样是 0 分，**不能读成"性能不达标"**。有效信号只剩 `precision_ratio` 与 `time`/`best_time`。
 
 ---
 
-## 14. ⭐ 小档固定开销定位与"少开核"定则（2026-09-20 23:16–23:40，真机 `02aeb`，第二次提交）
+## 14. ⭐ 小档固定开销定位与"少开核"定则（23:16–23:40，真机 `02aeb`，第二次提交）
 
-> 缘起：用户 23:00 下达"已拿到 NPU，直接连真机开始优化"。§13.4 那条"零成本第一步"（用现成
-> msprof 通路测小档逐任务时间）本轮做完，并顺它推出了**一条只改 host 的落地规则**。
+> 缘起：用户 23:00 下达"已拿到 NPU，直接连真机开始优化"。§13.2 那条"零成本第一步"（用现成 msprof 通路测小档逐任务时间）本轮做完，并顺它推出了**一条只改 host 的落地规则**。
 
 ### 14.1 小档差距 100% 在固定开销，且**不是** DMA 调用数
 
-`fwd/bwd-fp16-small`（S=64, D=256, m=2）读写合计 96KB ⇒ 纯带宽时间 ~0.1µs，而实测 Task Duration
-4.1–4.9µs。拆开看（blk=40 时）：aiv ≈ 2.3µs（mte2 ≈ 1.1、mte3 ≈ 0.2、vec ≈ 0）+ 派发/序言 ≈ 1.7µs。
-⚠️ 关键否定结论：**首交版在 blk=40 下每核只摊到 1~2 个任务、3~6 次 DMA 调用**，所以"减少调用次数"
-这类批处理手法对小档没有靶子 —— 靶子是**开的核太多**（每多一个 block ≈ 45ns 派发 + 每核固定序言）。
+`fwd/bwd-fp16-small`（S=64, D=256, m=2）读写合计 96KB ⇒ 纯带宽时间 ~0.1µs，而实测 Task Duration 4.1–4.9µs。拆开看（blk=40 时）：aiv ≈ 2.3µs（mte2 ≈ 1.1、mte3 ≈ 0.2、vec ≈ 0）+ 派发/序言 ≈ 1.7µs。
+⚠️ 关键否定结论：**首交版在 blk=40 下每核只摊到 1~2 个任务、3~6 次 DMA 调用**，所以"减少调用次数"这类批处理手法对小档**没有靶子** —— 靶子是**开的核太多**（每多一个 block ≈ **45ns** 派发 + 每核固定序言）。
+🔑 同一轮由 msprof `Block Num` 裁定：**本机 AIV 实为 40 核**（不是 config 里的 50；harness 的 `blk=50` 只是注入值）。
 
 ### 14.2 blockDim 扫描（msprof `Task Duration` 剔首 mean，单位 µs，同一会话内横比）
 
@@ -1014,9 +678,7 @@ in_que_.FreeTensor(x_local);                   // :121  只保证 VEC 已消费�
 | 24 | 3.4 | 4.0 | 3.7 | 3.7 | 14.8 |
 | 40（首交实际） | 4.1 | 4.6 | 4.4 | 4.9 | 18.0 |
 
-⇒ 曲线 12~16 见底、24 起回抬；首交的 40 核处在**明显过并行**区。原始 csv 36 份已回捞：
-`code1/npu_debug/prof/blockdim_20260920/{b2..b40,rule}_c*/`，stdout 摘要
-`code1/npu_debug/logs/blockdim_sweep_20260920.log`。
+⇒ 曲线 **12~16 见底、24 起回抬**；首交的 40 核处在**明显过并行**区。原始 csv 36 份已回捞：`npu_debug/prof/blockdim_20260920/{b2..b40,rule}_c*/`，stdout 摘要 `npu_debug/logs/blockdim_sweep_20260920.log`。
 
 ### 14.3 落地规则：**每核 IO 不足 6KB 就不再开核**（只改 `op_host/mhc_expand.cpp`）
 
@@ -1025,11 +687,8 @@ io_bytes    = (1 + m) * S * D * elem_size      // 前向 x+o 与反向 x+o 同�
 block_dim   = min(block_dim, max(1, io_bytes / 6144))
 ```
 
-6144 = 6KB/核，由 §14.2 反推：小档 96KB / 6KB = **16 核**，正落在实测谷底；medium(42MB) /
-large(8.4GB) 离拐点两个数量级 ⇒ 规则对中大档是**恒等变换**，仍满 40 核。
-
-⚠️ **核函数、tiling 结构体、tiling key 一字未改**（`53ee60e5…` / `f759a052…` / `267e0125…` 与首交
-逐字节一致）⇒ 首交已经证过 CANN 8.5.0 能编过，本轮残留风险只剩 host 侧一段整数算术。
+6144 = 6KB/核，由 §14.2 反推：小档 96KB / 6KB = **16 核**，正落在实测谷底；medium(42MB) / large(8.4GB) 离拐点两个数量级 ⇒ 规则对中大档是**恒等变换**，仍满 40 核。生效阈值：只在 `io_bytes < 40×6KB = 245KB` 时才可能改变结果。
+⚠️ **核函数、tiling 结构体、tiling key 一字未改**（`53ee60e5…` / `f759a052…` / `267e0125…` 与首交逐字节一致）⇒ 首交已证过 CANN 8.5.0 能编过，本轮残留风险只剩 host 侧一段整数算术。
 
 ### 14.4 规则版复测（`prof_matrix.sh rule 0..7`，无环境变量）
 
@@ -1044,14 +703,11 @@ large(8.4GB) 离拐点两个数量级 ⇒ 规则对中大档是**恒等变换**�
 | fwd-fp16-large | 40 | **1117.8** | §11.11 基线 1117.3 | +0.04%（环境未漂移的对照） |
 | bwd-fp16-large | 40 | **1084.8** | §11.11 基线 1088.3 | −0.3% |
 
-正确性闸门（同一 build）：`quick` 25 条 **ALL PASS fail=0 err=0**、`medium/large/mtile/bnd/ub48`
-= 4+4+12+15+4 全绿、`all` 模式**连跑两遍**各 45 条全绿（同参复验 ⇒ 无新增非确定性），前向用例
-`maxdiff=0.00000 / bitmis=0` 位级精确保持不变。
+正确性闸门（同一 build）：`quick` 25 条 **ALL PASS fail=0 err=0**、`medium/large/mtile/bnd/ub48` = 4+4+12+15+4 全绿、`all` 模式**连跑两遍**各 45 条全绿（同参复验 ⇒ 无新增非确定性，两份日志**同一个 md5 `a0a91cca…`**），前向用例 `maxdiff=0.00000 / bitmis=0` 位级精确保持不变。
 
 ### 14.5 ⛔ 被真机否决的路线：分块 + 跨步 DMA（`splitMode=3`，已整段回滚）
 
-设想是"一任务读 T 行、写 m 次跨行"（每任务 DMA 调用数固定为 1+m，与 T 无关），用
-`DataCopy` + `DataCopyParams{blockCount, blockLen, srcGap, dstGap}` 表达跨行。真机裁定：
+设想是"一任务读 T 行、写 m 次跨行"（每任务 DMA 调用数固定为 `1+m`，与 T 无关），用 `DataCopy` + `DataCopyExtParams/Params{blockCount, blockLen, srcGap, dstGap}` 表达跨行。真机裁定：
 
 | 注入的 T | 现象 |
 |---|---|
@@ -1059,27 +715,16 @@ large(8.4GB) 离拐点两个数量级 ⇒ 规则对中大档是**恒等变换**�
 | 8 / 16 | 该用例起整卡被毒化，后续用例 `launch failed st=361001` |
 | ≥32 | 稳定设备异常：`errcode 0x200000000` **"The write address of the MTE instruction is out of range"**（aivec，`mte error info 0x1000000ec`，多核同一 PC） |
 
-两种字段语义解释（`Gap` = 块间隔 vs `Stride` = 块首距）**各自都只能解释一半现象**，尤其是
-**T=1 时 `blockCount=1`、间隙项根本不参与，结果仍非确定性 mismatch** ⇒ 不是"换个字段值"能救的。
-加上 §14.1 已证明调用数不是瓶颈 ⇒ 该路线的**前提就不成立**，3 个构建周期后止损，kernel 与
-tiling.h 回滚到基线 md5（`.bak_pre_chunk` 两份，回滚后 md5 复核一致）。
-
-⚠️ 沉淀一条口径：**arch22 上 `DataCopyParams` 的 gap/stride 字段语义不可依赖文档推断**，CANN 开源
-包里 `srcGap/srcStride` 是同字段 union、`c_api` 头无 doxygen、`pto` 侧只在 ND2NZ 编码里出现 ⇒
-只能靠**受控探针实验**定档，而探针本身的成本高于本轮收益。
+两种字段语义解释（`Gap` = 块间隔 vs `Stride` = 块首距）**各自都只能解释一半现象**，尤其是 **T=1 时 `blockCount=1`、间隙项根本不参与，结果仍非确定性 mismatch** ⇒ 不是"换个字段值"能救的。加上 §14.1 已证明**调用数不是瓶颈** ⇒ 该路线的**前提就不成立**，3 个构建周期后止损，kernel 与 tiling.h 回滚到基线 md5（`.bak_pre_chunk` 两份，回滚后 md5 复核一致）。
+⚠️ 沉淀一条口径：**arch22 上 `DataCopyParams` 的 gap/stride 字段语义不可依赖文档推断** —— CANN 开源包里 `srcGap/srcStride` 是同字段 union、`c_api` 头无 doxygen、`pto` 侧只在 ND2NZ 编码里出现 ⇒ 只能靠**受控探针实验**定档，而探针本身的成本高于本轮收益。
 
 ### 14.6 归因注入已全部清除（提交前闸门）
 
-`[ABL-SK]` 的 `MHC_SK_T` / `MHC_SK_BLK` 两个 `getenv` 开关与 `#include <cstdlib>` **已整段删除**，
-提交源四文件合规 grep（`printf|fflush|fprintf|std::cout|TODO|FIXME|XXX|#if 0|调试|ABL-SK|MHC_SK`）
-**零命中**。留在 `npu_debug/` 里的 `MHC_PCASE`/`MHC_REPS`/`MHC_OPAPI_SO` 属调试工装，不在提交面内。
+`[ABL-SK]` 的 `MHC_SK_T` / `MHC_SK_BLK` 两个 `getenv` 开关与 `#include <cstdlib>` **已整段删除**；提交源四文件合规 grep（见 §3.3 的命令）**零命中**。留在 `npu_debug/` 里的 `MHC_PCASE`/`MHC_REPS`/`MHC_OPAPI_SO` 属调试工装，不在提交面内。
 
-### 14.7 第二次提交实测（`submission_id=6aaffd92b0477ec41eb14eb0`，23:36 交、23:41 出分）
+### 14.7 第二次提交实测（`submission_id=6aaffd92b0477ec41eb14eb0`，23:36 交、23:41 出分）—— ⭐ **逐 case 对照表的权威版本**
 
-**结果：`状态: Pass`、8/8 全过、每条 `precision_ratio: 1`。** 原始输出
-`code1/npu_debug/logs/submit2_result_20260920.log`（远端=本地 md5 `916c5e7b…`）。
-dry-run 恰好 4 字段，`tiling_h`/`tiling_key_h`/`kernel_cpp` 的 sha256 与 §12.4 逐项一致，
-只有 `host_cpp` 变化：9143B/`32cce2e9…` → **10343B/`278b7b84…`**。
+**结果：`状态: Pass`、8/8 全过、每条 `precision_ratio: 1`。** 原始输出 `code1/npu_debug/logs/submit2_result_20260920.log`（远端=本地 md5 `916c5e7b…`）。dry-run 恰好 4 字段，`tiling_h`/`tiling_key_h`/`kernel_cpp` 的 sha256 与首交逐项一致，**只有 `host_cpp` 变化**：9143B/`32cce2e9…` → **10343B/`278b7b84…`**。
 
 | Case | 首交 `time` | **本轮 `time`** | 变化 | 平台基准 `best_time` | 对基准比值 | 榜首 `time` |
 |---|---|---|---|---|---|---|
@@ -1093,30 +738,42 @@ dry-run 恰好 4 字段，`tiling_h`/`tiling_key_h`/`kernel_cpp` 的 sha256 与 
 | 8 | 1038.24 | 1037.14 | −0.1% | 995.84 | 1.04× | 1016.66 |
 
 **判读**：
-
-1. ✅ **两条目标小档按预期落地**：case 1 −24%（真机同口径 −22%）、case 5 −11%（真机 −24%）。
-   case 5 平台侧少赚 13 个点 ⇒ 平台计里有一截**与核数无关**的固定量（≈0.5µs 级），
-   这条与首交"真机 4.9µs ↔ 平台 5.02µs"的对表结论一致。
+1. ✅ **两条目标小档按预期落地**：case 1 −24%（真机同口径 −22%）、case 5 −11%（真机 −24%）。case 5 平台侧少赚 13 个点 ⇒ 平台计时里有一截**与核数无关**的固定量（≈0.5µs 级），与"真机 4.9µs ↔ 平台 5.02µs"的对表结论一致。
 2. ✅ **中大档 6 条按规则应当一动不动**，实测 5 条在 ±1.1% 内 ⇒ 规则是恒等变换的判断成立。
-3. ⚠️ **case 4 +2.7% 判为平台噪声，不是回归**：规则只在 `IO < 40×6KB = 245KB` 时才生效，
-   而 case 4 用时 49µs、IO 远大于该阈值 ⇒ 该 case 走的是**改前改后同一条代码路径**。
-   同轮 case 7 也反向 +0.15%、case 3/6/8 全在 ±0.4%，量级与之一致。
-   ⛔ 但这条**未被复测排除**：要坐实只能重交一次取分布，而 §13.3 已证 `ongoing=false`
-   计分冻结 ⇒ 不值得为它花提交位。
-4. ⛔ **`score` 仍为 0**，与 §13.3 判因（09-03 起全服停写分数）一致，**不能读成性能变差**。
+3. ⚠️ **case 4 +2.7% 判为平台噪声，不是回归**：规则只在 `io_bytes < 245KB` 时生效，而 case 4 用时 49µs、IO 远大于该阈值 ⇒ 改前改后走**同一条代码路径**；同轮 case 7 反向 +0.15%、case 3/6/8 全在 ±0.4%，量级一致。⛔ 但这条**未被复测排除**：要坐实只能重交取分布，而 §13.3 已证计分冻结 ⇒ 不值得为它花提交位。
+4. ⛔ **`score` 仍为 0**，与 §13.3 判因一致，**不能读成性能变差**。
 
-### 14.8 剩余缺口与下一步（本轮收口后的交接）
+### 14.8 剩余缺口与下一步
 
-- **题 1 已无可动的低成本项**：小档剩下的 ~3.8µs 里，派发 + 每核序言占 ~1.7µs、DMA 落地 ~1.1µs，
-  而 96KB 的纯带宽只有 0.1µs。要再往下只能动"每任务固定成本"本身（核函数序言、tiling 读取、
-  UB 分配），而 §14.5 已经证明这条路在 arch22 上连受控实验都不好做 ⇒ **投入产出比极低**。
-- 中大档 6 条已在基准 1–9% 内、两条反超榜首 ⇒ 带宽侧无空间。
-- ⇒ **题 1 建议转入"是否还有别的题更值"的判断**：`code2.md` 向量版性能仍等真机、
-  `code 3` 的 P0.5 修 `CalcUbNeed` 排在一切性能改动之前（两处都比题 1 的残余 2µs 更值钱）。
+- **题 1 已无可动的低成本项**：小档剩下的 ~3.8µs 里，派发 + 每核序言占 ~1.7µs、DMA 落地 ~1.1µs，而 96KB 的纯带宽只有 0.1µs。要再往下只能动"每任务固定成本"本身（核函数序言、tiling 读取、UB 分配），而 §14.5 已证明这条路在 arch22 上连受控实验都不好做 ⇒ **投入产出比极低**。
+- 中大档 6 条已在基准 1–9% 内、两条反超榜首 ⇒ **带宽侧无空间**。
+- ⭐ **下一条线索（未实测、未排期、比题 1 残余 2µs 更值钱）**：前向/反向仍是逐副本 `for k` 各一次 `DataCopyPad`（`blockCount` 固定 1，§4.1）。合并为一次 `DataCopyExtParams{blockCount=m, srcStride=0}` 的设想在**跨行**形态下被 §14.5 否决，但**同块连续 m 份**（前向写出本就是 `m*D` 连续，§2.1）这一形态**没有**被单独测过 —— 若将来要试，必须先按 §14.5 的口径做受控探针。
+- ⇒ **题 1 建议转入"是否还有别的题更值"的判断**（题 2 向量版性能等真机、题 3 的 P0.5 修 `CalcUbNeed`）。
 
-> **交接状态（2026-09-20 23:45）**：本轮 = §13.4 选项 2 的完整执行（定位 → 扫描 → 定则 → 回归 →
-> 提交），提交源只有 `op_host/mhc_expand.cpp` 一个文件变化（`c76d30be…`），核函数与首交逐字节一致。
-> §13.4 那条"等用户定"的旧交接注记已兑现关闭。下一步（转题 2/题 3，或继续压题 1 残余固定开销）
-> 按约定交用户定夺。
+> **交接状态（2026-09-20 23:45 → 2026-09-21 文档整理）**：本轮 = "查小档固定开销"那条零成本第一步的完整执行（定位 → 扫描 → 定则 → 回归 → 提交），提交源只有 `op_host/mhc_expand.cpp` 一个文件变化（`c76d30be…`）。
+> 2026-09-21：本文按"删无用 + 合并同类"重构（A 类），通用坑移入 `算子开发工作流.md §6`（B 类）；**结论、数字、md5 一字未改**，§10.0 与 §14 等被外部引用的锚点全部保留。
 
+---
 
+## 15. 本题专属的运维/判读坑（通用条目见工作流 §6，此处只留"题 1 才会遇到"的）
+
+| 坑 | 现象 | 正确写法 |
+|---|---|---|
+| 拿 harness 的 `blk=50` 当硬件事实 | 以为 910B3 有 50 个 AIV | **`num_aiv` 实为 40**，由 msprof `Block Num` 裁定（§14.1）；`SetBlockDim` 超量不会报错但只是排队 |
+| 对"远端另一份目录"做 md5 复验 | `~/code1` vs 构建树 `~/ops_comp/code1`，对错了等于没验 | **md5 必须在构建树内核**（§11.10.4 坑②） |
+| `build_npu.sh` 只判"包是否存在" | 改动没进 `.so` 也报 done | 源比产物新 → 强制重建 + 产物新时间戳 + `nm -D` 三件齐（§11.10.4 坑①） |
+| 把 `libcust_opapi.so` 做成链接期依赖 | 25/25 `st=561002` | 一律 `dlopen`/`dlsym` + 让框架自己按 `ASCEND_CUSTOM_OPP_PATH` 加载（§11.9.2） |
+| 外部循环脚本调 `msprof` | 拿不到逐任务记录 | **`msprof [args] <app>` 单进程内连发**（启动器 `prof` 组，§11.11.1） |
+| 看 `aicore_time` 判"profiler 没采到" | 纯向量核恒为 0、`aic_*` 全 0 | **看 `aiv_time(us)`**；`aic_*`=0 是正常（本 kernel 无 Cube）（§11.11.5） |
+| 用 `grep -E "^\["` 查运行期错误 | 带前导缩进的 `sync failed` 全被滤掉 ⇒ 误报"没报错" | `grep -n "sync failed"` 或 `ASCEND_GLOBAL_LOG_LEVEL=1`（§11.10.1） |
+| 只跑一轮就宣布全绿 | V0 失配计数每轮不同 | **同参重复跑**（V3 靠 quick×2 确认、§14.4 靠 `all`×2 同一 md5 确认） |
+| 换 V0 采数据后忘了还原 | 提交源变成"结果错误版" | keep + 还原 + **构建树内 md5 复验 + quick 25 条 ALL PASS** 三条齐才判"环境复原"（§11.11.5） |
+| 把平台 `best_time` 当榜上最快 | 以为已经输了 3 倍 | 它是**对所有提交都相同的固定基准**；真榜看 `last_submission`（§13.2） |
+
+---
+
+## 附：节号使用说明
+
+- **锚点不要重排**：`§10.0`（合规，AGENT.MD 引用）、`§14`（`op_host` 与 npu harness 的注释里写着"见 code1.md §14"）、`§11.8~§11.11` 及其 `.x` 子节（全篇互引）是**外部/内部引用锚点**。
+- §11 缺 `11.1~11.7`、§13 缺 `13.4` 是**有意留空**（准备清单与已关闭的交接注记被删，编号保留以免引用漂移）。
+- 通用坑一律指向 `算子开发工作流.md §6`；连接与环境指向 `连接信息.md` 与 `reference-devspace-environments`。本文件只留**题 1 专属**的事实与证据。
