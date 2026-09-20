@@ -1,0 +1,64 @@
+### built+cached base kernel=daf2b8ed3995
+### ready base kernel_src=daf2b8ed3995 kernel_o=306619d0a29b
+@@@@ round=1 mode=base 04:24:33
+### kernel md5: daf2b8ed3995d4698c435c2d42d67b23  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 306619d0a29b
+### so ts: 04:24:31  bin ts: 04:24:33  tag=r10baseR1 cases=4 6
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd 流水线均值(us) aiv=11.1 mte2=4.7 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd 流水线均值(us) aiv=1094.1 mte2=212.0 mte3=1087.3 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### built+cached b1 kernel=bc17d36241cc
+### ready b1 kernel_src=bc17d36241cc kernel_o=3cff1c06fdda
+@@@@ round=1 mode=b1 04:25:20
+### kernel md5: bc17d36241cc5f48e3bc30aa3809dcd9  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 3cff1c06fdda
+### so ts: 04:25:19  bin ts: 04:25:20  tag=r10b1R1 cases=4 6
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd 流水线均值(us) aiv=10.9 mte2=4.6 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd 流水线均值(us) aiv=1094.4 mte2=212.6 mte3=1088.0 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### built+cached b2 kernel=2373852b2f2d
+### ready b2 kernel_src=2373852b2f2d kernel_o=0d334ca34ee8
+@@@@ round=1 mode=b2 04:26:07
+### kernel md5: 2373852b2f2ddbdafd6236cc43bd4803  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 0d334ca34ee8
+### so ts: 04:26:05  bin ts: 04:26:07  tag=r10b2R1 cases=4 6
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd 流水线均值(us) aiv=11.3 mte2=3.4 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd 流水线均值(us) aiv=1070.4 mte2=174.9 mte3=1063.1 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### ready base kernel_src=2373852b2f2d kernel_o=306619d0a29b
+@@@@ round=2 mode=base 04:26:30
+### kernel md5: 2373852b2f2ddbdafd6236cc43bd4803  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 306619d0a29b
+### so ts: 04:26:30  bin ts: 04:26:07  tag=r10baseR2 cases=4 6
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd 流水线均值(us) aiv=11.1 mte2=4.7 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd 流水线均值(us) aiv=1093.8 mte2=212.4 mte3=1087.2 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### ready b1 kernel_src=2373852b2f2d kernel_o=3cff1c06fdda
+@@@@ round=2 mode=b1 04:26:53
+### kernel md5: 2373852b2f2ddbdafd6236cc43bd4803  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 3cff1c06fdda
+### so ts: 04:26:53  bin ts: 04:26:07  tag=r10b1R2 cases=4 6
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd 流水线均值(us) aiv=10.9 mte2=4.6 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd 流水线均值(us) aiv=1094.0 mte2=212.3 mte3=1087.5 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### ready b2 kernel_src=2373852b2f2d kernel_o=0d334ca34ee8
+@@@@ round=2 mode=b2 04:27:18
+### kernel md5: 2373852b2f2ddbdafd6236cc43bd4803  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 0d334ca34ee8
+### so ts: 04:27:18  bin ts: 04:26:07  tag=r10b2R2 cases=4 6
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd 流水线均值(us) aiv=11.2 mte2=3.4 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd 流水线均值(us) aiv=1068.8 mte2=174.8 mte3=1061.5 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### done 04:27:41  log=npu_debug/logs/r10_042410.log  (树已还原 base)

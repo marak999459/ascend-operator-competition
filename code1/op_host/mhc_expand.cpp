@@ -79,8 +79,8 @@ namespace optiling {
         tiling->backward = backward ? 1u : 0u;
 
         // D 方向大 tile：32B 对齐（fp16/bf16 = 16 元素），典型 512~2048；
-        // 核内同时只持有 1 份 D（前向读 1 次写 m 次、反向逐副本读），
-        // 故只需 D*elem_size 放得进 UB 的 1/4 即可整行一次 DMA。
+        // 前向攒批路径在 UB 里同时握 2*FWD_BATCH=4 份 tile 做环（见 op_kernel 的 fwd_b0_~b3_），
+        // 所以这个 /4 是环深的上限：放宽预算等于放弃前向 barrier 批处理，两者必须一起改。
         const uint64_t elem_size = static_cast<uint64_t>(dtype_size_x);
         const uint64_t ub_budget = ub_size / 4;
         uint32_t d_tile_len = 0;

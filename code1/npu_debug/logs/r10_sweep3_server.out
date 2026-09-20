@@ -1,0 +1,146 @@
+### injector=c9652eb1 modes='base b2 ad fin' rounds=2 cache=/tmp/r10cache/c9652eb1
+### gate base c0: [fwd-fp16-small] S=64 D=256 m=2 blk=16 mode=0 tile=256 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/32768 PASS
+### gate base c4: [fwd-fp16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/16777216 PASS
+### gate base c6: [fwd-fp16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s timed=1 -> maxdiff=0.00000 mismatch=0/469762048 PASS
+### built+cached base kernel=daf2b8ed3995
+### ready base kernel_src=daf2b8ed3995 kernel_o=306619d0a29b
+@@@@ round=1 mode=base 04:48:21
+### kernel md5: daf2b8ed3995d4698c435c2d42d67b23  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 306619d0a29b
+### so ts: 04:48:06  bin ts: 04:48:07  tag=r10baseR1 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=3.0us | 剔首 mean=3.0 min=2.8 p50=2.9 max=8.0us blk=16
+c0   fwd 流水线均值(us) aiv=1.8 mte2=0.6 mte3=0.5 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=13.6us | 剔首 mean=13.1 min=13.0 p50=13.1 max=13.4us blk=40
+c4   fwd 流水线均值(us) aiv=11.4 mte2=5.2 mte3=8.5 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1120.8us | 剔首 mean=1119.6 min=1113.2 p50=1120.5 max=1125.8us blk=40
+c6   fwd 流水线均值(us) aiv=1094.7 mte2=213.1 mte3=1087.8 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### gate b2 c0: [fwd-fp16-small] S=64 D=256 m=2 blk=16 mode=0 tile=256 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/32768 PASS
+### gate b2 c4: [fwd-fp16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/16777216 PASS
+### gate b2 c6: [fwd-fp16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s timed=1 -> maxdiff=0.00000 mismatch=0/469762048 PASS
+### built+cached b2 kernel=27674e835146
+### ready b2 kernel_src=27674e835146 kernel_o=0d334ca34ee8
+@@@@ round=1 mode=b2 04:49:29
+### kernel md5: 27674e835146694f7e3b344be02d6991  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 0d334ca34ee8
+### so ts: 04:49:15  bin ts: 04:49:16  tag=r10b2R1 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=2.8us | 剔首 mean=2.8 min=2.7 p50=2.8 max=9.0us blk=16
+c0   fwd 流水线均值(us) aiv=1.7 mte2=0.5 mte3=0.3 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=13.8us | 剔首 mean=13.3 min=13.1 p50=13.3 max=13.8us blk=40
+c4   fwd 流水线均值(us) aiv=11.4 mte2=3.7 mte3=8.5 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1096.7us | 剔首 mean=1095.6 min=1091.7 p50=1096.0 max=1102.3us blk=40
+c6   fwd 流水线均值(us) aiv=1069.7 mte2=176.0 mte3=1062.3 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### gate ad c0: [fwd-fp16-small] S=64 D=256 m=2 blk=16 mode=0 tile=256 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/32768 PASS
+### gate ad c4: [fwd-fp16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/16777216 PASS
+### gate ad c6: [fwd-fp16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s timed=1 -> maxdiff=0.00000 mismatch=0/469762048 PASS
+### built+cached ad kernel=4a42fa5f81c3
+### ready ad kernel_src=4a42fa5f81c3 kernel_o=5847eb3edffe
+@@@@ round=1 mode=ad 04:50:40
+### kernel md5: 4a42fa5f81c3abb388fdfce9a38b202c  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 5847eb3edffe
+### so ts: 04:50:24  bin ts: 04:50:26  tag=r10adR1 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=3.0us | 剔首 mean=3.0 min=2.8 p50=2.9 max=7.7us blk=16
+c0   fwd 流水线均值(us) aiv=1.8 mte2=0.6 mte3=0.5 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=13.9us | 剔首 mean=13.4 min=13.1 p50=13.4 max=13.8us blk=40
+c4   fwd 流水线均值(us) aiv=11.2 mte2=4.8 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1096.1us | 剔首 mean=1095.2 min=1090.4 p50=1094.7 max=1106.1us blk=40
+c6   fwd 流水线均值(us) aiv=1070.0 mte2=175.5 mte3=1062.7 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### gate fin c0: [fwd-fp16-small] S=64 D=256 m=2 blk=16 mode=0 tile=256 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/32768 PASS
+### gate fin c4: [fwd-fp16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s timed=1 -> maxdiff=0.00000 mismatch=0/16777216 PASS
+### gate fin c6: [fwd-fp16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s timed=1 -> maxdiff=0.00000 mismatch=0/469762048 PASS
+### built+cached fin kernel=8810171ea780
+### ready fin kernel_src=8810171ea780 kernel_o=363663f846bc
+@@@@ round=1 mode=fin 04:51:49
+### kernel md5: 8810171ea78003845be2adf54c814a61  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 363663f846bc
+### so ts: 04:51:34  bin ts: 04:51:35  tag=r10finR1 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=3.0us | 剔首 mean=3.0 min=2.8 p50=2.9 max=8.3us blk=16
+c0   fwd 流水线均值(us) aiv=1.8 mte2=0.6 mte3=0.5 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=13.6us | 剔首 mean=13.1 min=13.0 p50=13.1 max=13.5us blk=40
+c4   fwd 流水线均值(us) aiv=11.3 mte2=4.9 mte3=8.5 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1091.3us | 剔首 mean=1090.5 min=1084.3 p50=1090.2 max=1096.9us blk=40
+c6   fwd 流水线均值(us) aiv=1069.3 mte2=175.2 mte3=1062.0 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### ready base kernel_src=daf2b8ed3995 kernel_o=306619d0a29b
+@@@@ round=2 mode=base 04:52:22
+### kernel md5: daf2b8ed3995d4698c435c2d42d67b23  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 306619d0a29b
+### so ts: 04:52:22  bin ts: 04:51:35  tag=r10baseR2 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=2.9us | 剔首 mean=2.9 min=2.7 p50=2.9 max=7.8us blk=16
+c0   fwd 流水线均值(us) aiv=1.8 mte2=0.6 mte3=0.5 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=14.1us | 剔首 mean=13.6 min=13.4 p50=13.6 max=13.9us blk=40
+c4   fwd 流水线均值(us) aiv=11.8 mte2=5.3 mte3=8.6 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1119.2us | 剔首 mean=1118.2 min=1110.2 p50=1118.3 max=1128.1us blk=40
+c6   fwd 流水线均值(us) aiv=1094.2 mte2=212.7 mte3=1087.8 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### ready b2 kernel_src=27674e835146 kernel_o=0d334ca34ee8
+@@@@ round=2 mode=b2 04:52:55
+### kernel md5: 27674e835146694f7e3b344be02d6991  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 0d334ca34ee8
+### so ts: 04:52:55  bin ts: 04:51:35  tag=r10b2R2 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=2.8us | 剔首 mean=2.8 min=2.7 p50=2.8 max=8.5us blk=16
+c0   fwd 流水线均值(us) aiv=1.7 mte2=0.5 mte3=0.3 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=13.6us | 剔首 mean=13.1 min=13.0 p50=13.1 max=13.5us blk=40
+c4   fwd 流水线均值(us) aiv=11.2 mte2=3.3 mte3=8.4 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1089.7us | 剔首 mean=1089.2 min=1083.7 p50=1089.7 max=1093.8us blk=40
+c6   fwd 流水线均值(us) aiv=1068.8 mte2=175.7 mte3=1061.5 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### ready ad kernel_src=4a42fa5f81c3 kernel_o=5847eb3edffe
+@@@@ round=2 mode=ad 04:53:28
+### kernel md5: 4a42fa5f81c3abb388fdfce9a38b202c  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 5847eb3edffe
+### so ts: 04:53:28  bin ts: 04:51:35  tag=r10adR2 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=2.9us | 剔首 mean=2.9 min=2.8 p50=2.9 max=8.3us blk=16
+c0   fwd 流水线均值(us) aiv=1.8 mte2=0.6 mte3=0.5 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=14.4us | 剔首 mean=13.9 min=13.4 p50=13.9 max=14.3us blk=40
+c4   fwd 流水线均值(us) aiv=11.6 mte2=4.9 mte3=8.5 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1092.5us | 剔首 mean=1091.6 min=1086.9 p50=1091.5 max=1097.8us blk=40
+c6   fwd 流水线均值(us) aiv=1069.4 mte2=175.1 mte3=1062.5 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### ready fin kernel_src=8810171ea780 kernel_o=363663f846bc
+@@@@ round=2 mode=fin 04:54:00
+### kernel md5: 8810171ea78003845be2adf54c814a61  host md5: c76d30be6bd1117e2848d858168d89e3  kernel_o: 363663f846bc
+### so ts: 04:54:00  bin ts: 04:51:35  tag=r10finR2 cases=0 4 6
+c0 === ALL PASS | cases=1 fail=0 err=0 ===
+c0   fwd: n=402 含首任务 mean=3.0us | 剔首 mean=3.0 min=2.8 p50=2.9 max=8.4us blk=16
+c0   fwd 流水线均值(us) aiv=1.8 mte2=0.6 mte3=0.5 vec=0.0 scalar=—
+c0   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c4 === ALL PASS | cases=1 fail=0 err=0 ===
+c4   fwd: n=102 含首任务 mean=13.6us | 剔首 mean=13.2 min=13.0 p50=13.2 max=13.5us blk=40
+c4   fwd 流水线均值(us) aiv=11.4 mte2=5.2 mte3=8.5 vec=0.0 scalar=—
+c4   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+c6 === ALL PASS | cases=1 fail=0 err=0 ===
+c6   fwd: n=22 含首任务 mean=1092.8us | 剔首 mean=1091.6 min=1087.2 p50=1091.5 max=1096.9us blk=40
+c6   fwd 流水线均值(us) aiv=1070.7 mte2=175.6 mte3=1063.3 vec=0.0 scalar=—
+c6   bwd 流水线均值(us) aiv=— mte2=— vec=— scalar=—
+### done 04:54:33  log=npu_debug/logs/r10_044744.log  (树已还原 base)

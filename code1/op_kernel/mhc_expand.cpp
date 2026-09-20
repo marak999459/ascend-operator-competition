@@ -13,7 +13,6 @@ public:
     __aicore__ inline void Init(GM_ADDR x, GM_ADDR o, GM_ADDR workspace, const MhcExpandTilingData &tiling) {
         tiling_ = tiling;
         elem_size_ = sizeof(DT_X);
-        slot_ = 0;
         const uint32_t s = tiling_.S;
         const uint32_t d = tiling_.D;
         const uint32_t m = tiling_.m;
@@ -52,7 +51,8 @@ public:
         if (task_end_ > total_tasks) task_end_ = total_tasks;
 
         // UB 缓冲：反向走 TQue 流水线（in/out 双缓冲 + 两块 float 暂存）；
-        // 前向是纯搬运，只要两块轮转缓冲，其余一个都不建
+        // 前向是纯搬运，按环深建轮转缓冲：小 tile 走 BS=1 只要 2 块，攒批路径要 2*BS 块。
+        // 每块上限 host 的 ub_size/4，所以环最深 4 块正好铺满 UB，加深环要先动 host 预算。
         if constexpr (BACKWARD) {
             pipe_.InitBuffer(in_que_, 2, tiling_.dTileLen * elem_size_);
             pipe_.InitBuffer(out_que_, 2, tiling_.dTileLen * elem_size_);
@@ -61,66 +61,119 @@ public:
         } else {
             pipe_.InitBuffer(fwd_b0_, tiling_.dTileLen * elem_size_);
             pipe_.InitBuffer(fwd_b1_, tiling_.dTileLen * elem_size_);
+            // 后两块只有攒批路径会用到；小 tile 走 BS=1，不白占 UB
+            if (FwdBigTile()) {
+                pipe_.InitBuffer(fwd_b2_, tiling_.dTileLen * elem_size_);
+                pipe_.InitBuffer(fwd_b3_, tiling_.dTileLen * elem_size_);
+            }
         }
     }
 
     __aicore__ inline void Process() {
         if (task_begin_ >= task_end_) return;
-        const uint32_t d_tile_num = tiling_.dTileNum;
-        const uint32_t s = tiling_.S;
-        const uint32_t m = tiling_.m;
-        const uint32_t smode = tiling_.splitMode;
+        if constexpr (BACKWARD) ProcessBackward();
+        else ProcessForward();
+    }
 
+    // 反向任务循环：ROW -> task=s(整行,遍历全部 jt); ELEMENT -> task=s*dTileNum+jt
+    __aicore__ inline void ProcessBackward() {
+        const uint32_t d_tile_num = tiling_.dTileNum;
+        const uint32_t smode = tiling_.splitMode;
         for (uint32_t t = task_begin_; t < task_end_; ++t) {
-            if constexpr (BACKWARD) {
-                // 反向：ROW -> task=s; ELEMENT -> task=s*dTileNum+jt
-                uint32_t s_idx, jt;
-                if (smode == 2) { s_idx = t / d_tile_num; jt = t % d_tile_num; }
-                else            { s_idx = t; jt = d_tile_num; } // jt=d_tile_num 表示遍历全部
-                if (jt == d_tile_num) {
-                    for (uint32_t j = 0; j < d_tile_num; ++j) {
-                        const uint32_t cur_h = (j == d_tile_num - 1) ? tiling_.dTailLen : tiling_.dTileLen;
-                        BackwardOneBlock(s_idx, j, cur_h);
-                    }
-                } else {
-                    const uint32_t cur_h = (jt == d_tile_num - 1) ? tiling_.dTailLen : tiling_.dTileLen;
-                    BackwardOneBlock(s_idx, jt, cur_h);
+            uint32_t s_idx, jt;
+            if (smode == 2) { s_idx = t / d_tile_num; jt = t % d_tile_num; }
+            else            { s_idx = t; jt = d_tile_num; } // jt=d_tile_num 表示遍历全部
+            if (jt == d_tile_num) {
+                for (uint32_t j = 0; j < d_tile_num; ++j) {
+                    const uint32_t cur_h = (j == d_tile_num - 1) ? tiling_.dTailLen : tiling_.dTileLen;
+                    BackwardOneBlock(s_idx, j, cur_h);
                 }
             } else {
-                // 前向：ROW -> task=s(全k); STREAM -> task=s*m+k(单k全jt); ELEMENT -> task=s*m*dTileNum+k*dTileNum+jt
-                uint32_t s_idx, k, jt;
-                if (smode == 0) { s_idx = t; k = m; jt = d_tile_num; } // k=m 表示全k
-                else if (smode == 1) { s_idx = t / m; k = t % m; jt = d_tile_num; }
-                else { uint32_t stride = m * d_tile_num; s_idx = t / stride; uint32_t r = t % stride; k = r / d_tile_num; jt = r % d_tile_num; }
-                if (jt == d_tile_num) {
-                    for (uint32_t j = 0; j < d_tile_num; ++j) {
-                        const uint32_t cur_h = (j == d_tile_num - 1) ? tiling_.dTailLen : tiling_.dTileLen;
-                        ForwardOneBlock(s_idx, j, cur_h, k);
-                    }
-                } else {
-                    const uint32_t cur_h = (jt == d_tile_num - 1) ? tiling_.dTailLen : tiling_.dTileLen;
-                    ForwardOneBlock(s_idx, jt, cur_h, k);
-                }
+                const uint32_t cur_h = (jt == d_tile_num - 1) ? tiling_.dTailLen : tiling_.dTileLen;
+                BackwardOneBlock(s_idx, jt, cur_h);
             }
         }
     }
 
 private:
-    // 前向单块：读 x[i, jt] 一次，写 k_begin..k_end-1 个副本
-    // k=m 表示全 k（ROW 模式 UB 复用），k<m 表示只写第 k 个（STREAM/ELEMENT 模式拆核）
-    __aicore__ inline void ForwardOneBlock(uint32_t i, uint32_t jt, uint32_t cur_h, uint32_t k_limit) {
+    // 前向批处理驱动：攒 BS 个"块"一起灌 -> 一道 PIPE_ALL -> 一起吐。
+    // 环深取 2*BS：本批写入的格必然不是上一批 MTE3 正在读的格，于是"上一批的吐出"和
+    // "本批的灌入"第一次真正并行，而序的强度与逐块 barrier 完全一样（这条纯搬运路径上
+    // arch22 只认 PIPE_ALL，手工事件对不产生序，见 code1.md §17）。
+    // BS 走模板参数：换成运行时变量会让内层循环失去展开，小档实测更慢。
+    template <uint32_t BS>
+    __aicore__ inline void ProcessForwardN() {
+        constexpr uint32_t MASK = BS * 2 - 1;
+        uint32_t t = task_begin_, j = 0, r = 0;
+        while (t < task_end_) {
+            uint32_t ii[BS], jj[BS], hh[BS], kk[BS];
+            uint32_t nb = 0;
+            while (nb < BS) {
+                if (!NextUnit(t, j, ii[nb], jj[nb], hh[nb], kk[nb])) break;
+                ++nb;
+            }
+            if (nb == 0) break;
+            for (uint32_t u = 0; u < nb; ++u) FwdIn((r + u) & MASK, ii[u], jj[u], hh[u]);
+            PipeBarrier<PIPE_ALL>();
+            for (uint32_t u = 0; u < nb; ++u) FwdOut((r + u) & MASK, ii[u], jj[u], hh[u], kk[u]);
+            r += nb;
+        }
+    }
+
+    __aicore__ inline bool FwdBigTile() const {
+        return tiling_.dTileLen * elem_size_ >= FWD_THRESH;
+    }
+
+    __aicore__ inline void ProcessForward() {
+        // 攒批只在单块够大时才有肉；小 tile 保持每块一道 barrier，两条路径各自编译期展开
+        if (FwdBigTile()) ProcessForwardN<FWD_BATCH>();
+        else ProcessForwardN<1>();
+    }
+
+    // 取下一个"块"= (行 i, d 方向第 jt 块, 高 cur_h, 副本上限 k_limit)。
+    // 任务解码与采纳版一致：ROW -> task=s(全k全jt); STREAM -> task=s*m+k; ELEMENT -> task=s*m*num+jt
+    __aicore__ inline bool NextUnit(uint32_t &t, uint32_t &j, uint32_t &i, uint32_t &jt,
+                                    uint32_t &cur_h, uint32_t &k_limit) {
+        const uint32_t d_tile_num = tiling_.dTileNum;
+        const uint32_t m = tiling_.m;
+        const uint32_t smode = tiling_.splitMode;
+        if (t >= task_end_) return false;
+        uint32_t s_idx, k, all_j;
+        if (smode == 0) { s_idx = t; k = m; all_j = 1; }
+        else if (smode == 1) { s_idx = t / m; k = t % m; all_j = 1; }
+        else {
+            uint32_t stride = m * d_tile_num;
+            s_idx = t / stride; uint32_t r = t % stride;
+            k = r / d_tile_num; jt = r % d_tile_num; all_j = 0;
+        }
+        if (all_j) {
+            jt = j;
+            if (++j >= d_tile_num) { j = 0; ++t; }
+        } else {
+            ++t;
+        }
+        i = s_idx;
+        k_limit = k;
+        cur_h = (jt == d_tile_num - 1) ? tiling_.dTailLen : tiling_.dTileLen;
+        return true;
+    }
+
+    // 环槽位 -> UB 缓冲：0/1 两格恒在，2/3 两格只在攒批路径下才被 InitBuffer
+    __aicore__ inline auto FwdBuf(uint32_t slot) {
+        return slot == 0 ? fwd_b0_.Get<DT_X>() : (slot == 1 ? fwd_b1_.Get<DT_X>() :
+               (slot == 2 ? fwd_b2_.Get<DT_X>() : fwd_b3_.Get<DT_X>()));
+    }
+
+    __aicore__ inline void FwdIn(uint32_t r, uint32_t i, uint32_t jt, uint32_t cur_h) {
         const int64_t src_off = static_cast<int64_t>(i) * tiling_.D + jt * tiling_.dTileLen;
         DataCopyExtParams cp{1, static_cast<uint32_t>(cur_h * static_cast<int32_t>(sizeof(DT_X))), 0, 0, 0};
         DataCopyPadExtParams<DT_X> pp{false, 0, 0, static_cast<DT_X>(0)};
+        DataCopyPad(FwdBuf(r), x_gm_[src_off], cp, pp);
+    }
 
-        // 前向纯搬运：两块 UB 轮转，不经 TQue（省每任务的队列簿记）
-        auto x_local = (slot_ & 1) ? fwd_b1_.Get<DT_X>() : fwd_b0_.Get<DT_X>();
-        ++slot_;
-        DataCopyPad(x_local, x_gm_[src_off], cp, pp);
-        // 这道 barrier 同时管两件事：等 MTE2 落地再让 MTE3 读，以及保证两任务前对同一缓冲
-        // 的上一次读已排空（本路径没有 VEC 动作，TQue 的事件序本来就挂不上，换 TBuf 不减少序）
-        PipeBarrier<PIPE_ALL>();
-
+    __aicore__ inline void FwdOut(uint32_t r, uint32_t i, uint32_t jt, uint32_t cur_h, uint32_t k_limit) {
+        DataCopyExtParams cp{1, static_cast<uint32_t>(cur_h * static_cast<int32_t>(sizeof(DT_X))), 0, 0, 0};
+        auto x_local = FwdBuf(r);
         const uint32_t k_begin = (k_limit == tiling_.m) ? 0 : k_limit;
         const uint32_t k_end   = (k_limit == tiling_.m) ? tiling_.m : k_limit + 1;
         for (uint32_t k = k_begin; k < k_end; ++k) {
@@ -178,14 +231,17 @@ private:
     TQue<QuePosition::VECOUT, 2> out_que_;
     TBuf<TPosition::VECCALC> acc_buf_;
     TBuf<TPosition::VECCALC> tmp_buf_;
+    static constexpr uint32_t FWD_BATCH = 2;      // 大 tile 前向每次攒 2 块、共用一道 barrier
+    static constexpr uint32_t FWD_THRESH = 12288; // 单块字节数阈值：过了才攒批
     TBuf<TPosition::VECCALC> fwd_b0_;
     TBuf<TPosition::VECCALC> fwd_b1_;
+    TBuf<TPosition::VECCALC> fwd_b2_;
+    TBuf<TPosition::VECCALC> fwd_b3_;
     GlobalTensor<DT_X> x_gm_;
     GlobalTensor<DT_X> o_gm_;
     MhcExpandTilingData tiling_;
     uint32_t elem_size_;
     uint32_t task_begin_;
-    uint32_t slot_;
     uint32_t task_end_;
 };
 
