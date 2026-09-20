@@ -28,7 +28,8 @@
 | 算子名 | `sparse_flash_attention`（稀疏 FlashAttention，MLA-absorb 模式） |
 | 提交实现 | **`code 3/code/`**（`op_host/`、`op_kernel/`） |
 | 工程文档 | **`code 3/`**（提交实现 + 构建脚本） |
-| 真机构建工作区 | `~/sfa_real/`（**只放构建产物，源码唯一所在地是本仓库 `code 3/`**） |
+| 真机构建工作区 | 真机 `02aeb` 上的 `~/sfa_real/`（**只放构建产物，源码唯一所在地是本仓库 `code 3/`**）。⚠️ **CPU 环境上没有、也不会有这个目录**（§13.2） |
+| 算力环境实态 | 2026-09-20 晚实测：**云端仿真机 `e6z6k` 可用**（aarch64 / 16 核 / CANN 9.0.0 + `ccec`/`bisheng`/`atc`，**无 NPU**）⇒ 定位是**编译门 + 参考源码浏览器**（§13.4）；**真机 `02aeb` 状态 free 但本路会话未连**（§5.10.1 的"未真机复验"仍未闭环，164 用例语料也只在它上面） |
 | 目标芯片 | ascend910b（真机 910B3，单卡 NPU ID=2，CANN 9.0.0） |
 | **真机正确性** | ✅ **r1~r8 8/8 PASS**；变长 **v1~v7 全 PASS**；`SBS=128` 边界超差 **0/8192**；`big1` **0/524288**；**2026-09-19 两处根因修复后**：SBS=64/128 系列、crash 系列、big1 全 PASS（含此前 507035 崩溃的 `crash_b2_s16_sbs128`，big1 重新生成后 0/524288）。**2026-09-20 全量回归 PASS=164 / FAIL=9**（FAIL 清单见 §5.9） |
 | **比赛平台提交** | 🟢🟢 **6/6 全 Pass（提交 `6aae9fad`，2026-09-19 深夜）** —— 根因：**比赛平台空行（idx 全 -1 / padding）LSE max 期望 `0.0`，本地旧参考用 `-2e38`**。判分结构已由探针提交反推闭环（§5.8）。 |
@@ -609,6 +610,9 @@ for tokIdx in [curTokenIdx, sparseCount):
 | `official_problem_statement.md` | ⭐ **三题官方题面全文**（权威口径，在根目录） |
 | `refs/README.md` | ⭐ `refs/` 说明：内容清单 + 用法 + **重建告诫** |
 | `refs/sfa/sfa_ref.py` | ⭐ Python 独立参考实现（生成用例 + 对拍） |
+| **`refs/sfa/cases/`** | 本地用例语料 **10 个 `.bin`**（`case_small` / `mini` / `r1_min`…`r8_heads`）⇒ **这是本地唯一副本**；§5.9.1 那 164 用例只在真机 `~/sfa_real/cases`，取回前别当作可复现（§13.2） |
+| **`refs/sfa/cann_builtin_900/`** | ⭐ **CANN 9.0.0 内置官方 SFA 的 Ascend C 源码（910B/arch22 版）6 个文件**，已从 `~/Ascend/cann-9.0.0/opp/built-in/.../ascendc/sparse_flash_attention/` tar 回拉本地并逐文件 md5 复验（台账 §13.3，首轮读数 §13.7）。**只读参考，不移植**（使用边界由用户裁定为"深度数据流对照"，§13.5） |
+| `code 3/cpu_debug/build_cpu.sh` | ⭐ **CPU 编译门脚本**（改自 `code 3/build.sh`，路径参数化 + 全 ASCII）：在无 NPU 的云端仿真机上跑真 `ccec` 交叉编译，产物 `ascend910b` kernel 二进制。用法见 §13.6 |
 | `refs/sfa/test_sfa_real.cpp` | ⚠️ **重建版**真机对拍 harness（原文件被误删；详见 `refs/README.md` §3） |
 | `refs/sfa/run.sh` / `build.sh` | ⭐ 真机构建 + 跑 8 用例对拍 |
 | `refs/sfa/gen_case.py` + `cases/` | ⭐ 用当前格式生成回归用例（**旧 `c*.bin` 是旧格式，见 §6.0**） |
@@ -731,6 +735,8 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 
 > 📌 **定位（用户 2026-09-20 定调）**：这批开源材料**有很大的参考价值**，但**最好不要照抄**——抄**部分细节**（索引判据、流水结构、tiling 切法），语义口径仍以**§5.8 的探针实测**为准。合规条款与许可证核查全文见 `code1.md §10.0`（CANN OSL v2.0，开源、可用于昇腾场景、**须保留版权头**）。
 
+> 📦 **本节（及 §11.2 全部行号）依赖外部库，它不入库**（`.gitignore` 已忽略 `ops-transformer-master/`，源码无须上传）。换机器或新 clone 后需自行拉取：`https://gitcode.com/cann/ops-transformer`，本地这份版本 = **9.2.0**（`version.cmake:11`）。⚠️ **行号会随版本漂移** —— 按行号找不到时改用**符号名 grep**（如 `CalcSinnerTopKBegin`、`InitAllZeroOutput`、`SoftmaxFlashV2`），别把"找不到"当成"不存在"。
+
 ### 10.0 同名实现存在，且 **910B 能编**（与第二题不同）
 
 | 证据 | 内容 |
@@ -784,14 +790,19 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 
 现状 §1：纯标量 **206.9 ms**，榜首 **2.16~3.54 µs** —— 差 5 个数量级，说明赛题性能分**完全由架构写法决定**。官方 arch22 实现是**手头唯一的生产级 910B 稀疏注意力样本**，价值高于 §10.2 的语义对照。
 
-前提条件（照搬前要知道）：需 `--cce-auto-sync=off`；**Cube:Vector 1:2 双核流水**；依赖 `attention/common` 的 `SoftmaxFlashV2`。→ 意味着**不能只拷一个文件**，要把 `attention/common/` 的依赖一并纳入理解范围。
+前提条件（照搬前要知道）：需 `--cce-auto-sync=off`；**Cube:Vector 1:2 双核流水**。
 
-### 10.6 顺带发现：本地 Python 参考与 kernel 存在漂移（⏳ 待核，勿当结论）
+> ✅ **依赖口径已核清（2026-09-20 本节初稿曾写错，据 §11.2 S2 更正并二次复核）**：arch22 **不依赖 `attention/common/`**。`arch22/sparse_flash_attention_kernel_mla.h:19-23` 只 include CANN 自带头（`kernel_operator.h`、`kernel_operator_list_tensor_intf.h`、`kernel_tiling/kernel_tiling.h`、`lib/matmul_intf.h`、`lib/matrix/matmul/tiling.h`）+ 本题目录内的 `sparse_flash_attention_*.h`；`grep -rn "attention/common" op_kernel/` **零命中**；`SoftmaxFlashV2` 在全仓库**只有调用点**（`arch22/…service_vector_mla.h:543`）**没有定义** ⇒ 它是 **AscendC 内置接口**。
+> ⇒ **好消息：不会把整棵依赖树拖进提交包**。真正的风险在别处 —— 前置编译选项 `--cce-auto-sync=off` 等三条（`op_host/CMakeLists.txt:22-28`）**比赛平台是否让我们带**，见 §11.2 末段。
 
-`refs/sfa/sfa_ref.py:112` 当前是 `smax = [SOFTMAX_MIN_NUM] * (B*S1*N1)`，即**空行在本地参考里仍是 `-2e38`**；而 §5.9 曾记录"已同步为 `0.0`"。本轮已核实该行**确实是 `SOFTMAX_MIN_NUM`**（磁盘态）。
+### 10.6 本地 Python 参考与 kernel 的漂移（✅ 已核清并已修，详见 §5.10 第 4 条 / §10.7）
 
-**含义**：若某批真机回归用例含空行，本地对拍与平台期望不一致 → "**真机自测全过**"的证据力要打折扣。
-**待核（不改代码，只查证据）**：确认 §5.8 通过版本（提交 `6aae9fad`）跑的那批用例**是否覆盖空行**；若覆盖且当时 PASS，说明该 ref 分支未被这些用例触达，属**参考实现滞后**而非 kernel 问题。
+`refs/sfa/sfa_ref.py:112` 原为 `smax = [SOFTMAX_MIN_NUM] * (B*S1*N1)`，即**空行在本地参考里是 `-2e38`**；而 §5.9 曾记录"已同步为 `0.0`"。本节初稿核实磁盘态**确实是 `SOFTMAX_MIN_NUM`** —— 文档记载的那次同步**从未落盘**。
+
+**含义**：本地含空行用例的对拍**期望口径本身是错的**，"真机自测全过"对空行场景不具证据力（§5.9.1 的 23 个含空行用例 PASS，当时PASS 的是"kernel 与旧参考都写 -2e38"）。
+
+> ✅ **收口状态（2026-09-20 第二路会话）**：`sfa_ref.py:112` 已改为 `0.0` 并同步 `:473` 自检，`selftest` 全项 PASS；本地 20 个 `.bin` 用例仅 `r4_shortkv.bin` 含 1 处 `-2e38` 字节 ⇒ 无大面积 expect 翻红风险。**未闭环**：远端 164 用例语料无本地副本，待有环境对账（§5.10.1 未闭环项 2）。
+> 📎 本节初稿的"待核"提问已由 §5.10 第 4 条回答，保留结论、撤下疑问句口径。
 
 ### 10.7 待办
 
@@ -831,7 +842,7 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 |---|---|---|---|
 | S1 | **稀疏 index 读取同样是标量循环**，但粒度是"每 512 个 KV 一次"，重活交给 `Mmad` + `Nd2Nz DataCopy` | `kernel_mla.h:965/995`（`topKGm.GetValue`）；搬运 `service_cube_mla.h:410-419`，行偏移 `(idInTopK*sbs+curOffset)*headDim` `:666/:911` | ✅ **印证"index 不需要向量化"**。我们该做的是：块内 token 本来就**连续**（`[curBegin, curEnd)`），所以 K/V 用**整段 `DataCopy`**，不是 gather |
 | S2 | **`SoftmaxFlashV2` 是 AscendC 内置接口**，不在 `attention/common/` | `service_vector_mla.h:543-545`；tiling 运行时算 `:540-542`；UB：tmpBuff1 32K + max/sum/exp 各 2×1K（`:220/:228-230`） | 我们**不必自己写 ReduceMax/Exp 树**（§10.7 原文记错了依赖位置，已更正） |
-| S3 | **在线 softmax 重缩放用向量指令**：`Sub` → `Exp` → `Brcb` + `RowMuls`，系数量化成 int32 再 `AmlaVec` | `service_vector_mla.h:568-647`（`AmlaVecCompute`，`:580/:598/:613-615/:624-647`） | 直接对应我们 `FlushChunk` 第 3 段 `:424-444` 的标量 `o = o*alpha + e*v` —— **这是单点收益最大的一处替换** |
+| S3 | **在线 softmax 重缩放用向量指令**：`Sub` → `Exp` → `Brcb` + `RowMuls`，系数量化成 int32 再 `AmlaVec`（⚠️ **§13.7 更正**：这行里只有 `Brcb`/`Exp`/`Sub` 是内置指令，`RowMuls`/`AmlaVecCompute` 是官方**自己写的成员函数**，`AmlaVec` 一名与 toolkit 无关） | `service_vector_mla.h:568-647`（`AmlaVecCompute`，`:580/:598/:613-615/:624-647`） | 直接对应我们 `FlushChunk` 第 3 段 `:424-444` 的标量 `o = o*alpha + e*v` —— **这是单点收益最大的一处替换** |
 | S4 | **LSE 走 `DataCopy` → `outputBuff2` → `DataCopyPad`**，非标量 `SetValue`；空行由 `InitAllZeroOutput` 统一归零 | `service_vector_mla.h:339 CopyFALseToGm`、`:371-383`；空行 `kernel_mla.h:265/:279-280/:291-292` | 我们在 §5.10.1 刚把 padding 分支改成同机制（`:289`）→ **口径已与官方一致**，这也是 K2 判定的独立印证 |
 | S5 | **Cube:AIV = 1:2 + `PRELOAD_NUM=2` 三段软流水**，跨核 `CrossCoreSetFlag`，双 buffer `pingpongFlag^=1` | `cpp:83 KERNEL_TYPE_MIX_AIC_1_2`；`kernel_mla.h:85/:798/:870-907`；`service_vector_mla.h:215-216/:824` | ⛔ **不可部分引入**：要 Cube 就必须一次到位（AIC + 两个 AIV 的握手），否则收益被同步吃掉 |
 | S6 | MM1 的 k 维**拆 `（256+32）×2` 两段**喂 Cube；MM2 的 k `256→128`；跨核累加用 `SetAtomicAdd` 把 bias 原子加进 O | `service_cube_mla.h:773-778/:1001`、`:1060-1064`、`:1289-1303` | 我们 §5.7.4 记的"官方 256+256+64 三段"**行号口径应以此为准**；`SetAtomicAdd` 是官方做 online-rescale 的第二个思路，**我们不用**（我们 AIV 内单核完成，无跨核累加） |
@@ -847,7 +858,7 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 |---|---|---|---|---|
 | **P0 测偏差（不花提交）** | ⚠️ **本轮修正**：原打算直接提交"把 P 量化"的探针版测容差，算完数值发现**多数情况下根本不需要测容差** —— P2/P3 真正引入的是 fp32 舍入序变化（~1e-7 相对），落在任何合理容差之下；**真正未知的只是"硬件 `Exp` 指令在 910B 上有多准"**。所以 P0 = **在真机/仿真上用现有 harness 直接量出候选改动的 maxdiff**（`Exp` vs `ExpPoly`、P 量化到 fp16、累加顺序变），而不是猜 | 把"要不要花提交"变成有数据的决定 | 零 | 需真机或仿真机（**不花提交次数**） |
 | **P0b 容差探针（仅灰色带才做）** | 仅当 P0 测出的偏差落在 **1e-5 ~ 1e-3** 这个说不清的带里，才用 `code 3/probes/p0_quantp.py` 提交一版已知幅度的偏差去卡边界（仪表见 §11.5） | 定出容差量级 | 1 次提交 + 90s 间隔；**且提交完要把通过版恢复回去再交一次**（等于占 2 个槽） | 需用户批准 |
-| **P1 搬运聚合**（无精度影响） | `:342-349` 标量 gather → 块内连续段 `DataCopy`（K/V/kr 三段）；`:380-385` 标量写回 → `Cast` + `DataCopy`；`:358-364` 归一化 → `Reciprocal` + `RowMuls` | **数值逐位不变**（只换搬运），预计 3~10× | 低：`DataCopyExtParams` 的字节数/对齐踩坑（历史 §5.5 ① 已有 `static_cast<uint32_t>` 教训） | 不需要提交，真机 `run.sh` + 逐位对比即可 |
+| **P1 搬运聚合**（无精度影响） | `:342-349` 标量 gather → 块内连续段 `DataCopy`（K/V/kr 三段）；`:380-385` 标量写回 → `Cast` + `DataCopy`；`:358-364` 归一化 → `Reciprocal`（内置）+ 按行乘（⚠️ §13.7：`RowMuls` 不是内置指令，要照官方 `:1384` 的自写实现或 `Dup`/`Muls` 组合） | **数值逐位不变**（只换搬运），预计 3~10× | 低：`DataCopyExtParams` 的字节数/对齐踩坑（历史 §5.5 ① 已有 `static_cast<uint32_t>` 教训） | 不需要提交，**先在 §13.6 的 CPU 编译门上编**，再真机 `run.sh` + 逐位对比 |
 | **P2 PV 向量化** | `FlushChunk` 第 3 段 `:424-444` → 抄 S3 的 `Exp` + `Brcb`/`RowMuls` + `AmlaVec` 形态；`nBlk_` 调大做批量 | 再 10~30×（PV 占总 MAC 的 512/1088 ≈ 47%） | **中：换数值口径**（`ExpPoly`→`Exp`、累加顺序变）→ **依赖 P0 的容差结论** | 需要 |
 | **P3 score 向量化** | `:396-412` 的 576 维点积。两条路：(a) `Mul` + 归约（⚠️ §8 早记的疑问：`WholeReduceSum` 带 stride 是否可用，**未验证**）；(b) **在 UB 里转置 K** 成 `[d][j]`，把归约维换到向量维 → 纯 `AmlaVec` | 再 5~20×；做完 P1~P3 ≈ **~110 µs 量级**（11.1 表） | **高**：(b) 要额外 UB（`nBlk_×512×4` 的转置缓冲）→ 与 §5.7.2 UB 预算冲突，`SBS=128` 时可能装不下 | 需要 |
 | **P4 Cube 化**（`KERNEL_TYPE_MIX_AIC_1_2`） | MM1/MM2 上 Cube + 双 AIV + 三段流水（S5） | **~5~20 µs**，榜口径 | **很高**：≈ 重写；且**必须确认 11.2 的编译选项能带进比赛平台构建** | 需要，且需用户明确批准（"一次到位、不可部分引入"） |
@@ -859,7 +870,11 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 1. 提交源已恢复为通过版（§5.10.1），**性能改造可以开始了，但先别动 `code 3/code/`**。
 2. ~~建议 P0（容差探针）优先于一切~~ → **本轮自己推翻**（算术见 §11.5 表）：直接用 grid=1024 那种粗探针去测容差，注入的是 **8.7e-2 绝对误差**，平台若按绝对容差判就会**因为错误的原因失败**，一次提交换不来可读结论。改成 **P0 = 先用 harness 量出候选改动的真实 maxdiff**（不花提交），只有落在灰色带才做 P0b 探针。
 3. **P1 是唯一"零精度风险"的一段**（只换搬运、逐位不变）→ 可先在副本文件上做，等有真机窗口再验（§11.3 门控列已标它不需要提交）。
-4. ⚠️ 未核实清单（别当已知）：`SoftmaxFlashV2` 在 CANN 9.0.0 的 910B 头文件里是否可用；`WholeReduceSum` stride；`AmlaVec`/`Brcb`/`RowMuls` 三个接口在 arch22(dav-2201) 的签名；比赛平台构建能否带 `-mllvm` 选项；**比赛平台成绩是"取最好"还是"取最后一次"**（决定 P0b 探针要不要占第二个槽）。**这几条要么读 CANN 头要么上真机，本地静态查不到。**
+4. ⚠️ 未核实清单（**2026-09-20 晚由 §13.7/§13.8 大幅修订，别再照旧表去查**）：
+   - ~~`AmlaVec` 签名~~、~~`RowMuls` 签名~~、~~`WholeReduceSum` stride~~ → **三条是伪问题**：前两个根本不是 toolkit 接口（官方自己的成员函数，见 §13.7），第三个官方 arch22 版没在用（§13.7 末行）。
+   - `SoftmaxFlashV2` 我们能否用：**头文件在 CANN 9.0.0 里存在**（`asc/include/adv_api/activation/softmaxflashv2.h`）、**官方 arch22 版确实在调**（`_service_vector_mla.h:540`）⇒ 只剩"**我们的构建能否实例化**"一问，**用 probe kernel 在 §13.6 编译门上编一次即可裁定**（§13.8 已把这条路走通，只差 probe 本体）。
+   - `Brcb` 调用形状：官方 4 处实测是 `Brcb(dst, srcElement, (rows + 7) / 8, {1, 8})`（§13.7）⇒ **已由源码裁定**，仍建议 probe 复验一次。
+   - **仍未裁定**：比赛平台构建能否带 `-mllvm` 选项；**比赛平台成绩是"取最好"还是"取最后一次"**（决定 P0b 探针要不要占第二个槽）；`CodeError2753/2754` 那类 tiling-key 代码生成在我们的提交包里能不能自己手写绕开（§13.8 的根因）。**这三条要么上真机、要么问平台，静态查不到。**
 
 ### 11.5 P0 仪表（本轮已就绪，**未提交、未改 `code/`**）
 
@@ -968,3 +983,141 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 1. **本轮没有阻塞性能路线的静态问题**：`SBS=128` 不降级（§12.2）、提交源 = 通过版（§12.5）、ref 口径已同步（§12.6）。
 2. **唯一新增的有效工作项 = §12.4 那三条 P1 改动**（零精度风险），与另一路会话的 P0 仪表**正交**：P0 量偏差、P1 换搬运，可并行推进。
 3. ⛔ **仍未闭环的前置门控**：`code 3/code/` 虽与 6/6 通过版 md5 一致，但**这一版从未真机复验**（§5.10.1 只做静态比对）。⇒ 动任何代码前，建议先取一次真机 `run.sh` 基线（需先用 `devspace_tunnel.ps1 -Role npu` 建隧道）。
+
+---
+
+## 13. 2026-09-20 晚（第一路会话）：题3 首次拿到云端仿真机 `e6z6k`，实测其能力边界 + 一个新素材
+
+> 用户恢复了 `e6z6k`（云端仿真机 / CPU）后由本路会话连上实测。**全部结论来自当场 `ssh` 输出**，日志双写落本地 `code 3/cpu_debug/logs/e6z6k_*.log`（容器易失，见工作纪律第 6 条）。
+> 编号说明：原 §13.5（内置源码使用边界"待裁定"）在用户答复后改写为**本节末的 §13.9**（裁定记录），**13.5 这个号就此空掉**，不是漏写。
+
+### 13.1 隧道与连接的两个坑（新增到 §4 坑表）
+
+| 现象 | 真因 | 正确做法 |
+|---|---|---|
+| `devspace_tunnel.ps1` 报 `[X] 服务端换不出 connect_url` + `development environment no longer exists`，但**端口 48254 实际在 LISTENING、ssh 能握手** | 脚本报的是"扩展侧换 connect_url 失败"，不等于转发链路不通 | 判"通不通"要**两条一起看**：`netstat -ano \| findstr <端口>` + 一次 `ssh`；只信脚本会误判成"没环境" |
+| 我第一次直连 `-p 48254 root@127.0.0.1` → `Permission denied (publickey,password)` | 用户名不是 `root`，且没走 `~/.atomgitdevenv/.ssh/config` 里的 IdentityFile | **必须用配置里的 Host 别名**（`devenvc_e6z6k.<devEnvId>.atomgit.0`，User=`developer`），别手拼 `user@host:port` |
+| 一次 `ssh "..." > 本地.log` 落盘**空文件但 exit=0** | 远端命令里用了 `~`（双引号内本地不展开、远端在 `sh -c` 下也没按预期展开） | 远端路径一律写 `$HOME/...`，且**用 `\| tee 本地.log` 而不是先重定向再读**，空不空当场可见 |
+
+### 13.2 `e6z6k` 实态（实测）
+
+| 项 | 值 |
+|---|---|
+| 机器 | `aarch64`，16 核，30 GB 内存，`/home` 独立盘 182 GB 可用 |
+| NPU 设备 | **无**（`/dev/davinci*` 空）⇒ 纯 CPU 仿真机，跑不了真机回归 |
+| CANN | `~/Ascend/cann-9.0.0`（`cann` 是其符号链接，`set_env.sh` 可用） |
+| 编译器 | `bisheng` / `ccec` / `atc` **都在** `~/Ascend/cann-9.0.0/bin`（**但 `source set_env.sh` 前不在 PATH**，直接 `command -v` 会误报 MISSING）；`tikistub` 无 |
+| CPU 仿真 | `~/Ascend/cann-9.0.0/tools/tikicpulib/lib/`（含 `libtikicpulib_npuchk.so` 等） |
+| `~/sfa_real/` | **不存在**（`find / -maxdepth 4` 全空）|
+
+⚠️ 由此纠正一条容易误判的事实：**`~/sfa_real/` 是"真机构建工作区"（§0.1 术语表），从来不在 CPU 环境上** ⇒ §5.10.1 待办里"有环境时第一步 `md5sum ~/sfa_real/*` 对账"和那份 164 用例语料，**只有连真机 `02aeb` 才能取**，在 CPU 环境上等它 = 白等。本路会话此前把它当成"云端仿真机上的目录"，是口径混用。
+
+### 13.3 新素材：CANN 9.0.0 **自带官方 SFA 的 Ascend C 源码**（910B/arch22 那一版）
+
+路径（只读，权限 `r-x`）：`~/Ascend/cann-9.0.0/opp/built-in/op_impl/ai_core/tbe/impl/ops_transformer/ascendc/sparse_flash_attention/`
+
+| 文件 | 大小 | md5 |
+|---|---|---|
+| `sparse_flash_attention.cpp` | 3.0 KB | `2879a202ace04884a68be40e988b9ecc` |
+| `sparse_flash_attention_common.h` | 7.1 KB | `8a12a0566b4340a06fbe47b6e1f57aac` |
+| `sparse_flash_attention_kernel_mla.h` | 46 KB | `460480726d1dc6abd6818fbbb96876b3` |
+| `sparse_flash_attention_service_cube_mla.h` | 58 KB | `692bc854956fe52719824824c319c824` |
+| `sparse_flash_attention_service_vector_mla.h` | 76 KB | `20e171eafe332fcc7d5c9cf4a913e3f3` |
+| `sparse_flash_attention_template_tiling_key.h` | 3.0 KB | `5258b5ed1d60726007f06339b78b407e` |
+
+三条判读：
+
+**include 清单实测**（对落地后的 6 个文件 `grep -h "#include"` 去重）：只有 `kernel_operator.h`、`kernel_operator_list_tensor_intf.h`、`kernel_tiling/kernel_tiling.h`、`lib/matmul_intf.h`、`lib/matrix/matmul/tiling.h`、`ascendc/host_api/tiling/template_argument.h` + 这 6 个文件互相引用 ⇒ **不 include 任何 `attention/common/` 或 `common/vector_common.h`**（与 §10 的 `:795` 结论一致），但它们**依赖 `ascendc/host_api/tiling/template_argument.h`** —— 这条依赖正是 §13.8 编不过的根因。
+
+1. **这一版没有 `arch35/` 子目录**（同目录树下 `sparse_flash_attention_grad`、`kv_quant_sparse_flash_attention` 才有），⇒ 这 6 个文件就是 **910B 走的 arch22 路径**，正是我们的目标芯片。
+2. **与 §10 的开源参考池不是同一份**：同名的三个 `_mla.h` 在 `ops-transformer-master/.../op_kernel/arch22/` 下 md5 全部不同（如 `_service_vector_mla.h` 本地 `d9b49c3d…` vs 内置 `20e171ea…`）⇒ 内置这份是**与本框 CANN 9.0.0 同步编译的版本**，比 §10 的 master 快照更贴我们的构建环境；两者差异本身就是"9.0.0 API 漂移"的清单。
+3. 顺带（**此处初判有误，已在 §13.7 更正**）：当时按"`grep -rl` 命中文件"推断 `AmlaVec` / `RowMuls` / `Brcb` 的出处，实际 `AmlaVec`、`RowMuls` 是官方**自己的成员函数**、`Brcb` 才是内置接口；`common/vector_common.h` 那些命中来自**别的算子**（nsa / kv_quant 等），arch22 SFA 这 6 个文件并不 include 它（include 清单实测见 §13.3 下方）。`SoftmaxFlashV2` 的头文件 `asc/include/adv_api/activation/softmaxflashv2.h` **存在**，但**"我们的构建能否实例化它"仍未裁定**（该文件内 grep 不到 `__CCE_AICORE__` 守卫，说明选择发生在别处：要么 intf 头、要么构建期按 arch 选实现）。
+
+### 13.4 本路会话对"CPU 仿真机能干什么"的裁定（修正 §11.3 的门控列）
+
+| 用途 | CPU 仿真机能否胜任 | 依据 |
+|---|---|---|
+| 用**真 CANN 编译器**编 P1/P2 候选（`DataCopyExtParams`、`Cast`/`Reciprocal`/`RowMuls`、`AmlaVec` 签名对不对） | ✅ **能，且这是它最大的价值**：`ccec`/`bisheng` 在，头文件在，§11.4 未核实项大多能在**编译期**裁定，不花提交、不占真机 | §13.2 工具链实测 |
+| 读内置官方 SFA 源码 + 与 §10 池 diff | ✅ 能（文件就在盘上，只读） | §13.3 |
+| 判定"数值对不对"（P0 量 maxdiff、边界用例 `w_partneg`/`z_s1_1`） | ❌ **不要在这里做** —— §9 已裁定 `tikicpulib` 的非确定性是仿真器自身问题，"仿真通不代表真机通"（§4 坑表同条） | §9、§4 |
+| 真机回归、性能计时 | ❌ 无 NPU 设备 | §13.2 |
+
+⇒ 结论：**题3 现在的瓶颈从"没环境"变成"没真机"**；`e6z6k` 只当**编译门 + 参考源码浏览器**用。
+
+### 13.6 ✅ 编译门已建成并首次转绿（`e6z6k:~/sfa_cpu/`，2026-09-20 19:11）
+
+| 步骤 | 结果 |
+|---|---|
+| 上传 `code 3/code/` → `~/sfa_cpu/code/`（tar 管道） | 4 个提交文件远端 md5 = `bcb2f654…` / `6144697b…` / `02dd48f9…` / `fe3d1bc0…` **与 §5.10.1 通过版逐条吻合** |
+| `bash ~/sfa_cpu/build_cpu.sh`（脚本落在本地 `code 3/cpu_debug/build_cpu.sh`，改了 `B`/`L` 路径 + 全 ASCII） | `cmake ok` → **`BUILD OK`**，**warning 0** |
+| 产物 | `build/op_kernel/ascendc_kernels/binary/ascend910b/sparse_flash_attention/SparseFlashAttention_{bf6e58eb…, e26890ef…}.json`（**两个 tiling-key 变体**）+ `_binary_*.o` + `build/libcust_opapi.so`(986 KB) + `build/op_host/libcustom_ascendc_cust_optiling.so`(633 KB) |
+
+**意义**：`cmake + make` 走的是**真器件交叉编译**（产物是 `ascend910b` 的 kernel 二进制），**不需要 NPU 在场** ⇒ §4 坑表里"仿真机不管 float↔整数隐式转换、真机 ccec 才报错"这一类错误，从此**在 CPU 环境上就能抓到**。P1/P2/P3 候选改动可以先过这道门再谈上机，**不花提交、不占真机**。日志：`code 3/cpu_debug/logs/e6z6k_upload_20260920.log`、`e6z6k_build_gate_20260920.log`。
+
+### 13.7 内置官方源码落地后的第一轮读数（**已逐行核对，取代我第一版按"出现次数"下的结论**）
+
+6 个文件已落地 `refs/sfa/cann_builtin_900/`（md5 与 §13.3 台账逐条一致，容器丢了也不丢料）。
+
+⚠️ **自我更正**：本节第一版我只 `grep -c` 了符号出现次数就断言"官方在用哪些 AscendC API"，**其中两条是错的** —— `AmlaVec`、`RowMuls` 的命中其实是**官方自己定义的同名成员函数**，不是 AscendC 内置接口。下表已改成"读到位号、区分内置 vs 官方自带"。**教训：计数不是证据，符号必须读到定义处。**
+
+| 符号 | 真相（位号在 `sparse_flash_attention_service_vector_mla.h`，除注明外） | 对 §11.3/§11.4 的影响 |
+|---|---|---|
+| `SoftmaxFlashV2` | ✅ **是 AscendC 内置模板，官方真在调**：`:540 SoftmaxFlashV2<T, true, true, false, false, SFA_SOFTMAX_FLASHV2_CFG_WITHOUT_BRC>(...)`（外层是官方自己的成员 `SoftmaxFlashV2Compute`，`:84` 声明 / `:519` 定义 / `:675` 调用） | ⇒ 910B 上有现成的融合 softmax 可用，**6 个模板参数的取值形状有据可抄**；§11.4 第 4 条的第 1 小问由"未核实"降为"**待编译裁定**"（头文件存在 + 官方 arch22 版调用，但仍没证明我们的构建能实例化它，见 §13.8） |
+| `Brcb` | ✅ **内置**，4 处真实调用，形状统一是 `Brcb(dst, srcElement, (行数 + 7) / 8, {1, 8})`（`:405` 广播 softmaxSum、`:413` 广播 softmaxMax、`:608`、`:1327`） | ⇒ **P1"把按行标量广播改成一次向量广播"官方同样在做**，`(n+7)/8` 与 `{1,8}` 是 repeatTimes/blend 的实测口径 |
+| `RowMuls` | ❌ **不是内置 API** —— 是官方自己的成员函数：`:62` 声明、`:1384` 定义 `SFAVectorService<SFAT>::RowMuls(dst, src0, src1, rowCount, columnCount, actualColumnCount)`，`:610` 调用 | ⇒ 归一化按行乘官方**自己手写实现**（其内部用什么指令要读 `:1384` 起）；§11.3 P1 第 3 条写"→ `RowMuls`"**用词错了**，应改成"照 §1384 的按行乘做法" |
+| `AmlaVec` | ❌ **不是内置 API** —— 命中的 3 处全是官方自己的成员 `AmlaVecCompute`（`:88` 声明 / `:552` 定义 / `:679` 调用） | ⇒ §11.4 里"`AmlaVec` 签名待核实"这一问**是伪问题**（它从来不是 toolkit 接口）；真正该读的是 `:552` 起这段官方怎么算 P@V |
+| `CrossCoreSetFlag` | ✅ **内置**：`_kernel_mla.h:30 using AscendC::CrossCoreSetFlag;`，`:738/:753/:754/:792` 以 `CrossCoreSetFlag<ConstInfo::SFA_SYNC_MODE2, PIPE_FIX>(constInfo.syncC1V1)` 形式调用（`:794` 还用了字面量通道 `3`） | ⇒ AIC↔AIV 握手的**模板参数写法与 flag 编号**有据；对应 §11.2 S5、P4 必经 |
+| `Matmul` | ✅ 内置：`_service_cube_mla.h` 23 处（`#include "lib/matmul_intf.h"`） | ⇒ **官方把 Q@K̃^T 与 P@V 放在 Cube**，与我们纯标量 Vector 路线根本不同 ⇒ P4 方向由官方实现背书 |
+| `WholeReduceSum` | 官方 arch22 SFA **一次都没用** | ⇒ 我们原来的"`WholeReduceSum` stride 待核实"也跟着作废，改成"读官方怎么做行归约"（`:1327` 附近的 `Brcb` + 自写累加） |
+
+### 13.8 实验：把内置官方源码整份丢进**我们自己的构建路径**编一次（结论：⛔ 拷文件不够）
+
+做法（全在 `e6z6k:~/sfa_cpu/`，不碰 `code 3/`）：`cp -r code proj_builtin` → 移走我们的 `op_kernel/sparse_flash_attention.cpp` → 拷入官方 6 个文件 → 跑 §13.6 的编译门。日志 `code 3/cpu_debug/logs/e6z6k_builtin_compile_20260920.log`（573 行完整 make 日志留在远端 `~/sfa_cpu/proj_builtin/logs_builtin/sfa_make.log`）。
+
+结果：`cmake ok`，**`MAKE FAIL`，11 个错误，且全部是同一类**：
+
+```
+kernel_meta_SparseFlashAttention_..._2753_kernel.cpp:112:5: error:
+  no matching function for call to 'sparse_flash_attention_34_tilingkey'   ← 还有 _0_ / _64_ / _66_ / _512_ / _546_ / _576_
+```
+
+**判读（这条比"编不过"本身值钱）**：
+
+1. 报错点在构建系统**生成的 kernel 包装**（`kernel_meta_*.cpp:112`）调用 tiling-key 分发函数处 —— 官方 `.cpp` 期望有一批 `sparse_flash_attention_<枚举>_tilingkey` 重载，它们由 **built-in 那套 tiling-key 代码生成体系**（`ascendc/host_api/tiling/template_argument.h` + 官方 host 侧 tiling）产生，**不在我们这 4 个提交文件里**。⇒ **§13.5 里对方案 (c)"直接移植"的风险，从推测变成实测**：移植不是拷 6 个文件，得连它的 host 侧 tiling 生成体系一起搬。
+2. ⚠️ **但这次失败不能用来裁定 API 可用性**：分发函数没匹配上 ⇒ 模板体根本没被实例化，`SoftmaxFlashV2`/`Brcb` 那些调用**一行都没进去编**。头文件能被找到并解析（没有 `file not found`/语法错）只能算弱证据。
+3. ⇒ **要裁定 §11.4 剩下的问题，必须写我们自己的 probe kernel**：在自己的 `extern "C" __global__ __aicore__` 入口里直接实例化 `SoftmaxFlashV2<T, true, true, false, false, ...>`、`Brcb(dst, src, (n+7)/8, {1,8})`、`CrossCoreSetFlag<2, PIPE_FIX>(k)`，让编译器的话代替计数。这就是 T3 的正题（工具已就绪，probe 待写）。
+
+### 13.9 内置官方源码的使用边界（**用户已裁定，本节作废原"待裁定"表**）
+
+原 §13.5 列了三种用法请用户拍板，2026-09-20 晚答复：**「深度数据流对照」**。落地口径：
+
+| 方案 | 裁定 | 依据 |
+|---|---|---|
+| (a) 只当 API/idiom 参考 | 否（用户选了比它更深的） | —— |
+| **(b) 深度数据流对照** | ✅ **按此执行**（任务 T4） | 逐段比官方 MLA-absorb 流水与我们通过版的差异：Q@K̃^T 放 Cube 还是 Vector、score 的 UB 布局、在线 softmax 状态机、P@V 累加、gather 搬运、多核切分与 tiling-key 决策；**产出写回 §11.3 修订 P1~P4，代码仍是我们自己写的** |
+| (c) 直接移植它的 kernel | ⛔ **已被实测挡下** | §13.8：官方 `.cpp` 依赖 built-in 的 tiling-key 代码生成（`sparse_flash_attention_<枚举>_tilingkey` 那批重载 + `host_api/tiling/template_argument.h`），**不是拷 6 个文件就能进我们的构建路径**；且我们是 6/6 通过版，移植等于推翻已锁定的正确性 |
+
+⇒ 素材已就位（`refs/sfa/cann_builtin_900/`，md5 已复验），编译门已就位（§13.6），**T4 可以纯本地开工**（读 6 个文件 + 我们 `code 3/code/`，不需要环境）；T3 的 probe kernel 是它的前置小料（先裁定 `SoftmaxFlashV2` 我们能不能实例化，否则对照出来的结论有一条走不通）。
+
+### 13.10 ✅ T3 收口：probe kernel 过编译门，§11.4 剩下的 API 全部由**编译器**裁定（`e6z6k:~/sfa_cpu/proj_probe/`，2026-09-20 19:32）
+
+工件：`code 3/cpu_debug/probe_apis.cpp`（远端改名成 `sparse_flash_attention.cpp` 才能进构建，见下）· CR 剥离后 md5 **`52d498541f83cb1efdaaa86307b3ec7f`**（远端同值，字节级一致）· 日志 `code 3/cpu_debug/logs/e6z6k_probe_compile{,2,3,4}_20260920.log`。
+
+**最后一轮：`cmake ok` → `BUILD OK`，warning 计数 0**，两个 kernel 变体（`SparseFlashAttention_bf6e58eb…` / `_e26890ef…`，即 DT_QUERY=float / half16）都出了 `.o` + `.json`，`libcust_opapi.so` 与 `libcustom_ascendc_cust_optiling.so` 都建出来了。⇒ **probe 里点名的每一个 API 都在 ascend910b / CANN 9.0.0 上通过类型检查并成功实例化**。
+
+| API（probe 里的调用形状） | 裁定 | 实测口径 |
+|---|---|---|
+| `SoftmaxFlashV2<half, true, true, false, false, cfg>` **9 参**（无 shared tmp） | ✅ 可实例化 | `softmaxflashv2.h:79` 那支确实存在于 910B 分支 |
+| `SoftmaxFlashV2<…>` **10 参**（官方 `_service_vector_mla.h:540` 原样参数个数，带 `u8` tmp） | ✅ | ⇒ §11.4 第 4 条第 1 小问结案：**融合 softmax 在我们自己的构建路径上可用**，P1/P2 可以依赖它 |
+| `SoftmaxFlashV2<…>` **11 参**（+ `outReduceMax`，`softmaxflashv2.h:291`） | ✅ | 想同时拿 max/sum 时有现成出口，不必自己存 |
+| `Brcb<half>(dst, src, (uint8_t)8, {1, 8})` | ✅ | `BrcbRepeatParams` **只有 2 参 ctor** `{dstBlkStride, dstRepStride}` ⇒ 官方的 `{1, 8}` 是合法写法 |
+| `Exp` / `Reciprocal` / `Muls` / `Cast`（mask 数组 + mask 标量两种） | ✅ | 但 **`UnaryRepeatParams` 没有 2 参 ctor**：只有 `{dstBlkStride, srcBlkStride, dstRepStride, srcRepStride}` 4 参与 +`halfBlock` 5 参（`kernel_struct_unary.h:36/43`）⇒ probe 首两轮就是死在这里（`{1,1}` 编不过，改成 `{1,1,0,0}`） |
+| `WholeReduceSum<half>(dst, src, mask[], 8, 1, 1, 1)`（显式 stride） | ✅ | §11.4 那条"stride 待核实"**结案** |
+| `CrossCoreSetFlag<2, PIPE_FIX>(flag)` / `CrossCoreWaitFlag<2, PIPE_FIX>(flag)` | ✅ | AIC↔AIV 握手的模板写法在我们的构建路径上成立（P4 前置） |
+
+**两条新的构建期坑（补进 §4）**：
+
+1. **kernel 源文件名必须等于算子名**。probe 曾以 `probe_apis.cpp` 放进去，OPC 直接 `FileNotFoundError: operator: sparse_flash_attention source file does not found` ⇒ 试编别处来的代码时要按算子名落盘。
+2. ⭐ **kernel 源必须 `#include "tiling_key_sparse_flash_attention.h"`**。漏了这一行时，构建系统生成的包装（`kernel_meta_*/…_kernel.cpp:43`）会去调 `sparse_flash_attention_0_tilingkey` 而**无人定义**，报 `no matching function for call to`，与 §13.8 官方源码的 11 个错**症状一模一样**。原 `sparse_flash_attention.cpp:481-485` 那条 `extern "C"` 注释早就暗示了这个分发机制，但没写"必须 include"。
+
+⚠️ **因此修正 §13.8 的判读 1**：官方那 11 个错**不是**"忘了 include tiling-key 头"（它 `:17` 就 include 了自己的 `sparse_flash_attention_template_tiling_key.h`）；但也不能再说"tiling-key 代码生成体系搬不过来"——**本节的 probe 证明：只要我们自己那份 15 行的 tiling-key 头被 include，同一套 codegen 就能生成匹配的 `_0_tilingkey` 包装并编绿**。真正的门槛收窄成一条：**要用官方的 `_34_/_64_/_512_…` 那批 key，就得让 host 侧 tiling 真的产出那些枚举值**（它依赖官方 host tiling + `SFA_OP_IMPL` 的多模板参数形状），而不是构建系统缺机制。⇒ 方案 (c)"移植"的阻力评估从"机制不通"降为"host 侧 tiling 要一起搬"，但仍不改 §13.9 的裁定：**只做数据流对照，不搬代码**。
