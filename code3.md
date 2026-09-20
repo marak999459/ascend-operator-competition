@@ -1121,3 +1121,12 @@ kernel_meta_SparseFlashAttention_..._2753_kernel.cpp:112:5: error:
 2. ⭐ **kernel 源必须 `#include "tiling_key_sparse_flash_attention.h"`**。漏了这一行时，构建系统生成的包装（`kernel_meta_*/…_kernel.cpp:43`）会去调 `sparse_flash_attention_0_tilingkey` 而**无人定义**，报 `no matching function for call to`，与 §13.8 官方源码的 11 个错**症状一模一样**。原 `sparse_flash_attention.cpp:481-485` 那条 `extern "C"` 注释早就暗示了这个分发机制，但没写"必须 include"。
 
 ⚠️ **因此修正 §13.8 的判读 1**：官方那 11 个错**不是**"忘了 include tiling-key 头"（它 `:17` 就 include 了自己的 `sparse_flash_attention_template_tiling_key.h`）；但也不能再说"tiling-key 代码生成体系搬不过来"——**本节的 probe 证明：只要我们自己那份 15 行的 tiling-key 头被 include，同一套 codegen 就能生成匹配的 `_0_tilingkey` 包装并编绿**。真正的门槛收窄成一条：**要用官方的 `_34_/_64_/_512_…` 那批 key，就得让 host 侧 tiling 真的产出那些枚举值**（它依赖官方 host tiling + `SFA_OP_IMPL` 的多模板参数形状），而不是构建系统缺机制。⇒ 方案 (c)"移植"的阻力评估从"机制不通"降为"host 侧 tiling 要一起搬"，但仍不改 §13.9 的裁定：**只做数据流对照，不搬代码**。
+
+### 13.11 本地参考实现的口径复验（不占任何环境，2026-09-20 晚）
+
+真机被题1 占用，本轮全部动作零环境依赖：
+
+- `refs/sfa/sfa_ref.py` **代码早已是按平台口径写的**（`:112-115` 空行/padding 行 `smax=0.0`），但**文件头注释 `:29` 仍写 `LSE = (-2e38, 0)`** —— 已改成 `0.0` 并标"别改回去"。风险点很实在：只看注释的人会把正确性反向"修"回旧哨兵。⚠️ 顺带更正了一条过期记载（本地备忘原记"`:112` 旧口径未同步"，与磁盘实际不符；实际滞后的只有注释）。
+- 复验：`python refs/sfa/sfa_ref.py selftest` → **全部通过 [PASS]**，其中 `[全 mask] LSE = (0.000e+00, 0.0) 期望 (0.0, 0.0)` 这条正是 §5.8.4 判分口径的本地锚点。（控制台中文乱码是 Windows GBK 显示问题，不影响判定。）
+- `SOFTMAX_MIN_NUM`(`:42`) 现已是**死常量**（全仓只有注释引用），保留仅作官方取值记录。
+- 待办不变：#4 数据流对照（纯本地）、#6 P1 候选试编（要 `e6z6k` CPU 编译门，**不碰 NPU**）、#5 真机基线（等题1 让出）。

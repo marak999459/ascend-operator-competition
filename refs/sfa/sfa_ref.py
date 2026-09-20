@@ -26,7 +26,8 @@ SparseFlashAttention 独立参考实现 —— 纯标准库（零依赖）
 - sparseMode=0: thr = actualS2
 - BSND 布局下 actual_seq_lengths 是【per-batch 值】（TND 才是累积前缀和）
 - score = (q@k^T + q_rope@k_rope^T) * scale
-- 全 mask 行 -> attentionOut 全 0, LSE = (-2e38, 0)
+- 全 mask 行 / padding 行 -> attentionOut 全 0, LSE max = 0.0（平台实测口径，见 :112 与 code3.md §5.8.4；
+  本地早期自造的 -2e38 哨兵已废弃，别改回去）
 """
 import argparse
 import math
