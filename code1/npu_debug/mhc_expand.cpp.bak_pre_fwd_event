@@ -110,9 +110,6 @@ private:
         DataCopyPad(in_buf, x_gm_[src_off], cp, pp);
         in_que_.EnQue(in_buf);
         auto x_local = in_que_.DeQue<DT_X>();
-        // 前向是纯搬运、中间没有 VEC 指令，TQue<VECIN> 的序只挂在 VEC 消费上，所以 MTE2
-        // 落地与上一次 MTE1 读完这两道序得自己补；本路径无 VEC 动作，ALL 与单条 barrier 等价
-        PipeBarrier<PIPE_ALL>();
 
         const uint32_t k_begin = (k_limit == tiling_.m) ? 0 : k_limit;
         const uint32_t k_end   = (k_limit == tiling_.m) ? tiling_.m : k_limit + 1;

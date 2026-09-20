@@ -1,0 +1,10 @@
+# v3_20260920_212646  op_summary_20260920212658.csv
+  fwd: n=21 含首任务 mean=1118.6us | 剔首 mean=1117.3 min=1111.0 p50=1116.6 max=1124.3us blk=40
+  bwd: n=21 含首任务 mean=1093.0us | 剔首 mean=1088.3 min=1079.6 p50=1086.9 max=1098.6us blk=40
+  fwd 流水线均值(us) aiv=1095.1 mte2=213.2 mte3=1088.4 vec=0.0
+  bwd 流水线均值(us) aiv=1056.3 mte2=1013.7 vec=385.0
+# v0_20260920_212810  op_summary_20260920212823.csv
+  fwd: n=21 含首任务 mean=1059.2us | 剔首 mean=1059.0 min=1054.4 p50=1058.9 max=1064.7us blk=40
+  bwd: n=21 含首任务 mean=1090.2us | 剔首 mean=1085.6 min=1079.5 p50=1085.7 max=1094.6us blk=40
+  fwd 流水线均值(us) aiv=1041.0 mte2=229.6 mte3=1038.3 vec=0.0
+  bwd 流水线均值(us) aiv=1056.2 mte2=1013.6 vec=385.0

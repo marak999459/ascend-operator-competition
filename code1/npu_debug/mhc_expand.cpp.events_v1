@@ -100,19 +100,21 @@ public:
 
 private:
     // 前向单块：读 x[i, jt] 一次，写 k_begin..k_end-1 个副本
-    // k=m 表示全 k（ROW 模式 UB 复用），k<m 表示只写第 k 个（STREAM/ELEMENT 模式拆核）
+    // k_limit=m 表示写全部 k（ROW 模式 UB 复用），k_limit<m 表示只写第 k_limit 个
+    // 前向是纯搬运、中间没有 VEC 指令，TQue<VECIN> 的序只挂在 VEC 消费上，所以
+    // MTE1 读出与 MTE2 写入之间必须用硬件事件配对，否则 MTE1 会读到未落地的 UB
     __aicore__ inline void ForwardOneBlock(uint32_t i, uint32_t jt, uint32_t cur_h, uint32_t k_limit) {
         const int64_t src_off = static_cast<int64_t>(i) * tiling_.D + jt * tiling_.dTileLen;
         DataCopyExtParams cp{1, static_cast<uint32_t>(cur_h * static_cast<int32_t>(sizeof(DT_X))), 0, 0, 0};
         DataCopyPadExtParams<DT_X> pp{false, 0, 0, static_cast<DT_X>(0)};
 
+        if (fwd_warmed_) WaitFlag<HardEvent::MTE1_MTE2>(EVT_OUT2IN);
         auto in_buf = in_que_.AllocTensor<DT_X>();
         DataCopyPad(in_buf, x_gm_[src_off], cp, pp);
+        SetFlag<HardEvent::MTE2_MTE1>(EVT_IN2OUT);
         in_que_.EnQue(in_buf);
         auto x_local = in_que_.DeQue<DT_X>();
-        // 前向是纯搬运、中间没有 VEC 指令，TQue<VECIN> 的序只挂在 VEC 消费上，所以 MTE2
-        // 落地与上一次 MTE1 读完这两道序得自己补；本路径无 VEC 动作，ALL 与单条 barrier 等价
-        PipeBarrier<PIPE_ALL>();
+        WaitFlag<HardEvent::MTE2_MTE1>(EVT_IN2OUT);
 
         const uint32_t k_begin = (k_limit == tiling_.m) ? 0 : k_limit;
         const uint32_t k_end   = (k_limit == tiling_.m) ? tiling_.m : k_limit + 1;
@@ -121,7 +123,9 @@ private:
                                     static_cast<int64_t>(k) * tiling_.D + jt * tiling_.dTileLen;
             DataCopyPad(o_gm_[dst_off], x_local, cp);
         }
+        SetFlag<HardEvent::MTE1_MTE2>(EVT_OUT2IN);
         in_que_.FreeTensor(x_local);
+        fwd_warmed_ = 1;
     }
 
     // 反向单块：逐 m 读 o_grad[i, k, jt] -> Cast 到 float 累加 -> Cast 回原 dtype 写 x_grad[i, jt]
@@ -178,6 +182,9 @@ private:
     uint32_t elem_size_;
     uint32_t task_begin_;
     uint32_t task_end_;
+    uint32_t fwd_warmed_ = 0;
+    static constexpr int32_t EVT_IN2OUT = 0;   // MTE2 -> MTE1
+    static constexpr int32_t EVT_OUT2IN = 1;   // MTE1 -> MTE2
 };
 
 template <typename DT_X, bool BACKWARD>
