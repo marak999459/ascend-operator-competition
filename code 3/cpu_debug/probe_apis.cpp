@@ -59,6 +59,15 @@ __aicore__ inline void ProbeSoftmaxFlashV2()
     SoftMaxTiling tl;
     SoftMaxShapeInfo si{8, 16, 8, 16};
 
+    /* the tiling the official computes IN-KERNEL (softmaxflashv2.h:46 constexpr, return-value
+       form). The host-side out-param overload in softmax_tiling.h:207 is a DIFFERENT function
+       (ge::Shape + optiling::SoftMaxTiling), not a newer version of this one. */
+    SoftMaxTiling t6 = SoftMaxFlashV2TilingFunc(si, sizeof(half), sizeof(half), 32768, true, false);
+    SoftMaxTiling t8 = SoftMaxFlashV2TilingFunc(si, sizeof(half), sizeof(half), 32768, true, false,
+        false, true);
+    tl = t6;
+    tl = t8;
+
     /* form A: 9 args, no shared tmp buffer (softmaxflashv2.h:79) */
     SoftmaxFlashV2<half, true, true, false, false, PROBE_SFA_CFG>(
         h0, h0, h0, h1, h0, h0, h0, tl, si);
@@ -71,6 +80,30 @@ __aicore__ inline void ProbeSoftmaxFlashV2()
     /* form C: 11 args, with outReduceMax + shared tmp (softmaxflashv2.h:291) */
     SoftmaxFlashV2<half, true, true, false, false, PROBE_SFA_CFG>(
         h0, h0, h0, h0, h1, h0, h0, h0, u8, tl, si);
+
+    /* the official vector side runs fp32 (_service_vector_mla.h:31 "using T = float"),
+       so the float instantiation is the one we actually need (softmaxflashv2.h:162) */
+    LocalTensor<float> g0, g1;
+    SoftmaxFlashV2<float, true, true, false, false, PROBE_SFA_CFG>(
+        g0, g0, g0, g0, g1, g0, g0, u8, tl, si);
+}
+
+/* RowMuls / RowDivs are the official's OWN members (_service_vector_mla.h:1382 / :1359).
+   The toolkit primitive RowMuls is built from is Mul with BinaryRepeatParams -- that form is
+   NOT in the headers we landed locally (vconv:140-150 is AddReluCast), so the compiler has to
+   say whether our build path can see it. Args/field-assignment mirror the official verbatim
+   (_service_vector_mla.h:1407-1419), which is why nothing is brace-initialised here. */
+__aicore__ inline void ProbeRowBroadcastMul()
+{
+    LocalTensor<float> d0, s0, s1;
+    BinaryRepeatParams rp;
+    rp.src0BlkStride = 1;
+    rp.src1BlkStride = 0;
+    rp.dstBlkStride = 1;
+    rp.src0RepStride = 8;
+    rp.src1RepStride = 1;
+    rp.dstRepStride = 8;
+    Mul(d0, s0, s1, (uint32_t)64, (uint32_t)8, rp);
 }
 
 template <typename DT_QUERY>
@@ -88,6 +121,7 @@ __global__ __aicore__ void sparse_flash_attention(
         ProbeVectorOps();
         ProbeCrossCore();
         ProbeSoftmaxFlashV2();
+        ProbeRowBroadcastMul();
     }
 }
 

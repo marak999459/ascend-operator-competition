@@ -842,15 +842,18 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
 |---|---|---|---|
 | S1 | **稀疏 index 读取同样是标量循环**，但粒度是"每 512 个 KV 一次"，重活交给 `Mmad` + `Nd2Nz DataCopy` | `kernel_mla.h:965/995`（`topKGm.GetValue`）；搬运 `service_cube_mla.h:410-419`，行偏移 `(idInTopK*sbs+curOffset)*headDim` `:666/:911` | ✅ **印证"index 不需要向量化"**。我们该做的是：块内 token 本来就**连续**（`[curBegin, curEnd)`），所以 K/V 用**整段 `DataCopy`**，不是 gather |
 | S2 | **`SoftmaxFlashV2` 是 AscendC 内置接口**，不在 `attention/common/` | `service_vector_mla.h:543-545`；tiling 运行时算 `:540-542`；UB：tmpBuff1 32K + max/sum/exp 各 2×1K（`:220/:228-230`） | 我们**不必自己写 ReduceMax/Exp 树**（§10.7 原文记错了依赖位置，已更正） |
-| S3 | **在线 softmax 重缩放用向量指令**：`Sub` → `Exp` → `Brcb` + `RowMuls`，系数量化成 int32 再 `AmlaVec`（⚠️ **§13.7 更正**：这行里只有 `Brcb`/`Exp`/`Sub` 是内置指令，`RowMuls`/`AmlaVecCompute` 是官方**自己写的成员函数**，`AmlaVec` 一名与 toolkit 无关） | `service_vector_mla.h:568-647`（`AmlaVecCompute`，`:580/:598/:613-615/:624-647`） | 直接对应我们 `FlushChunk` 第 3 段 `:424-444` 的标量 `o = o*alpha + e*v` —— **这是单点收益最大的一处替换** |
+| S3 | **在线 softmax 重缩放用向量指令**：`Sub` → `Exp` → `Brcb` + `RowMuls`，系数量化成 int32 再 `AmlaVec`（⚠️ **§13.7 更正**：这行里只有 `Brcb`/`Exp`/`Sub` 是内置指令，`RowMuls`/`AmlaVecCompute` 是官方**自己写的成员函数**，`AmlaVec` 一名与 toolkit 无关） | `service_vector_mla.h:568-647`（`AmlaVecCompute`，`:580/:598/:613-615/:624-647`） | ~~直接对应我们 `FlushChunk` 第 3 段 `:424-444` 的标量 `o = o*alpha + e*v` —— **这是单点收益最大的一处替换**~~ ⛔ **本行右列已被 §14.3 作废**：那段是官方自己的误差源（整数位技巧 + 故意的 fp16 往返 + P 量化到 KV dtype），照抄只会远离 torch 参考。可迁移的只有**形状**（行级 `Brcb`/`Mul` + 整块 `Exp`），见 §14.5 的 P2 |
 | S4 | **LSE 走 `DataCopy` → `outputBuff2` → `DataCopyPad`**，非标量 `SetValue`；空行由 `InitAllZeroOutput` 统一归零 | `service_vector_mla.h:339 CopyFALseToGm`、`:371-383`；空行 `kernel_mla.h:265/:279-280/:291-292` | 我们在 §5.10.1 刚把 padding 分支改成同机制（`:289`）→ **口径已与官方一致**，这也是 K2 判定的独立印证 |
 | S5 | **Cube:AIV = 1:2 + `PRELOAD_NUM=2` 三段软流水**，跨核 `CrossCoreSetFlag`，双 buffer `pingpongFlag^=1` | `cpp:83 KERNEL_TYPE_MIX_AIC_1_2`；`kernel_mla.h:85/:798/:870-907`；`service_vector_mla.h:215-216/:824` | ⛔ **不可部分引入**：要 Cube 就必须一次到位（AIC + 两个 AIV 的握手），否则收益被同步吃掉 |
 | S6 | MM1 的 k 维**拆 `（256+32）×2` 两段**喂 Cube；MM2 的 k `256→128`；跨核累加用 `SetAtomicAdd` 把 bias 原子加进 O | `service_cube_mla.h:773-778/:1001`、`:1060-1064`、`:1289-1303` | 我们 §5.7.4 记的"官方 256+256+64 三段"**行号口径应以此为准**；`SetAtomicAdd` 是官方做 online-rescale 的第二个思路，**我们不用**（我们 AIV 内单核完成，无跨核累加） |
 
 **引入代价（好消息）**：arch22 **只依赖 CANN 自带头**（`kernel_operator.h`、`kernel_operator_list_tensor_intf.h`、`kernel_tiling/kernel_tiling.h`、`lib/matmul_intf.h`、`lib/matrix/matmul/tiling.h`，见 `kernel_mla.h:19-23`），**不需要 `attention/common/`** ⇒ 不会把整棵依赖树拖进提交包。
 ⚠️ **但**它的前置编译选项在 `op_host/CMakeLists.txt:22-28`：`--cce-auto-sync=off`、`-mllvm -cce-vf-remove-membar=false`、`-mllvm -cce-aicore-hoist-movemask=false`。**这三条是 Cube 流水正确性的前提**，而我们的提交包自带 `code/CMakeLists.txt`（三份与 zip 逐字节一致，见 §5.10.1）→ **必须先确认比赛平台的构建是否让我们带这些选项**，不能假设。
+✅ **§14.4 已推翻上面这句的适用范围**：内置 arch22 版那六个文件里**没有任何** `__NPU_ARCH__ == 3510/5102` 分支、**没有任何** `-mllvm` 依赖；`op_host/CMakeLists.txt:22-28` 那三条属于 **arch35 新版**（`ops-transformer-master/.../op_kernel/sparse_flash_attention.cpp:22-26`）。⇒ 对手写 `Mmad` 路线（我们的 P4）**这不是前置条件**，不用再问平台。
 
 ### 11.3 分阶段路线（每阶段独立可提交、独立可回退）
+
+> ⛔ **本节的 P1~P4 表述已被 §14.5 的修订表取代**（2026-09-20 深夜，深度数据流对照之后）。原表保留是为了留下"当时怎么想错"的痕迹：**新增 P0.5**（UB 预算式，§13.14）、P0 缩小、P1 的 ③ 升为前置、P2 丢 Amla、P3 的 UB 变成可算的数、P4 代价上调一档。**以 §14.5 为准，不要照本表动手。**
 
 > 纪律：**当前 6/6 通过版 = `§5.10.1` 的四个 md5，是本阶段的对照组，任何阶段失败就退回它**。改造在新文件副本上做，通过真机对拍再换提交源（§0 约束 4 备份、约束 5 逐步验证）。
 
@@ -874,9 +877,11 @@ export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann
    - ~~`AmlaVec` 签名~~、~~`RowMuls` 签名~~、~~`WholeReduceSum` stride~~ → **三条是伪问题**：前两个根本不是 toolkit 接口（官方自己的成员函数，见 §13.7），第三个官方 arch22 版没在用（§13.7 末行）。
    - `SoftmaxFlashV2` 我们能否用：**头文件在 CANN 9.0.0 里存在**（`asc/include/adv_api/activation/softmaxflashv2.h`）、**官方 arch22 版确实在调**（`_service_vector_mla.h:540`）⇒ 只剩"**我们的构建能否实例化**"一问，**用 probe kernel 在 §13.6 编译门上编一次即可裁定**（§13.8 已把这条路走通，只差 probe 本体）。
    - `Brcb` 调用形状：官方 4 处实测是 `Brcb(dst, srcElement, (rows + 7) / 8, {1, 8})`（§13.7）⇒ **已由源码裁定**，仍建议 probe 复验一次。
-   - **仍未裁定**：比赛平台构建能否带 `-mllvm` 选项；**比赛平台成绩是"取最好"还是"取最后一次"**（决定 P0b 探针要不要占第二个槽）；`CodeError2753/2754` 那类 tiling-key 代码生成在我们的提交包里能不能自己手写绕开（§13.8 的根因）。**这三条要么上真机、要么问平台，静态查不到。**
+   - **仍未裁定**：~~比赛平台构建能否带 `-mllvm` 选项~~（✅ §14.4 裁定：arch22 路线不需要，这条划掉）；**比赛平台成绩是"取最好"还是"取最后一次"**（决定 P0b 探针要不要占第二个槽）；`CodeError2753/2754` 那类 tiling-key 代码生成在我们的提交包里能不能自己手写绕开（§13.8 的根因，§14.4 进一步收窄为"host tiling 字段要搬 20 多个"）。**剩下的这两条要么上真机、要么问平台，静态查不到。**
 
 ### 11.5 P0 仪表（本轮已就绪，**未提交、未改 `code/`**）
+
+> ⚠️ 本节的网格仿真仍然有效，但**用途已缩**：§14.3 裁定"P 量化 / fp16 往返"是我们**主动不做**的改动，不再是"要不要做"的开放项 ⇒ 下面的 `p0_quantp.py` 探针**默认不投入提交槽**，只在 P0（真机量 `ExpPoly` vs `Exp`）意外落在灰色带、且需要反推绝对容差时才启用。
 
 | 文件 | 作用 |
 |---|---|
@@ -1130,3 +1135,112 @@ kernel_meta_SparseFlashAttention_..._2753_kernel.cpp:112:5: error:
 - 复验：`python refs/sfa/sfa_ref.py selftest` → **全部通过 [PASS]**，其中 `[全 mask] LSE = (0.000e+00, 0.0) 期望 (0.0, 0.0)` 这条正是 §5.8.4 判分口径的本地锚点。（控制台中文乱码是 Windows GBK 显示问题，不影响判定。）
 - `SOFTMAX_MIN_NUM`(`:42`) 现已是**死常量**（全仓只有注释引用），保留仅作官方取值记录。
 - 待办不变：#4 数据流对照（纯本地）、#6 P1 候选试编（要 `e6z6k` CPU 编译门，**不碰 NPU**）、#5 真机基线（等题1 让出）。
+
+### 13.12 ⚠️ 官方 arch22 源码在本地其实有**两个版本**，§11.2 与 §13.7 的行号不是同一份（对照开工前必须先钉的口径）
+
+`find` + 逐文件 CR 剥离 md5 比对，根目录 `ops-transformer-master/attention/sparse_flash_attention/op_kernel/arch22/`（下称 **A**）与我这轮拉回的 CANN 9.0.0 安装版 `refs/sfa/cann_builtin_900/`（下称 **B**）**六个文件全部 md5 不同**：
+
+| 文件 | A 行数 | B 行数 | 差异行数 |
+|---|---|---|---|
+| `_common.h` | 205 | 201 | 41 |
+| `_kernel_mla.h` | 1037 | 1018 | 288 |
+| `_service_cube_mla.h` | **1320** | **1120** | **731** |
+| `_service_vector_mla.h` | 1481 | 1464 | 413 |
+| `.cpp`（入口）/ `_template_tiling_key.h` | A 放在**上一层** `op_kernel/`（arch22/arch35 共用），B 放在 arch22 目录内 | —— | —— |
+
+⇒ **§11.2 的 S1~S6 行号是读 A 得来的**（例：`SoftmaxFlashV2` 在 A 是 `:543`、B 是 `:540`，§13.7 记的是 B），**两版漂移最大的是 cube 侧（731 行）——恰好是 P4 要抄的那一段**。**口径定为**：结构与行号一律以 **B（9.0.0 安装版）** 为准，因为我们的构建/编译门就是 9.0.0（§13.10 的 API 裁定只对得上 9.0.0 头），A 只作交叉印证；引用时写成 `B:_service_vector_mla.h:540`（A 的对应位号另注）。
+
+**顺带纠正 §13.7 最后一条误读**（我当时写"`SoftMaxFlashV2TilingFunc` 已漂移成出参形式，与内置源码的返回值形式不符"）：**两版官方源码用的是同一个返回值形式**，而 9.0.0 里其实**同时存在两个不同侧的重载**，我把它们当成版本差：
+
+| 声明位号 | 签名形状 | 侧 |
+|---|---|---|
+| `refs/sfa/cann_api_900/adv_api/activation/softmaxflashv2.h:46` | `__aicore__ inline constexpr SoftMaxTiling SoftMaxFlashV2TilingFunc(const SoftMaxShapeInfo&, u32, u32, u32, isUpdate=false, isBasicBlock=false, isDataFormatNZ=false, isFlashOutputBrc=false)` —— **返回值形式**，正是官方 `B:…:538-540` / `A:…:541-542` 在用的 | **kernel 侧** |
+| `refs/sfa/cann_api_900/adv_api/activation/softmax_tiling.h:207` | `void SoftMaxFlashV2TilingFunc(const ge::Shape&, u32, u32, u32, optiling::SoftMaxTiling&, isUpdate, …)` —— **出参形式** | **host 侧**（`ge::` / `optiling::` 类型） |
+
+⇒ 对 P2 的意义：**`SoftMaxTiling` 可以在 kernel 里 constexpr 现算**（不必依赖 host 侧 tiling 把结构体塞进 workspace），官方就是这么做的。**待编译门复验**（已把 6 参与 8 参两种调用加进 `code 3/cpu_debug/probe_apis.cpp`，`e6z6k` 一恢复就编）。
+
+### 13.13 环境状态（2026-09-20 深夜）：CPU 编译门**暂时不可用**
+
+`devspace_tunnel.ps1 -Role cpu -Env e6z6k` 实测失败，三条独立证据一致：本地 `482xx` 无监听、`ssh` 直接 `Connection refused`、脚本扩展日志"账号环境列表里查不到 devEnvId `d611a7d4…`"，结论行判定是**桌面 VS Code 当前登录账号切走了**（不是环境被回收）。已停手不重试。⇒ 已排队的 `SoftMaxFlashV2TilingFunc` 编译复验 + #6 P1 候选试编**都等环境**；#4 数据流对照是纯本地，不受影响，继续推进。
+
+### 13.14 ⚠️ 对照 P1 前置：host 的 UB 预算式**按 fp16 算 K/V，但 fp32 模板实例要 2 倍** —— 实测超预算 17 KB
+
+纯本地算术（不需要环境，逐项照抄代码）：
+
+- kernel 侧真实申请：`op_kernel:170-172` 是 `nBlk_ * D_ * sizeof(DT_QUERY)`（K、V 各一份）+ `nBlk_ * Dr_ * sizeof(DT_QUERY)`；**DT_QUERY ∈ {half, float}**（`op_kernel:502-506` 两个显式实例化）。
+- host 侧估算：`op_host:44-45` 把这三项**写死成 2 字节**（`nBlk*qD*2*2` / `nBlk*dr*2`）⇒ 与模板实例**无关**，`CalcBlocking()`（`:59-75`）也从不按 dtype 分叉。
+- bench 形状（`B=1,S1=128,S2=8192,N1=8,D=512,Dr=64`）下，按 `NB_CAND/NBLK_CAND` 的打分规则（`:36-37` 优先大 `nb` 再大 `n_blk`，约束 `nb*n_blk>=sbs`、`host 估算<=ubSafe`）实测选中 **`nb=32, n_blk=16`**（对 `sbs=1/64/128` 三档都是这一个组合）。
+- 该组合的真实占用：`ubSafe = 196608/100*95 = 186,770`
+
+| 口径 | 字节 | 对 196,608 物理 UB |
+|---|---|---|
+| host 估算（`CalcUbNeed`） | 178,624 | 通过 |
+| kernel 实际 **fp16** 实例 | 178,880 | 通过（host 少算 256B：`lseBuf_` 没进预算式） |
+| kernel 实际 **fp32** 实例 | **213,696** | ⚠️ **超 17,088 字节** |
+
+**判读（哪些是实测、哪些还是推断）**：
+- ✅ 实测部分只有"算术"：三行数字可复算，代码位号如上。
+- ⚠️ **未验证部分**：`TBuf` 超预算时是**分配失败**还是**静默越界**，本地判不了；以及**比赛平台哪些用例会走到 `DT_QUERY=float`**（`refs/sfa/cases/` 现有 10 个用例文件名不带 dtype，需真机 `run.sh` 侧确认）。若平台 fp32 用例存在且现在 6/6 是 PASS，那更可能是"静默共享地址"而非报错 —— 那就是**正确性隐患**，不是性能问题。
+- 与 §4.2 的教训同源：**别自己撑爆 UB**。这也是 §11.3 "UB 预算提醒"的具体化。
+
+**对 P1 的直接约束**：`DataCopyPad` 的搬运单位是 `n_blk=16` 个 token（不是官方的 32），且 **P1 第一步应把 `CalcUbNeed` 的 `sizeof(DT_QUERY)` 补成按实例取大者**（或干脆 `nb*n_blk` 表按 dtype 分叉），否则 P1~P3 把 `n_blk` 往大调会把这个洞放大。⇒ 新增 **P0.5 前置项**：修预算式 + 真机确认 fp32 用例存在性，**零性能风险、但必须排在 P1 之前**。
+
+---
+
+## 14. ⭐ 2026-09-20 深夜：内置 arch22 SFA 与通过版的**深度数据流对照**结论（任务 T4，用户裁定口径"只对照不搬代码"）
+
+方法：3 个只读研究任务分轴拆官方 B 版（轴1 搬运/UB、轴2 在线 softmax+LSE、轴3 AIC/AIV 与 tiling key），**我对其中改变决策的断言逐条回读原文复核**（标记：✅=我读了位号原文；⚠️=仅研究任务报告、未复核）。位号一律 §13.12 的 **B 版**口径；缩写 `vec/kmla/cube/cmn/tk` 指 `refs/sfa/cann_builtin_900/sparse_flash_attention_{service_vector,service_cube,kernel,common,template_tiling_key}_mla.h`（`cmn`/`tk` 无 `_mla` 后缀），`our:` 指 `code 3/code/op_kernel/sparse_flash_attention.cpp`。
+
+### 14.1 三条最重要的结构性事实（都推翻或收紧了我原来的假设）
+
+1. ✅ **官方向量侧全程 fp32**：`vec:30-31` 原文注释"中间计算数据类型为float，高精度模式"+ `using T = float`，且 `MM1_OUT_T / MM2_OUT_T = float`。⇒ 它调的是 `SoftmaxFlashV2<float,…>`（`vec:540`），**不是**我 probe 里唯一编过的 `<half,…>`。9.0.0 该重载是类型无关模板（`refs/sfa/cann_api_900/adv_api/activation/softmaxflashv2.h:162-168`），但"编过 half"不等于"编得过 float"——**已加进 probe 队列**（§14.5 末）。
+2. ✅ **官方 arch22 根本没用高层 `Matmul` 类**：`cube` 里 `Matmul<` / `SetMulCfg` / `SetAa` / `SetB(` / `IterateAll` / `SetBias` **各 0 次**（`matmul_intf` 只 1 次 = 那个 `#include`）。"23 处 Matmul 命中"又是 §13.7 那类**计数陷阱**——命中的是自家类名 `SFAMatmulService`（`cube:115`）。真实流水是手写 L1/L0：`Mmad(` 2 次（`cube:808/1074`）、`Fixpipe(` 2 次（`cube:832/1102`）、`LoadData<` 3 次（`cube:471/1035/1061`），配 `MmadParams`(`800/1066`)、`FixpipeParamsV220`(`822/1093`)、`LoadData3DParamsV2`(`446/1012/1038`)、`Nd2NzParams`(`53/360/403-412`)。⇒ **P4 不是"接一个 Matmul 类"，是手写一套 dav-2201 的 L1/L0/MTE 流水**，比我 §11.3 P4 那行"≈重写"还要再高一档。
+3. ✅ **官方"少搬一半 KV"的快路径对我们不成立**：`tk:27-28` 定义 `C_TEMPLATE=0 / V_TEMPLATE=1`，是 tiling key 的一个维度。**V 模板 = MLA-absorb 语义下"K 的 content 就是 V"**，所以 mm2 的右矩阵直接复用合并区的 K content（`cube:623` 与 `cube:917` 的 `if constexpr (TEMPLATE_MODE == V_TEMPLATE)`），V 完全不 gather。而**我们题面 `value` 是独立张量**（`official_problem_statement.md` 示例1：`key = zeros` 而 `value = arange(1..S2)`，形状 `(B, KV_S, KV_N=1, Q_D)`）⇒ **能对照的只有 C_TEMPLATE 分支**，官方那半个 KV 的流量红利我们拿不到。
+
+### 14.2 搬运轴：官方怎么把"稀疏 gather"变成整段拷贝（P1 的权威口径）
+
+- ✅ 稀疏块号→GM 偏移官方也是**标量 `GetValue`**：`vec:824` `topkGmIdx = (s2GmOffset + runInfo.s2Idx * s2BaseSize) / sparseBlockSize`；`vec:829-830` `realS2Idx = topkGm_.GetValue(base + idx) * sparseBlockSize + ((s2GmOffset + s2Idx*s2BaseSize) % sparseBlockSize)`。⇒ **§11.2 S1 成立：index 不需要向量化**。我们 `NextTokenBlock`（`our:241-256`）同构，且我们的 `sparse_indices` 也是**块号**（每块 `sbs_` 个连续 token）⇒ **一块 = `sbs×D` 连续元素**，天然可整段拷。
+- ✅ **一条指令搬两个块**：`vec:921-925` 用相邻两块地址差算 `keySrcStride = ((off1>off2?off1-off2:off2-off1) - sparseBlockSize) * headDim * sizeof(KV_T)`，配合 `blockCount=2`；异常场景回落成 2 条（`vec:928-934`，原文注释"stride溢出、stride为负数、s2超长等异常场景，还原成2条搬运指令"）。落盘 API 是 `DataCopyPad(dstUb, gm[start], DataCopyExtParams{blockCount, blockLen, srcStride, …})`（快路径 `vec:947-948` K content、`vec:953-954` K-rope）。
+- ✅ 官方**一个 `TQue` / `EnQue` / `SetQueue` / `Gather` / `IterSet` 都没用**（六个文件全文计数 0；"不存在"这类否定命题用全量计数是可靠的，与 §13.7 那种正向断言不同）。它用 `TBuf<>` + `SetFlag/WaitFlag<HardEvent::…>` 手工流水，12 个缓冲声明在 `vec:180-195`、申请在 `vec:213-231`；`inputBuff1` 是 `32K*2`=64KB **时分复用**（V0 阶段装 `32×512` K content，V1/V2 阶段装 8192 个 fp32 分数/O），双槽用 `pingpongFlag` / `loop%2` 轮转（`vec:657/886/1305`）。
+- ✅ 无效/越界**不 break**：压实 + 补零 + 记有效长度（`vec:1041` `Duplicate`、`vec:1051-1058` 逐 token 补零、`vec:1073-1074` 写 `kvValidSizeGm`），再把分数列打成 `-2e38` 掩掉（`vec:486-499` 的 32B 位掩码 `Duplicate(dst, SOFTMAX_MIN_NUM, mask, …)`）。我们 `our:247` 是 `return false` 直接退出扫描 ⇒ **凑不出定长向量窗口**，这是 P1 之前必须先换的语义（换完才谈得上 ping-pong）。
+- **我们的真实差距**（✅ 逐行对过 `our:352-361` vs `vec:947`）：我们把 1 个 token 的 576 维**逐元素** `SetValue/GetValue` 填进 UB（576 条标量访存/token）；更糟的是 **bf16 分支连 UB 都不读**——`our:414/419/450` 在 `isBf16_` 时直接 `kRawGm_ / krRawGm_ / vRawGm_.GetValue(...)` 从 GM 重读，于是 `kBuf_ / vBuf_ / krBuf_` **被分配却被闲置**（占了 §13.14 里那笔 UB 预算）。
+
+### 14.3 在线 softmax 轴：哪一段可抄、哪一段必须丢
+
+✅ 官方单块顺序（`vec:649-693` + `vec:551-646`）：**scale 前置**（`Muls(mmResUb, mmResUb, tilingData->baseParams.scaleValue, …)`，`vec:429`，全文件唯一 scale 点，在求 max 之前）→ `SoftmaxFlashV2<float, true, true, false, false, WITHOUT_BRC>` 一次拿齐 `P / sum / max`（`vec:540-542`，`isReuseSource=true` 原地覆盖 `mmResUb`，`expMaxTensor` 输出**被丢弃**）→ 行级 `Brcb(nTmp3, nUpdateTmp2, (rows+7)/8, {1,8})` + `RowMuls` 乘重缩放（`vec:608/610`）→ `Cast` P 到 KV dtype（`vec:686`）→ 末块 `RowDivs` 除 `sum×2^δ`（`vec:1329`）→ 输出 `Cast`。
+
+⛔ **必须丢弃的两段**（§11.2 S3 原写"直接对应我们 `:424-444`，是单点收益最大的一处替换"——**该结论作废**）：
+
+1. `AmlaVecCompute`（`vec:551-646`，官方**自家成员函数**，不是 AscendC API）的重缩放是**整数位技巧**：`n(i)=round(-m/ln2)`（`vec:563-566`）、系数量化成 int32、`SetAtomicAdd<int32_t>()` 把修正项直接原子加到 fp32 累加器的**位模式**上（`vec:747-770` + `cube:1088-1104`，首块还要先塞种子 `2^-80`，`vec:696-711`），中间含 `Muls(1.5)` 经验系数、`Maxs(nUpdate,-30)` 钳位、以及一次**故意的 fp16 往返**（`vec:595/597`）。这是**官方自己的误差源**（它为喂 Cube 才这么做），不是参考真值。我们 `our:441-443` 的 `alpha = exp(mOld-mNew)` 显式乘 O 数值上更准 ⇒ **照抄只会远离 torch 参考，而我们是"整行整头"判分**（§5.8.2）。
+2. **P 量化到 KV dtype**（`vec:686` fp32→fp16/bf16）：同理是喂 Cube 的产物，我们不上 Cube 就没理由引入。⇒ §11.5 那套 P0b 容差探针（`code 3/probes/p0_quantp.py`）针对的正是这一项，**默认不做**。
+
+✅ **LSE 语义**：kernel 内**根本没有 log**（`Ln` 全目录 0 次调用、`Reciprocal` 未使用），`softmaxMaxOut = max(scale·S)`、`softmaxSumOut = Σexp(x − max)`，`lse = max + ln(sum)` 由 kernel 之外完成 ⇒ 与我们 `our:383-384` 写的 `(mNew, l)` **同口径**。这条对 P2 是好消息：换硬件 `Exp` 不改变 LSE 的定义，只改变末位。
+
+⚠️ **口径分歧（重要，且我们是对的）**：官方对"跑过循环但整块无有效列"的行写 `max = SOFTMAX_MIN_NUM(-2e38)`、`sum = 0`（✅ 我读了 `vec:380-382` 原文 `matmul::InitOutput(softmaxMaxGm[offset], size, SOFTMAX_MIN_NUM)`）；只有"整行无有效 KV"和 padding 行才 `0.0`（`kmla:264-294` `InitAllZeroOutput`）。我们 6/6 通过版对 `l == 0` 一律写 `(0,0)` 且平台判 PASS（§5.8.4）⇒ **不要照搬官方的 -2e38**。
+
+✅ 唯一"我们明显偏官方"的点：bf16 输出我们用手写**截断**（`our:67-72` `FloatToBf16` 右移 16 位），官方用 `Cast` + **`CAST_RINT`**（`vec:1265-1269`）。**记为待评估项，不擅改**——动了就是改已锁定的数值，必须真机逐位对比才知道影响面。
+
+### 14.4 AIC/AIV 与 tiling key 轴：P4 的真实门槛
+
+- ✅ key 打包规则**反推自洽**：`key = FLASH_DECODE<<0 | LAYOUT_T<<1 | KV_LAYOUT_T<<5 | TEMPLATE_MODE<<9`（`tk:21-37`），恰好生成 §13.8 编译错误里那 7 个名字：`0`(BSND/BSND/C)、`34`(TND/TND/C)、`64`(BSND/PA_BSND/C)、`66`(TND/PA/C)、`512/546/576`（同四组合的 V 版）。**dtype / sparseMode / headDim / sbs 都不进 key**（在 tiling data 里，`kmla:213-227`）。⇒ **§13.8 的门槛确认收窄为"host tiling 字段"**：我们赛题 shape 只需 1~2 个 key，`switch(tilingKey)` 自己写完全可行；真正要搬的是 `kmla:203-227` 那 20 多个字段，以及与之一一绑定的 workspace 切分（`kmla:466-489`）。
+- ✅ 跨核握手编号与写法：flag `C2V1=4, V1_NupdateC2=5, V0C1=6, C1V1=7, V1C2=8, C2V2=9`（`kmla:88-93`，我复核过原文），`10/11/12` 三个 flag **在这 6 个文件里没有任何一行使用**（FLASH_DECODE 被 `tk:43` 恒置 0 关死）；`PRELOAD_NUM=2`、`N_BUFFER_M_BASIC_SIZE=256`、`SFA_PRELOAD_TASK_CACHE_SIZE=3`（`kmla:84-86`）。写法成对：`Set` 用 `<2, PIPE_FIX/MTE2/MTE3>`，`Wait` 走默认 `<0, PIPE_S>`（⚠️ modeId 的路由语义本地无头可裁定；§13.10 的 probe 只证明 `<2,PIPE_FIX>` 的 Set/Wait 过类型检查）。
+- ⚠️ **硬约束**：`nBufferLoopTimes` 在 AIC 与 AIV 两侧用同一公式**各自独立**算出（`kmla:731/745` vs `vec:1083/1149`），次数不一致即**死锁**。⇒ P4 不是"一段改动"，是"两侧循环计数必须推导一致"这一整块工程。
+- ✅ 1 Cube : 2 Vector 的映射靠 `blockIdx`（`kmla:422-428`：AIV 用 `idx/2`、AIC 用 `idx`）+ `KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)`（`entry:41`）。**我们入口没有这一句**（我们的入口见 `our:486`），等于 AIV_ONLY，`if ASCEND_IS_AIC` 那支直接 return ⇒ P4 还必须让 host 下发 blockDim / `usedCoreNum`。
+- ✅ 官方 arch22 六文件里**没有任何** `__NPU_ARCH__ == 3510/5102` 分支、**没有任何** `-mllvm` 依赖 ⇒ §11.2 末尾"必须先确认比赛平台能否带 `-mllvm` 编译选项"这条**对手写 `Mmad` 路线不是前置条件**（那是 arch35 新版 `ops-transformer-master/.../op_kernel/sparse_flash_attention.cpp:22-26` 的事）。**§11.4 第 4 条的三个"未裁定"里，这一条现在可以划掉。**
+
+### 14.5 据此修订的分阶段路线（取代 §11.3 的 P1~P4 表述）
+
+| 阶段 | 修订后内容 | 相对 §11.3 的变化 | 依据 |
+|---|---|---|---|
+| **P0.5（新增，排在 P1 前）** | 修 `CalcUbNeed`：K/V/kr 按 `sizeof(DT_QUERY)` 计（现在写死 2 字节），并把 `lseBuf_` 补进预算式；`CalcBlocking` 按 dtype 分叉 | 新增前置项，零性能风险 | §13.14：bench shape 选中 `nb=32, n_blk=16`，fp32 实例真实 213,696 B > 196,608 B 物理 UB |
+| **P0（改定义）** | 不再测"P 量化容差"，改成：**真机只量 `ExpPoly` → 硬件 `Exp` 的单点 maxdiff**；P 量化 / fp16 往返**默认不做** | 大幅缩小 | §14.3（Amla 与 fp16 P 是官方误差源，不是我们要靠近的真值） |
+| **P1 搬运聚合** | ① `our:352-361` 逐元素填 UB → `DataCopyPad`，**搬运单位 = `min(sbs, n_blk) = 16` token**（不是官方 32，受 §13.14 预算约束），可仿 `vec:921` 用 `srcStride` 两块一指令、异常回落两条；② bf16 分支改成"原始 `uint16` 整段拷进 UB + 向量化 `Cast`"，消灭 `our:414/419/450` 的 GM 重读；③ "遇 -1 即停"换成"补零 + 记有效长度 + 事后掩 `-2e38`"（`vec:1041/1073/486-499`） | 三条被官方原文钉实；**③从"可选"升为前置**（不做③就没有定长窗口，也就没有 ping-pong） | §14.2 |
+| **P2 PV 向量化** | 只做"`Exp` + 行级 `Brcb`/`Mul(BinaryRepeatParams)` 形态的 α 缩放 + 整块 `Exp` 后归约"，**保留 fp32 显式 `alpha` 与 fp32 P**；官方对应实现是 `AmlaVecCompute`，**取其形状、丢其数值技巧** | 从"抄 S3"降级为"抄结构、丢 Amla" | §14.3 |
+| **P3 score 向量化** | `sbs` 内 token 已连续 ⇒ K 整段进 UB 后按 `[j][d]` 布局做 `Mul` + `WholeReduceSum`（带 stride 版已由编译门裁定可用）；转置缓冲在 `n_blk=16` 下约 `16×576×4 ≈ 36 KB`，**但必须先做 P0.5** 才谈得上扩 `n_blk` | UB 冲突从"警告"变成"可算的数" | §13.10、§13.14 |
+| **P4 Cube 化** | 门槛重估：不是"接 Matmul 类"，而是**手写 `Mmad/Fixpipe/LoadData/Nd2Nz` + L1/L0 pingpong + 6 flag 三方握手 + 两侧循环计数一致 + host 下发 blockDim/20 多个 tiling 字段**。好消息：**不依赖 `-mllvm`**，且 `SoftMaxFlashV2TilingFunc` 有设备侧 `constexpr` 重载（§13.12），不必让 host 往 workspace 塞 tiling | 代价上调一档；同时拆掉"必须带 -mllvm"这条**假前置** | §14.1(2)、§14.4 |
+
+**一句话总结**：官方给我们的最大红利在 **P1**（整段 `DataCopyPad` + `srcStride` 两块一指令 + 补零定长化），其次是 P2/P3 的向量化原语（`SoftmaxFlashV2<float>` 一次拿齐 max/sum/P）；**官方最"炫"的那段（Amla 整数位重缩放 + fp16 P 往返）恰恰是不能抄的部分**；P4 被证实是**另一个数量级的工程**，且要先补掉 §13.14 的预算式与"bf16 分支空转 UB"两个洞。
+
+**probe 队列（等 `e6z6k` 恢复，一次跑完）**：(a) `SoftmaxFlashV2<float,…>`（官方真实形态）；(b) 设备侧 `SoftMaxFlashV2TilingFunc` 6 参与 8 参；(c) `Mul(dst, src0, src1, count, repeatTime, BinaryRepeatParams)`（`RowMuls` 的底层原语，**本地 9 个头里没有这个重载**——`vconv:140-150` 那两条是 `AddReluCast`，别再当成 Mul）。三条已写进 `code 3/cpu_debug/probe_apis.cpp`（`ProbeSoftmaxFlashV2` 内的 float/t6/t8 + 新增 `ProbeRowBroadcastMul`）。
+
+**本轮未动的东西**：`code 3/code/` 四个提交文件 md5 仍是 §5.10.1 的通过版；官方源码只作为**对照材料**，上面每一条"可抄"都只是结构与位号证据，落笔时要按 §0 约束在副本上做、先过 §13.6 编译门、再上真机逐位对拍。
