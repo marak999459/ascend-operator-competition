@@ -13,6 +13,7 @@ public:
     __aicore__ inline void Init(GM_ADDR x, GM_ADDR o, GM_ADDR workspace, const MhcExpandTilingData &tiling) {
         tiling_ = tiling;
         elem_size_ = sizeof(DT_X);
+        slot_ = 0;
         const uint32_t s = tiling_.S;
         const uint32_t d = tiling_.D;
         const uint32_t m = tiling_.m;
@@ -50,11 +51,17 @@ public:
         }
         if (task_end_ > total_tasks) task_end_ = total_tasks;
 
-        // UB 缓冲（双缓冲）
-        pipe_.InitBuffer(in_que_, 2, tiling_.dTileLen * elem_size_);
-        pipe_.InitBuffer(out_que_, 2, tiling_.dTileLen * elem_size_);
-        pipe_.InitBuffer(acc_buf_, tiling_.dTileLen * sizeof(float));
-        pipe_.InitBuffer(tmp_buf_, tiling_.dTileLen * sizeof(float));
+        // UB 缓冲：反向走 TQue 流水线（in/out 双缓冲 + 两块 float 暂存）；
+        // 前向是纯搬运，只要两块轮转缓冲，其余一个都不建
+        if constexpr (BACKWARD) {
+            pipe_.InitBuffer(in_que_, 2, tiling_.dTileLen * elem_size_);
+            pipe_.InitBuffer(out_que_, 2, tiling_.dTileLen * elem_size_);
+            pipe_.InitBuffer(acc_buf_, tiling_.dTileLen * sizeof(float));
+            pipe_.InitBuffer(tmp_buf_, tiling_.dTileLen * sizeof(float));
+        } else {
+            pipe_.InitBuffer(fwd_b0_, tiling_.dTileLen * elem_size_);
+            pipe_.InitBuffer(fwd_b1_, tiling_.dTileLen * elem_size_);
+        }
     }
 
     __aicore__ inline void Process() {
@@ -106,12 +113,12 @@ private:
         DataCopyExtParams cp{1, static_cast<uint32_t>(cur_h * static_cast<int32_t>(sizeof(DT_X))), 0, 0, 0};
         DataCopyPadExtParams<DT_X> pp{false, 0, 0, static_cast<DT_X>(0)};
 
-        auto in_buf = in_que_.AllocTensor<DT_X>();
-        DataCopyPad(in_buf, x_gm_[src_off], cp, pp);
-        in_que_.EnQue(in_buf);
-        auto x_local = in_que_.DeQue<DT_X>();
-        // 前向是纯搬运、中间没有 VEC 指令，TQue<VECIN> 的序只挂在 VEC 消费上，所以 MTE2
-        // 落地与上一次 MTE1 读完这两道序得自己补；本路径无 VEC 动作，ALL 与单条 barrier 等价
+        // 前向纯搬运：两块 UB 轮转，不经 TQue（省每任务的队列簿记）
+        auto x_local = (slot_ & 1) ? fwd_b1_.Get<DT_X>() : fwd_b0_.Get<DT_X>();
+        ++slot_;
+        DataCopyPad(x_local, x_gm_[src_off], cp, pp);
+        // 这道 barrier 同时管两件事：等 MTE2 落地再让 MTE3 读，以及保证两任务前对同一缓冲
+        // 的上一次读已排空（本路径没有 VEC 动作，TQue 的事件序本来就挂不上，换 TBuf 不减少序）
         PipeBarrier<PIPE_ALL>();
 
         const uint32_t k_begin = (k_limit == tiling_.m) ? 0 : k_limit;
@@ -121,7 +128,6 @@ private:
                                     static_cast<int64_t>(k) * tiling_.D + jt * tiling_.dTileLen;
             DataCopyPad(o_gm_[dst_off], x_local, cp);
         }
-        in_que_.FreeTensor(x_local);
     }
 
     // 反向单块：逐 m 读 o_grad[i, k, jt] -> Cast 到 float 累加 -> Cast 回原 dtype 写 x_grad[i, jt]
@@ -172,11 +178,14 @@ private:
     TQue<QuePosition::VECOUT, 2> out_que_;
     TBuf<TPosition::VECCALC> acc_buf_;
     TBuf<TPosition::VECCALC> tmp_buf_;
+    TBuf<TPosition::VECCALC> fwd_b0_;
+    TBuf<TPosition::VECCALC> fwd_b1_;
     GlobalTensor<DT_X> x_gm_;
     GlobalTensor<DT_X> o_gm_;
     MhcExpandTilingData tiling_;
     uint32_t elem_size_;
     uint32_t task_begin_;
+    uint32_t slot_;
     uint32_t task_end_;
 };
 

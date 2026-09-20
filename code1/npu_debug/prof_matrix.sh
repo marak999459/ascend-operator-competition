@@ -39,7 +39,12 @@ export ASCEND_SLOG_PRINT_TO_STDOUT=${ASCEND_SLOG_PRINT_TO_STDOUT:-0}
 TAG=${1:-untagged}; shift
 CASES="${*:-0 1 2 3 4 5 6 7}"
 BIN=$ROOT/npu_debug/test_npu
-echo "### kernel md5: $(md5sum $ROOT/op_kernel/mhc_expand.cpp | cut -d' ' -f1)  host md5: $(md5sum $ROOT/op_host/mhc_expand.cpp | cut -d' ' -f1)"
+KB=$ROOT/build_out/tmp/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand
+PKB=$PKG/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand
+A=$(md5sum $KB/*.o 2>/dev/null | awk '{print $1}' | sort | tr -d '\n')
+B=$(md5sum $PKB/*.o 2>/dev/null | awk '{print $1}' | sort | tr -d '\n')
+[ -z "$A" ] || [ "$A" = "$B" ] || { echo "### PROF ABORT: pkg kernel .o != build_out ($A vs $B) 先跑 build_npu.sh"; exit 9; }
+echo "### kernel md5: $(md5sum $ROOT/op_kernel/mhc_expand.cpp | cut -d' ' -f1)  host md5: $(md5sum $ROOT/op_host/mhc_expand.cpp | cut -d' ' -f1)  kernel_o: $(echo $A | cut -c1-12)"
 echo "### so ts: $(date -r "$DST" '+%H:%M:%S')  bin ts: $(date -r "$BIN" '+%H:%M:%S')  tag=$TAG cases=$CASES"
 
 for i in $CASES; do

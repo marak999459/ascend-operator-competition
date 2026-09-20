@@ -168,6 +168,7 @@ static int run_case(const char* name, uint32_t S, uint32_t D, uint32_t m,
     uint64_t ws_size = 0;
     aclOpExecutor* ex = nullptr;
     double kern_s = 0.0, prof_s = 0.0;
+    bool timed = false;
 
     do {
         if (aclrtMalloc(&dx, in_bytes, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) break;
@@ -203,25 +204,22 @@ static int run_case(const char* name, uint32_t S, uint32_t D, uint32_t m,
                 if (aclrtSynchronizeStream(g_stream) != ACL_SUCCESS) { printf("    [%s] sync failed\n", name); ok = false; break; }
             }
             prof_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - tp).count();
-            rc = ok ? 3 : 2;
-            break;
+            if (!ok) { rc = 2; break; }
+            // 计时档过去在这里直接 return 0 —— 于是 prof/prof2 的 "ALL PASS" 只代表
+            // "启动没报错"，一次数值都没比过（2026-09-21 定档：删掉前向全部序的 none
+            // 也在 c0/c4 上 "ALL PASS"）。现在打完成绩行后**继续往下走数值校验**，
+            // 让"计时"和"对不对"在同一次运行里同时成立。
+            printf("[PROF %s] S=%u D=%u m=%u blk=%u mode=%u tile=%u reps=%d per=%.4fms batch=%.3fs first=%.4fms\n",
+                   name, S, D, m, p.blockDim, p.splitMode, p.dTileLen,
+                   reps - 1, prof_s * 1000.0 / (reps - 1), prof_s, kern_s * 1000.0);
+            timed = true;
+            if (g_run(dws, ws_size, ex, g_stream) != ACLNN_SUCCESS) { rc = 2; break; }
+            if (aclrtSynchronizeStream(g_stream) != ACL_SUCCESS) { printf("    [%s] sync failed\n", name); rc = 2; break; }
         }
 
         if (aclrtMemcpy(hout.data(), out_bytes, dout, out_bytes, ACL_MEMCPY_DEVICE_TO_HOST) != ACL_SUCCESS) break;
         rc = 0;
     } while (false);
-
-    if (rc == 3) {
-        printf("[PROF %s] S=%u D=%u m=%u blk=%u mode=%u tile=%u reps=%d per=%.4fms batch=%.3fs first=%.4fms\n",
-               name, S, D, m, p.blockDim, p.splitMode, p.dTileLen,
-               reps - 1, prof_s * 1000.0 / (reps - 1), prof_s, kern_s * 1000.0);
-        if (tx) aclDestroyTensor(tx);
-        if (to) aclDestroyTensor(to);
-        if (dx) aclrtFree(dx);
-        if (dout) aclrtFree(dout);
-        if (dws) aclrtFree(dws);
-        return 0;
-    }
 
     size_t mismatch = 0, bitmis = 0, nan_cnt = 0; float maxdiff = 0.0f;
     uint32_t bad[8]; size_t nbad = 0;
@@ -237,9 +235,9 @@ static int run_case(const char* name, uint32_t S, uint32_t D, uint32_t m,
     }
     // 与 CPU harness 同一行格式，便于两份日志逐条对拍；ws= 是设备侧 host tiling 真实
     // 申请的 workspace 字节数（0 = 本实现不用 workspace），可旁证 tiling 已被执行
-    printf("[%s] S=%u D=%u m=%u blk=%u mode=%u tile=%u ws=%llu kern=%.3fs -> maxdiff=%.5f mismatch=%zu/%zu %s\n",
+    printf("[%s] S=%u D=%u m=%u blk=%u mode=%u tile=%u ws=%llu kern=%.3fs timed=%d -> maxdiff=%.5f mismatch=%zu/%zu %s\n",
            name, S, D, m, p.blockDim, p.splitMode, p.dTileLen,
-           (unsigned long long)ws_size, kern_s,
+           (unsigned long long)ws_size, kern_s, (int)timed,
            maxdiff, mismatch, out_elems, (rc != 2) ? (mismatch ? "FAIL" : "PASS") : "ERROR");
     if (nbad > 0) {
         printf("    first mismatches:");

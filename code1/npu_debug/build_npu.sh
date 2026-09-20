@@ -49,6 +49,30 @@ echo "### libcust_opapi.so ts: $BEFORE -> $AFTER"
 [ "$AFTER" = "0" ] && { echo "MISSING libcust_opapi.so"; exit 3; }
 nm -D build_out/libcust_opapi.so | grep -a aclnnMhcExpand | head -3
 
+# ---- 1.5) 刷新 npu_debug/pkg：运行期真正加载的是这里，不是 build_out ----
+# 为什么每次无条件重建：MhcExpand_<hash>.o 里那段哈希只覆盖 tiling/key，**不覆盖内核源码**，
+# 所以改过 kernel 重编后 pkg 里的同名 .o 可以是完全不同的一份二进制 ⇒ 静默跑旧核。
+# 2026-09-21 03:36 实测：optA 树 pkg 停在 02:16 那版，把"未打补丁的对照"跑成挂死，
+# 连带 R5/R6/R7/R8 四组读数全部作废（都执行的是同一份 02:16 二进制）。
+rm -rf npu_debug/pkg
+mkdir -p npu_debug/pkg/custom/op_api/lib npu_debug/pkg/custom/op_impl/ai_core/tbe
+cp build_out/libcust_opapi.so npu_debug/pkg/custom/op_api/lib/ ||
+    { echo "PKG SO COPY FAILED"; exit 5; }
+for d in kernel config; do
+    [ -d "build_out/tmp/vendors/custom/op_impl/ai_core/tbe/$d" ] &&
+        cp -r "build_out/tmp/vendors/custom/op_impl/ai_core/tbe/$d" \
+              npu_debug/pkg/custom/op_impl/ai_core/tbe/
+done
+# 硬不变式：pkg 内嵌 .o 必须与 build_out 逐字节一致，否则绝不放行
+PKGO=$(md5sum npu_debug/pkg/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/*.o 2>/dev/null |
+       awk '{print $1}' | sort | tr -d '\n')
+SRCO=$(md5sum build_out/tmp/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/*.o 2>/dev/null |
+       awk '{print $1}' | sort | tr -d '\n')
+if [ -z "$SRCO" ] || [ "$PKGO" != "$SRCO" ]; then
+    echo "PKG KERNEL MISMATCH pkg=$PKGO src=$SRCO"; exit 5
+fi
+echo "### pkg synced, kernel .o md5 = $(md5sum npu_debug/pkg/custom/op_impl/ai_core/tbe/kernel/ascend910b/mhc_expand/*.o | awk '{print substr($1,1,12)}' | tr '\n' ' ')"
+
 # ---- 2) ACL 启动器 ----
 mkdir -p npu_debug/logs
 g++ -std=c++17 -O2 -I build_out/autogen -I "$INC" \
