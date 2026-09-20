@@ -32,12 +32,19 @@
 
 ## 2. ⛔ 硬约束
 
+0. **统一术语（用户 2026-09-20 规定，全仓库文档一律照此称呼）**：
+   - **仿真机** = CPU 仿真环境；两个具体环境分别叫 **本地仿真机**（VMware VM）与 **云端仿真机**（云 devenv 容器）
+   - **真机** = NPU 环境（910B3，SSH 隧道进入）
+   - **比赛平台** = 代码提交/评测网站（CANNJudge）；旧文档中的"网站 / 比赛网站 / 提交平台"均指此
 1. **三道题严格分家**，绝不跨界：
    - 第一题 `mhc_expand` → 提交代码在 `code1/`
    - 第二题 `mhc_sinkhorn` → `code2/`
    - 第三题 `sparse_flash_attention` → `code 3/code/`（文档在 `code 3/`）
-2. **提交里绝不能有任何调试输出**：`printf` / `fflush` / `fprintf` / `std::cout` 一律禁止，`TODO` / `FIXME` / `#if 0` / `调试` 字样也要清掉。否则平台判**"提交代码中存在不合规内容"**。
-3. **NPU 隧道需人工建立，端口会变**：连不上（`Connection refused`）**直接问用户，不要重试**；`Test-NetConnection` 探不到，别用它判断。详见 `连接信息.md` §2。
+2. **提交里绝不能有任何调试输出**：`printf` / `fflush` / `fprintf` / `std::cout` 一律禁止，`TODO` / `FIXME` / `#if 0` / `调试` 字样也要清掉。否则比赛平台判**"提交代码中存在不合规内容"**。
+3. **隧道一律先用 `devspace_tunnel.ps1` 自举，不要一上来就找用户**（2026-09-20 更新）：`.ssh/config` 的 Host 别名自带 `Match !exec` 自举，脚本封装了"拉起 + 等端口 + ssh 验证 + `bootstrap.log` 判读"。用法：**"连 cpu" → `-Role cpu`**、**"连 npu" → `-Role npu`**、只看状态 `-List`。环境表（短名 → 角色 / 可否派活 / 备注）在脚本顶部 `$EnvTable`，**加新环境只在那里补一行**；`连接信息.md` §2 是同一张表的文档口径。
+   - ⭐ **派活闸门**：`-Role` 只会选中 `use='free'` 的环境；`use='reserved'`（正被别的会话当通道）和**未登记的新环境**会被跳过并打印 `[门]`。⛔ **Agent 不得为了"有环境用"而用 `-Env` 点名越过闸门** —— 被挡下就等于没环境，回去告诉用户缺什么，让用户决定（改表 / 开新环境 / 授权占用）。
+   - 用户直接点名环境（"用 e6z6k"）时按 `-Env <短名>` 执行，那是用户的决定，不是越闸。
+   - ⛔ 脚本报 `development environment no longer exists` ⇒ **环境本体已被回收，只有用户能在 IDE / 网页重新 Start**，此时停下来找用户；**不得重试轰炸**。真机连上之后**跑什么**仍按 §2.4/§2.5 的纪律先问用户。
 4. **不要自动改代码**：Agent 只负责提交与报告，改代码由用户决定。
 5. **不要连续提交**：每次提交后等用户确认；每次提交前先 `--dry-run`。
 6. **密钥与私钥路径不写死在文档里**，一律引用 `连接信息.md` 的相对路径。
@@ -57,7 +64,9 @@
 ├─ code2/                    ← 第二题 mhc_sinkhorn（提交代码）
 ├─ code 3/                   ← 第三题 SFA：code/ 是提交实现，其余是工程文档
 │
-├─ 密钥.txt / public.pem / encrypt_password.py   ← 提交平台凭据与加密脚本
+├─ 密钥.txt / public.pem / encrypt_password.py   ← 比赛平台凭据与加密脚本
+├─ devspace_tunnel.ps1       ← ⭐ 隧道自举 + 派活闸门：-Role cpu|npu / -Env <短名> / -List / -Diag / -Watch；环境表 = 顶部 $EnvTable
+│                                 角色表与环境状态见 连接信息.md §2
 ├─ official_problem_statement.md   ← ⭐ 三题官方题面全文（权威口径）
 └─ refs/                     ← 可跑的引用材料（不是提交代码）
    ├─ README.md              ← ⭐ refs 说明 + 用法 + 重建告诫
@@ -98,6 +107,6 @@
 |---|---|
 | 第一题 `mhc_expand` | 代码看似完成，**真机从未验证** —— 唯一未知项，性价比最高 |
 | 第二题 `mhc_sinkhorn` | 真机 **5/5 通过**，性能 303µs → 目标 ~1.5µs（病根 = 指令数） |
-| 第三题 `sparse_flash_attention` | 真机自测全过，**平台仍 Wrong Answer**；bf16 假设**已被实验 0 排除**，当前最优先假设 = 输出差常数倍缩放 |
+| 第三题 `sparse_flash_attention` | **比赛平台已 6/6 全 Pass**（提交 `6aae9fad`，根因 = 空行 LSE max 平台期望 `0.0` 而旧参考用 `-2e38`；判分结构靠探针反推）。2026-09-20 发现**本地提交源曾落后于通过版 5 处**，已用通过版 zip 同步并 md5 校验（`code3.md` §5.10.1）；剩：**真机未复验**、性能未动工（206.9 ms 纯标量 vs 榜 2.16~3.54 µs，方案见 `code3.md` §11）。`w_partneg` 已挂起（平台不判）。细节见 [code3.md](code3.md) §1 |
 
 > 细节与证据见各自的 `codeN.md`。

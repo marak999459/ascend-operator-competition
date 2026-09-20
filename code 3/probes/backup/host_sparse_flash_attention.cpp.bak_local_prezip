@@ -162,10 +162,14 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     const int64_t mode    = (p_mode != nullptr) ? (*p_mode) : 3;
     const int64_t amode   = (p_amode != nullptr) ? (*p_amode) : 2;
 
-    // sparseBlockSize: 仅做 [1,128] 截断，不做 2 的幂映射（非 2 幂 SBS 合法，
-    // 强制映射会让 kernel 按映射后的块大小展开 token，与真实数据错位）
+    // sparseBlockSize: 安全映射到 [1,128] 内最近的 2 的幂，不拒绝
     if (sbs < 1) { sbs = 1; }
     if (sbs > 128) { sbs = 128; }
+    {
+        uint32_t p2 = 1;
+        while ((p2 << 1) <= static_cast<uint32_t>(sbs)) { p2 <<= 1; }
+        sbs = p2;
+    }
     // 以下属性一律不拒绝：kernel 只区分 mode==3（因果）与其它（非因果）
     (void)mode; (void)amode;
 
@@ -262,18 +266,21 @@ namespace ops {
     class SparseFlashAttention : public OpDef {
     public:
         explicit SparseFlashAttention(const char *name) : OpDef(name) {
+            // ⚠️ 官方题面：query/key/value 支持 float16 与 bfloat16。
+            // 每个张量的 .DataType() 与 .Format() 列表长度必须一致，
+            // 否则 opbuild 报 `The dtype size of input[N] ... is 0.`（长度不匹配时会去查第 3 个 Format）
             this->Input("query")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+                .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+                .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
             this->Input("key")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+                .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+                .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
             this->Input("value")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+                .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+                .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
             this->Input("sparse_indices")
                 .ParamType(REQUIRED)
                 .DataType({ge::DT_INT32, ge::DT_INT32})
@@ -288,16 +295,16 @@ namespace ops {
                 .Format({ge::FORMAT_ND, ge::FORMAT_ND});
             this->Input("query_rope")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+                .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+                .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
             this->Input("key_rope")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+                .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+                .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
             this->Output("attention_out")
                 .ParamType(REQUIRED)
-                .DataType({ge::DT_FLOAT16, ge::DT_FLOAT})
-                .Format({ge::FORMAT_ND, ge::FORMAT_ND});
+                .DataType({ge::DT_FLOAT16, ge::DT_BF16, ge::DT_FLOAT})
+                .Format({ge::FORMAT_ND, ge::FORMAT_ND, ge::FORMAT_ND});
             this->Output("softmax_max_out")
                 .ParamType(OPTIONAL)
                 .DataType({ge::DT_FLOAT, ge::DT_FLOAT})

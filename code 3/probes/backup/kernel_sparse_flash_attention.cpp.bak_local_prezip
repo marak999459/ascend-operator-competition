@@ -195,7 +195,7 @@ public:
             const uint32_t idx = (qLenSize_ == 1) ? 0u : b;
             if (idx < qLenSize_) {
                 const int32_t v = qLenGm_.GetValue(idx);
-                if (v >= 0 && static_cast<uint32_t>(v) < actQ) {
+                if (v > 0 && static_cast<uint32_t>(v) < actQ) {
                     actQ = static_cast<uint32_t>(v);
                 }
             }
@@ -205,7 +205,7 @@ public:
             const uint32_t idx = (kvLenSize_ == 1) ? 0u : b;
             if (idx < kvLenSize_) {
                 const int32_t v = kvLenGm_.GetValue(idx);
-                if (v >= 0 && static_cast<uint32_t>(v) < actKV) {
+                if (v > 0 && static_cast<uint32_t>(v) < actKV) {
                     actKV = static_cast<uint32_t>(v);
                 }
             }
@@ -272,22 +272,10 @@ private:
                 for (int32_t d = 0; d < D_; ++d) {
                     outGm_.SetValue(outOff + d, static_cast<DT_QUERY>(0.0f));
                 }
-            }
-            if (lseOn_) {
-                // ⚠️ 修复：padding 行 LSE 改为 UB + DataCopyPad 写（与正常分支同机制）。
-                //    标量 GM 写在本算子多核并发下偶发整行丢失（VARSBS8 复现 0xAA 残留）。
-                LocalTensor<float> lseP = lseBuf_.Get<float>();
-                for (uint32_t hb = 0; hb < nHeadBlk_; ++hb) {
-                    const uint32_t n0 = hb * nb_;
-                    uint32_t nbCur = N1_ - n0;
-                    if (nbCur > nb_) { nbCur = nb_; }
-                    for (uint32_t i = 0; i < nbCur; ++i) {
-                        lseP.SetValue(i, 0.0f);
-                        lseP.SetValue(nb_ + i, 0.0f);
-                    }
-                    const uint32_t lseOff = (static_cast<uint64_t>(b) * S1_ + s) * N1_ + n0;
-                    DataCopyPad(maxGm_[lseOff], lseP,     DataCopyExtParams{1, static_cast<uint32_t>(nbCur * sizeof(float)), 0, 0, 0});
-                    DataCopyPad(sumGm_[lseOff], lseP[nb_], DataCopyExtParams{1, static_cast<uint32_t>(nbCur * sizeof(float)), 0, 0, 0});
+                if (lseOn_) {
+                    const uint32_t lseOff = (static_cast<uint64_t>(b) * S1_ + s) * N1_ + n;
+                    maxGm_.SetValue(lseOff, sfa::SOFTMAX_MIN_NUM);
+                    sumGm_.SetValue(lseOff, 0.0f);
                 }
             }
             return;
@@ -380,7 +368,7 @@ private:
                     //    真机双对拍实测：若在此乘 scale_，max 会恰好偏小 1/scale=22.6274 倍
                     //    （同一用例的 softmax_sum 同时完全正确，证明缩放在 softmax 内部完成、
                     //     不进入 LSE）。此前真机只对拍 attention_out，所以这个错误长期未被发现。
-                    lse.SetValue(i,     (l > 0.0f) ? ml.GetValue(i) : 0.0f);
+                    lse.SetValue(i,     (l > 0.0f) ? ml.GetValue(i) : sfa::SOFTMAX_MIN_NUM);
                     lse.SetValue(nb_ + i, (l > 0.0f) ? l : 0.0f);
                 }
             }

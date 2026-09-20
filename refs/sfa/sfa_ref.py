@@ -109,7 +109,9 @@ def sparse_flash_attention_ref(query, key, value, sparse_indices, scale_value,
     si = sparse_indices.data
 
     out = [0.0] * (B * S1 * N1 * D)
-    smax = [SOFTMAX_MIN_NUM] * (B * S1 * N1)
+    # 空行 / 全 mask 行：比赛平台期望 max = 0.0（探针提交 6aae9fad 实测，见 code3.md §5.8.4）。
+    # 旧口径用 SOFTMAX_MIN_NUM(-2e38) 是本地自造的哨兵，与平台期望不符。
+    smax = [0.0] * (B * S1 * N1)
     ssum = [0.0] * (B * S1 * N1)
 
     for b in range(B):
@@ -460,15 +462,16 @@ def self_test_closed_form(verbose=True):
     ok &= rm < 1.5 - 1e-3
 
     # ---------- 全 mask 行自检 ----------
-    # act_s2=0 -> thr<=0 -> 全 mask -> 输出 0, LSE=(-2e38, 0)
+    # act_s2=0 -> thr<=0 -> 全 mask -> 输出 0, LSE=(0.0, 0.0)
+    # （期望值口径来自比赛平台实测，见 code3.md §5.8.4；旧口径 -2e38 已作废）
     q, k, v, qr, kr, si = build(1, 1, 1, 1, {(0,0):[0]})
     out3, sm3, ss3 = sparse_flash_attention_ref(q, k, v, si, scale, qr, kr,
                                                 sparse_block_size=1, sparse_mode=3,
                                                 actual_seq_lengths_kv=[0])
     allzero = all(x == 0.0 for x in out3)
     P(f"\n[全 mask] act_s2=0 -> 输出全 0  {allzero}")
-    P(f"[全 mask] LSE = ({sm3[0]:.3e}, {ss3[0]})  期望 (-2e38, 0)")
-    ok &= allzero and sm3[0] == SOFTMAX_MIN_NUM and ss3[0] == 0.0
+    P(f"[全 mask] LSE = ({sm3[0]:.3e}, {ss3[0]})  期望 (0.0, 0.0)")
+    ok &= allzero and sm3[0] == 0.0 and ss3[0] == 0.0
 
     P("\n" + "=" * 72)
     P("闭式解自检结果: " + ("全部通过 [PASS]" if ok else "存在失败 [FAIL]"))
