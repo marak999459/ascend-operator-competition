@@ -962,7 +962,7 @@ __aicore__ inline void ProcessForward() {    // ≥12KB/tile 才攒批，否则�
 | 处置 | 文件（md5 前 8 位） | 依据 |
 |---|---|---|
 | 删除 | `cpu_debug/test_mhc_expand_cpu.cpp.bak_pre_ieee` 46681732、`npu_debug/mhc_expand.cpp.bak_pre_chunk` 53ee60e5、`npu_debug/mhc_expand_tiling.h.bak_pre_chunk` f759a052 | git 里逐字节存在（`git show e330077:code1/op_kernel/mhc_expand.cpp` = 53ee60e5；f759a052 更简单——它和**当前提交的 `op_kernel/mhc_expand_tiling.h` 是同一份**） |
-| 删除（未跟踪的散落副本） | `op_kernel/mhc_expand.cpp.bak_pre_a` 53ee60e5、`op_kernel/mhc_expand.cpp.bak_pre_r10` daf2b8ed、`npu_debug/code1.md.bak_pre_reorg` c63cc337、5 个 `nul` | 三份都有正本：前两者 = git 里的 `e330077`/`bc2057b` 两版内核，`code1.md.bak_pre_reorg` = `40a383b^:code1.md`（重构前那份 1122 行版，实测同 md5）；`nul` 是 Windows 下 `>nul` 写错的产物 |
+| 删除（未跟踪的散落副本） | `op_kernel/mhc_expand.cpp.bak_pre_a` 53ee60e5、`op_kernel/mhc_expand.cpp.bak_pre_r10` daf2b8ed、`npu_debug/code1.md.bak_pre_reorg` c63cc337、7 个 `nul`（清理后复查又数出 2 个，全仓已归零） | 三份都有正本：前两者 = git 里的 `e330077`/`bc2057b` 两版内核，`code1.md.bak_pre_reorg` = `40a383b^:code1.md`（重构前那份 1122 行版，实测同 md5）；`nul` 是 Windows 下 `>nul` 写错的产物 |
 | 移入 `npu_debug/archive/`（加 `cpu_debug__`/`npu_debug__` 前缀保原路径） | `npu_debug__mhc_expand.cpp.bak_pre_abl` a16c371d、`cpu_debug__test_mhc_expand_cpu.cpp.bak_pre_mtile` 93ecb1e0、`npu_debug__test_mhc_expand_npu.cpp.bak_pre_ieee` c7a3e698、`npu_debug__test_mhc_expand_npu.cpp.bak_pre_prof2` 9491224d | git 里**没有**这四份（HEAD 的 code1 只跟踪 8 个 `.bak_*`，这四份的内容分别是被回滚的事件对内核、mtile 分支 harness、IEEE 溢出对拍、prof2 启动器）⇒ 唯一副本，只能搬不能删 |
 | 移位（改名保留原语义） | `npu_debug/mhc_expand.cpp.bak_pre_fwd_event` 0fb9e6ec → **`op_kernel/mhc_expand.cpp.bak_pre_fwd_event`** | §562 的回滚命令写的就是 `op_kernel/` 路径，原来放在 `npu_debug/` 是历史错位；现在命令与磁盘一致 |
 
