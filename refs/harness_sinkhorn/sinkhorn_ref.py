@@ -5,10 +5,10 @@ mHC-Sinkhorn 参考实现与对拍
 
 用法:
   # 生成输入
-  python3 sinkhorn_ref.py gen <batch> <n> <iters> <eps> <out.bin> <ref.bin> [seed]
+  python3 sinkhorn_ref.py gen <batch> <n> <iters> <eps> <out.bin> <ref.bin> [seed] [--f32]
 
-  # 对拍（读 kernel 输出 /tmp/mhc_out.bin）
-  python3 sinkhorn_ref.py check <batch> <n> <iters> <eps> <in.bin> <ref.bin>
+  # 对拍（默认读 fp16 的 /tmp/mhc_out.bin；--f32 读 /tmp/mhc_out_f32.bin）
+  python3 sinkhorn_ref.py check <batch> <n> <iters> <eps> <in.bin> <ref.bin> [--f32]
 
 参考实现（与 kernel 逻辑一致）：
   a = logits
@@ -31,6 +31,14 @@ def read_fp16(path, count):
     return vals
 
 
+def read_fp32(path, count):
+    with open(path, "rb") as f:
+        d = f.read()
+    vals = list(struct.unpack("<%df" % (len(d) // 4), d))
+    assert len(vals) == count, "期望 %d 个，实际 %d" % (count, len(vals))
+    return vals
+
+
 def f16_bits(v):
     b = struct.unpack("<I", struct.pack("<f", v))[0]
     s = (b >> 31) & 1
@@ -47,28 +55,38 @@ def f16_from_bits(h):
     return struct.unpack("<e", struct.pack("<H", h))[0]
 
 
-def gen(batch, n, iters, eps, out_in, out_ref, seed):
+def gen(batch, n, iters, eps, out_in, out_ref, seed, f32=False):
     random.seed(seed)
     total = batch * n * n
     logits = [round(random.uniform(-4.0, 4.0), 4) for _ in range(total)]
     with open(out_in, "wb") as f:
         f.write(struct.pack("<%df" % total, *logits))
 
-    ref = sinkhorn(logits, batch, n, iters, eps)
+    ref = sinkhorn(logits, batch, n, iters, eps, f32)
     with open(out_ref, "wb") as f:
-        f.write(struct.pack("<%dH" % total, *[f16_bits(v) for v in ref]))
-    print("生成: %s (%d 元素), 参考: %s" % (out_in, total, out_ref))
+        if f32:
+            f.write(struct.pack("<%df" % total, *ref))
+        else:
+            f.write(struct.pack("<%dH" % total, *[f16_bits(v) for v in ref]))
+    print("生成: %s (%d 元素), 参考: %s dtype=%s"
+          % (out_in, total, out_ref, "fp32" if f32 else "fp16"))
 
 
-def sinkhorn(logits, batch, n, iters, eps):
-    """在 float16 语义下模拟 kernel"""
+def sinkhorn(logits, batch, n, iters, eps, f32=False):
+    """在 fp16（默认）或 fp32 语义下模拟 kernel"""
     out = []
     for m in range(batch):
-        # fp16 量化输入（模拟 kernel 从 GM 读 fp16）
-        a = [f16_from_bits(f16_bits(logits[m * n * n + i])) for i in range(n * n)]
+        if f32:
+            a = list(logits[m * n * n:(m + 1) * n * n])
 
-        def quant(x):
-            return f16_from_bits(f16_bits(x))
+            def quant(x):
+                return x
+        else:
+            # fp16 量化输入（模拟 kernel 从 GM 读 fp16）
+            a = [f16_from_bits(f16_bits(logits[m * n * n + i])) for i in range(n * n)]
+
+            def quant(x):
+                return f16_from_bits(f16_bits(x))
 
         # 行 softmax
         rowmax = [max(a[i * n + k] for k in range(n)) for i in range(n)]
@@ -100,21 +118,27 @@ def sinkhorn(logits, batch, n, iters, eps):
     return out
 
 
-def check(batch, n, iters, eps, in_bin, ref_bin, got_bin="/tmp/mhc_out.bin"):
+def check(batch, n, iters, eps, in_bin, ref_bin, got_bin=None, f32=False):
     total = batch * n * n
-    ref = read_fp16(ref_bin, total)
-    got = read_fp16(got_bin, total)
+    if got_bin is None:
+        got_bin = "/tmp/mhc_out_f32.bin" if f32 else "/tmp/mhc_out.bin"
+    rd = read_fp32 if f32 else read_fp16
+    ref = rd(ref_bin, total)
+    got = rd(got_bin, total)
 
     bad_mats = []
+    worst = 0.0
     for m in range(batch):
         blk_r = ref[m * n * n:(m + 1) * n * n]
         blk_g = got[m * n * n:(m + 1) * n * n]
         dev = max(abs(a - b) for a, b in zip(blk_r, blk_g))
+        worst = max(worst, dev)
         if dev > 1e-2:
             bad_mats.append((m, dev))
 
     nbad = len(bad_mats)
-    print("batch=%d n=%d -> 异常矩阵 %d/%d" % (batch, n, nbad, batch))
+    print("batch=%d n=%d iters=%d dtype=%s -> 异常矩阵 %d/%d | 元素级最大偏差 = %.3e"
+          % (batch, n, iters, "fp32" if f32 else "fp16", nbad, batch, worst))
 
     if bad_mats:
         m = bad_mats[0][0]
@@ -134,19 +158,17 @@ def check(batch, n, iters, eps, in_bin, ref_bin, got_bin="/tmp/mhc_out.bin"):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    F32 = "--f32" in sys.argv
+    a = [x for x in sys.argv if x != "--f32"]
+    if len(a) < 2:
         print(__doc__)
         sys.exit(1)
-    cmd = sys.argv[1]
+    cmd = a[1]
     if cmd == "gen":
-        batch, n, iters = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
-        eps = float(sys.argv[5])
-        gen(batch, n, iters, eps, sys.argv[6], sys.argv[7],
-            int(sys.argv[8]) if len(sys.argv) > 8 else 1234)
+        gen(int(a[2]), int(a[3]), int(a[4]), float(a[5]), a[6], a[7],
+            int(a[8]) if len(a) > 8 else 1234, F32)
     elif cmd == "check":
-        batch, n, iters = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
-        eps = float(sys.argv[5])
-        sys.exit(check(batch, n, iters, eps, sys.argv[6], sys.argv[7]))
+        sys.exit(check(int(a[2]), int(a[3]), int(a[4]), float(a[5]), a[6], a[7], None, F32))
     else:
         print(__doc__)
         sys.exit(1)

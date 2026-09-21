@@ -31,6 +31,7 @@ cp $B/build/libcust_opapi.so $V/op_api/lib/
 cp $B/build/autogen/aclnn_mhc_sinkhorn.h $V/op_api/include/
 
 cd $T/harness
+rm -f test_sink   # 先删旧二进制：否则编译失败会被残留 test_sink 掩盖（HARNESS FAIL 门失效）
 g++ -std=c++17 -O2 test_mhc_sinkhorn.cpp -o test_sink \
   -I$CANN/aarch64-linux/include -I$V/op_api/include \
   -L$CANN/aarch64-linux/lib64 -L$V/op_api/lib \
