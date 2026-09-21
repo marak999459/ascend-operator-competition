@@ -41,7 +41,11 @@ cd $T/harness || exit 1
 OUT=$T/prof/$LABEL
 rm -rf "$OUT"; mkdir -p "$OUT"
 FAIL=0
-for cfg in "1 4 20" "1 8 20" "20 6 20" "64 8 20" "100 6 20" "1024 8 20"; do
+# 默认网格 = 历次 A/B 的口径，别动它（历史读数要能对上）。
+# 只想加形状时用 SHAPES 覆盖（'|' 分隔三元组），这样判决行仍带同一个 label/dtype。
+SHAPES="${SHAPES:-1 4 20|1 8 20|20 6 20|64 8 20|100 6 20|1024 8 20}"
+IFS='|' read -r -a SHAPE_ARR <<< "$SHAPES"
+for cfg in "${SHAPE_ARR[@]}"; do
   set -- $cfg
   d="$OUT/b$1_n$2_i$3"; mkdir -p "$d"
   timeout 300 msprof --task-time=on --ai-core=on --output="$d" \

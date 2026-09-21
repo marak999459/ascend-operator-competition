@@ -1,32 +1,22 @@
-// Kernel: mHC-Sinkhorn (Sinkhorn-Knopp double stochastic), vectorized step-6b
-//   = step-6a verbatim (refs/harness_sinkhorn/k_vec6_g16.cpp, md5 0b7af944), with ONE
-//   variable moved: G_MAX 16 -> 31.
+// Kernel: mHC-Sinkhorn (Sinkhorn-Knopp double stochastic), vectorized step-6a
+//   = step-5 verbatim (code2.md §11.17: platform 5/5 Pass), with ONE variable moved:
+//   G_MAX 8 -> 16, so step-5's instruction set replays over 16 matrices per pass.
 //
-// Purpose: last legal step of the packing axis, so §11.19's two-term model either keeps
-//   paying or dies here. Fitting instruction cost = fixed + slope*g on the measured points
-//   (g=1 -> 16.3ns, g=8 -> 40.9ns, g=16 -> 62.5ns) gives fixed ~12.8-19.3ns and
-//   ~2.7-3.1ns per additional window-group. Per matrix a pass therefore costs
-//   180*(fixed+slope*g)/g, i.e. g=16 -> 703ns, g=26 -> ~648ns, g=31 -> ~633ns.
-//   Prediction for this round: vec -8~12% on the shapes that currently split into
-//   several passes, and on top of that the per-pass work (Seed, DMA, scalar bookkeeping)
-//   is billed fewer times -- 1024x8 goes 16+10 -> a single pass of 26, 2000x8 goes
-//   16+16+16+2 -> 31+19. If vec does not move ~-8% at 1024x8, the model has a term we
-//   have not seen (UB bank conflicts at large repeat) and packing is closed out.
+// Purpose: falsify or confirm the two-term per-instruction cost model of §11.18
+//   (fixed ~12.8 ns/instruction + ~3.5 ns per 256B block-group). Doubling G_MAX
+//   halves the instruction count per matrix while doubling the block-groups each
+//   instruction covers, so the model predicts vec 30.1 -> ~25.3us (-16%) and
+//   fp32 1024x8 total 37.4 -> ~33us on the paired device run. If the measurement
+//   misses that, the fixed term is wrong and the next lever changes.
 //
-// Why 31 and not 32 or 64: WholeReduce* is declared with an int32_t repeatTime but the
-//   c220 impl funnels it into the vcadd/vcmax leaf intrinsic whose repeat operand is
-//   uint8_t, and this kernel passes repeatTime = N_MAX * g. g = 31 -> 248 fits;
-//   g = 32 -> 256 wraps to 0 and silently drops the whole reduction (§11.19 #3).
-//   31 is a hard ceiling, not a tuning choice.
+// Ceiling found while sizing this (worth keeping): WholeReduce* is declared with an
+// int32_t repeatTime, but the c220 impl funnels it into the vcadd/vcmax leaf
+// intrinsic whose repeat operand is uint8_t. repeatTime == N_MAX * g here, so
+// g > 31 would wrap to 0 and silently drop work. 16 sits safely under that cap.
 //
-// The fp32 build now allocates only the four float buffers: hin/hout are dead weight in
-//   that instantiation and at g=31 they would have cost 31KB of UB. They are initialised
-//   after mat/red/bcast/cs, so dropping them leaves the fp32 UB layout byte-identical and
-//   the single-variable property intact.
-//
-// DMA is still chunked to DMA_WIN=8 windows, i.e. the 2048B DataCopyPad step-5 proved on
-//   device, so a pass now issues ceil(g/8) MTE2/MTE3 bursts instead of 2. MTE is 4% of
-//   the budget at these shapes (§11.19) and is not what this round reads off.
+// DMA is deliberately NOT widened: the dense fp32 burst is chunked to DMA_WIN=8
+// windows, i.e. exactly the 2048B DataCopyPad step-5 proved on device, so MTE2
+// count per matrix is unchanged and the delta reads off the V pipe alone.
 //
 // 910B3 + CANN 9.0.0, arch22. Layout invariant: a matrix lives in one UB *window* of
 // N_MAX=8 rows x RS=8 floats = WIN=64 floats = 256B = 8 blocks, 32B aligned for every
@@ -69,9 +59,10 @@ public:
     static constexpr int32_t RS = 8;    // UB row stride, floats -> exactly 32B
     static constexpr int32_t RH = 16;   // UB row stride, halfs    -> exactly 32B
     static constexpr int32_t WIN = N_MAX * RS;   // one matrix window = 64 floats
-    static constexpr int32_t G_MAX = 31;         // matrices per vector pass, hard cap
+    static constexpr int32_t G_MAX = 16;         // matrices per vector pass
     // Max windows in one dense DataCopyPad burst. 8 keeps every burst at the 2048B
-    // step-5 already ran on device, so the G_MAX change is read off the V pipe alone.
+    // step-5 already ran on device, so G_MAX=16 costs 2 MTE2/MTE3 instead of 1 and the
+    // V-pipe delta stays the only moving part.
     static constexpr int32_t DMA_WIN = 8;
     // Padding sentinel: far below any plausible logit, far enough from the fp32
     // limit that (sentinel - rowmax) cannot overflow.
@@ -101,11 +92,8 @@ public:
         pipe_.InitBuffer(red_buf_, nf);
         pipe_.InitBuffer(bcast_buf_, nf);
         pipe_.InitBuffer(cs_buf_, nf);
-        if constexpr (!std::is_same<DT_LOGITS, float>::value) {
-            const uint32_t nh = G_MAX * N_MAX * RH * sizeof(DT_LOGITS);
-            pipe_.InitBuffer(hin_buf_, nh);
-            pipe_.InitBuffer(hout_buf_, nh);
-        }
+        pipe_.InitBuffer(hin_buf_, G_MAX * N_MAX * RH * sizeof(DT_LOGITS));
+        pipe_.InitBuffer(hout_buf_, G_MAX * N_MAX * RH * sizeof(DT_LOGITS));
     }
 
     __aicore__ inline void Process() {
