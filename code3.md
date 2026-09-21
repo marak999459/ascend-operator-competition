@@ -3290,7 +3290,7 @@ SoftmaxPv(o, vb, sc, ml, nbCur, m);
 
 ⇒ `SFA_STAGE_MAX` 40→**48**、`NBLK_CAND` 插入 48、`CalcUbNeed` 删掉 `+ UbAlignBuf(k*qD*e) // vBuf_` 一行（**host 与 kernel 的 `InitBuffer` 必须逐项同源，这一条是 P0.5 立的法**）。⚠️ 48 之后 `SFA_STAGE_MAX` 这道钳第一次变成 **binding** 的（`k=64` 现在是"预算装得下、段表装不下"），host 那条"这道钳对选档是空操作"的注释已按事实改掉。
 
-**(4) 三档闸门（真机干净构建，06:19~06:40 同场次；原始日志已归档到 `probes/p32_gate.txt` / `p32_verify.log` / `p32_ab*.txt` / `p32_base.txt`）**
+**(4) 三档闸门（真机干净构建，06:19~06:40 同场次；原始日志已归档到 `probes/p32_gate.txt` / `p32_verify.txt` / `p32_ab*.txt` / `p32_base.txt`，全部用 `.txt` 后缀 —— 仓库 `.gitignore:22` 有 `*.log`，`.log` 归档件进不了库）**
 1. **27 个用例 × {fp16,fp32} = 54 条 `超差 0/N` 全绿**（GATE1 覆盖 golden 的 13 个：`r1~r8` + `p1/p2/p4/p6/big1` ⇒ 26 条；GATE2 覆盖另 14 个：`q1h/q2h/q3h` `p_n64/p_n512/p_n1024` `e1empty…e8padkv` ⇒ 14 行、每行双 dtype 两个读数）。
 2. **1e-5 LSE 阶梯**：`out` maxAbs `p1 3.05e-5 / p4 6.10e-5 / p6 3.05e-5 / q3h 2.44e-4 / e2one 0 / r8 1.19e-7`，LSE **max 列 `超差 0/N`（maxAbs 1.2e-7~2.4e-7）**、sum 列 `超差 0/N`（maxAbs 0~1.8e-4，其 `|exp|` 在 1e2~1e3 ⇒ 相对仍 <1e-5）；`out` 在 1e-5 档按 fp16 ULP 失配 **p1 242/8192、q3h 2842/16384** —— 与 §15.49 的 P29 读数（242 / 2841）**逐格同量级** ⇒ 没有新增精度债。
 3. **golden**：**26 条真机 `diff` 行（13 用例 ×2 dtype）里有 12 条 FAIL**，全部集中在"会改 chunk 边界"的那几个用例，且 **失败的那一条永远是 `out`/`sum`，`.max` 26/26 逐位一致** —— 这是一个比"超差 0/N"更硬的自证：行最大与求和顺序**无关**，若 V/K 的 gather 偏移错一个元素，`max` 不可能保持不变。逐条（GATE1 只打印"逐位一致"的正向文件名，缺席者即不逐位）：
@@ -3298,7 +3298,7 @@ SoftmaxPv(o, vb, sc, ml, nbCur, m);
    - fp32 `r6_multiB`：只有 `out` 动位（max/sum 逐位）；fp32 `r8_heads`：`out`+`sum` 动位（max 逐位）⇒ 上一条旧稿写的"r 系列全逐位一致"**只对 fp16 成立**，fp32 这两个用例确实动了最后一位；
    - `p1/p2/p4/p6/big1` 双 dtype：`out`+`sum` 动位、`.max` 逐位（chunk 边界 40/32→48/40 改了结合顺序，与 P29 当年 32→40 同类）。
    重锁完成（144 个文件写于 06:37~06:38），旧基线整份在远端 `golden_bak_p29/`；`diff -rq golden golden_bak_p29` = **23 个文件**，与上面 GATE1 的失败集合**逐项吻合**（20 = 5 用例×2 dtype×{out,sum}，另 3 = `r6_multiB.f32.out` / `r8_heads.f32.out` / `r8_heads.f32.sum`）。⚠️ 两点判读限制：① `golden_bak_p29` 里 `p1/p2/p6` 的 fp16 与 `p1/p2/q1h/q2h` 那份 mtime 是 **05:07~05:09（本轮中间的锁）**而非 P29 的锁 ⇒ 这几格的"P29 vs P32"对照不干净（`q1h/q2h` 不在 23 的清单里只是因为 V3 的重锁列表 `GOLD` 不含它们，不代表它们没变）；② **结论不受影响**，因为"超差 0/N"那一列对的是**用例 `.bin` 内嵌的 `sfa_ref.py` 参考值**（`test_sfa_dev.cpp:341-347` 用 `c.expect`/`fexp`），与 golden 无关。
-   - 🔴 **工具法（本轮踩到，必须记住）**：`p32_gate.sh` / `p32_verify.sh` 里 grep 的 `不\*\*逐位一致\*\*` **永远匹配不到** —— harness 实际打的是 `与 golden **不逐位一致**`（星号在"不"前面，`test_sfa_dev.cpp:144`）⇒ `p32_verify.log` 的"非逐位=0"整列是**假零**。可靠的替代口径有两个：行尾的 `PASS/FAIL` 判决，和"`逐位一致 <文件名>` 正向列表里缺席"。以后判逐位**首选文件级 `diff -rq`**；凡是"整列全 0/全绿"的自检都要先做一次阴性对照（拿一份已知不同的基线跑一遍，看它是否也报 0）。
+   - 🔴 **工具法（本轮踩到，必须记住）**：`p32_gate.sh` / `p32_verify.sh` 里 grep 的 `不\*\*逐位一致\*\*` **永远匹配不到** —— harness 实际打的是 `与 golden **不逐位一致**`（星号在"不"前面，`test_sfa_dev.cpp:144`）⇒ `p32_verify.txt` 的"非逐位=0"整列是**假零**。可靠的替代口径有两个：行尾的 `PASS/FAIL` 判决，和"`逐位一致 <文件名>` 正向列表里缺席"。以后判逐位**首选文件级 `diff -rq`**；凡是"整列全 0/全绿"的自检都要先做一次阴性对照（拿一份已知不同的基线跑一遍，看它是否也报 0）。
 
 
 
@@ -3319,6 +3319,17 @@ SoftmaxPv(o, vb, sc, ml, nbCur, m);
 **(6) 为什么这一发的量级和 P29 不是一回事**：P29 只把 `nb==1` 那一档从 32 抬到 40（`nb≥2` 的 40 档当年越过**物理** UB，§15.50 已量），所以对平台 C4/C6 那类 `nb≥2` 的点**零收益**；P32 是**同时**打开 `nb=2/4` 的 48 档与 `nb=8` 的 40 档 ⇒ `p4/p6` 各 **−6 %** 是 P29 拿不到的那一半。**可证伪预测**：若平台六点里有任何一个落在 `nb≥2`，P32 应在那一点上看到 **−5~−7 %**，`nb=1` 的点看到 **−1~−2.5 %**，六点合起来 score ≈ **+0.3~+0.5**；若六点全在 `nb=1`，则只有 −1~−2.5 %（≈ +0.1）。
 
 **(7) 状态与回滚**：本地四文件 = **P32**：host `68d5eef0…`、kernel `0d5c5e28…`、`…_tiling.h` `4ad6b976…`、`tiling_key…` `02dd48f9…`（未动），四份禁用词 grep **0**；改前 P29 三件套在 `probes/backup/{host,kernel,kernel_…_tiling.h}*.bak_pre_p32`（md5 `9fdcc936… / e05d057f… / a3d828eb…`）。远端 `~/sfa_real` 已 `npu.sh sync` 回干净态（`grep -c SFA_FORCE` = **0**，kernel/tiling 与本地逐字节一致，host 只差 `dev.sh build` 的 SoC 双注册 sed）并重建。**代价模型本身没动一行**（迟滞、`UnitCalls`、`Ks2Allowed` 全部原样）⇒ §15.50 那条"`UnitCalls` 在 k 轴上反指"的债仍然挂着，只是**它现在不再挡路**：k 轴的最大可行档由 UB 预算唯一决定，模型在每个 nb 下都是"取第一个（=最大）可行档"。
+- ✅ **干净构建下的复测（06:40，`probes/p32_verify.txt` 的 V2）**：模型自选档 `p1 0.1529 / p4 0.3805 / p6 0.7350 / big1 0.7049 ms`，与上面 (5) 表里"P32 臂"的读数差 ≤0.3 % ⇒ 那批 −1.2~−6.7 % 不是扫格补丁带出来的假象。
+
+#### 15.53(a) P32 的提交包已经 dry-run 过了（09-22 07:0x，**只 dry-run，没有 submit**）
+
+- `npu.sh sync` 已把远端 `~/sfa_real/code` 铺成与本地**逐字节一致**的干净态（四文件 md5 双侧吻合：`68d5eef0 / 0d5c5e28 / 4ad6b976 / 02dd48f9`）。⚠️ 代价：SoC 双注册 sed 被抹掉了 ⇒ **远端现在不能直接跑真机测试**，要继续测得先 `dev.sh build`（它会自己重打 sed）。
+- CLI `submit --dry-run`（真机 `/mnt/workspace/gitCode/cann/cann-learning-hub/skills/cannjudge-submit/`，会话仍有效）返回 `problemId=6a7c22d6a52e0f540a8a098d` + **四个角色槽**，sha256/字节数与本地四个文件**完全吻合**：
+  `host_cpp 30,623 B / 56d2525afbad7001838f2be54d6280a9d25245a1e51ff33a2df0fb94c144fb82`、`kernel_cpp 67,501 B / 261110f7d8853c9bda7e82a1dc2ddf6d5938dd0e1f39117baa7d62770009cb46`、`tiling_h 4,149 B / f2b28a86e998c194f3e816bfb85f8769f89c5f0da694de41170e1f6c970baff6`、`tiling_key_h 460 B / 1046b349538f3007c3fda6a06e2fae4a6b81c9fda47646dabfcab09b32c89eff`。
+- ⇒ **早上要发 P32，动作只剩一条命令**（把 `--dry-run` 去掉）：`cd /mnt/workspace/gitCode/cann/cann-learning-hub/skills/cannjudge-submit && python3 cannjudge_cli.py submit --problem-url "https://cannjudge.cn/public/ct_starcup_aiop_g2/sparseflashattention" --project-dir /home/developer/sfa_real/code`。**前提**：中途不再动 `code 3/code/`；动了就要重新 `npu.sh sync` + 重新 dry-run（sha256 是这么对上的，别沿用本文任何哈希）。
+- ⚠️ 计分模式是 `latest` ⇒ 一发 WA 就当场掉分（§2.5）。P32 的下行风险主要是**平台 UB 比本地小**这一条：本地 `nb=4/k=48` 只剩 **917 B** 余量，若平台 `ubSize` 或 `UB_SAFE_PCT` 口径不同，模型会自动退到 `k=40/32`（**只是没收益，不会错**，因为这道钳就是 host 自己算的）；真正能 WA 的只有"平台核数/UB 组合让某个 `need > ubSafe` 的档被选中"，而这类档在 §15.44 的 184 格网格里已扫过（那一次是补丁强制，覆盖了越界格）。
+- 📌 参考：上一发已计分的是 **P25 = `score 22.17` / 榜 27**；P29、P32 都**未提交**。
+
 
 
 

@@ -1,0 +1,54 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+=== V1) 与 P29 golden 差分（重锁前最后一次的对照）===
+fp16  r1_min      非逐位=0 超差 0/512
+fp16  r2_chunk    非逐位=0 超差 0/512
+fp16  r3_mode3    非逐位=0 超差 0/2048
+fp16  r4_shortkv  非逐位=0 超差 0/2048
+fp16  r5_blocks   非逐位=0 超差 0/1024
+fp16  r6_multiB   非逐位=0 超差 0/4096
+fp16  r7_norope   非逐位=0 超差 0/512
+fp16  r8_heads    非逐位=0 超差 0/8192
+fp16  p1          非逐位=0 超差 0/8192
+fp16  p2          非逐位=0 超差 0/8192
+fp16  p4          非逐位=0 超差 0/32768
+fp16  p6          非逐位=0 超差 0/65536
+fp16  big1        非逐位=0 超差 0/524288
+fp32  r1_min      非逐位=0 超差 0/512
+fp32  r2_chunk    非逐位=0 超差 0/512
+fp32  r3_mode3    非逐位=0 超差 0/2048
+fp32  r4_shortkv  非逐位=0 超差 0/2048
+fp32  r5_blocks   非逐位=0 超差 0/1024
+fp32  r6_multiB   非逐位=0 超差 0/4096
+fp32  r7_norope   非逐位=0 超差 0/512
+fp32  r8_heads    非逐位=0 超差 0/8192
+fp32  p1          非逐位=0 超差 0/8192
+fp32  p2          非逐位=0 超差 0/8192
+fp32  p4          非逐位=0 超差 0/32768
+fp32  p6          非逐位=0 超差 0/65536
+fp32  big1        非逐位=0 超差 0/524288
+=== V2) 计时复验（模型自选档）===
+p1 平均 0.1529 ms
+p4 平均 0.3805 ms
+p6 平均 0.7350 ms
+big1 平均 0.7049 ms
+=== V3) golden 重锁（旧基线整份备份到 golden_bak_p29）===
+已备份 golden_bak_p29 (144 个文件)
+=== V4) 重锁后复验（应全为 非逐位=0）===
+fp16  r1_min      非逐位=0
+fp16  r2_chunk    非逐位=0
+fp16  r3_mode3    非逐位=0
+fp16  r4_shortkv  非逐位=0
+fp16  r5_blocks   非逐位=0
+fp16  r6_multiB   非逐位=0
+fp16  r7_norope   非逐位=0
+fp16  r8_heads    非逐位=0
+fp16  p1          非逐位=0
+fp16  p2          非逐位=0
+fp16  p4          非逐位=0
+fp16  p6          非逐位=0
+fp16  big1        非逐位=0
+fp32  r1_min      非逐位=0
+fp32  r2_chunk    非逐位=0
+fp32  r3_mode3    非逐位=0
+fp32  r4_shortkv  非逐位=0
+fp32  r5_blocks   非逐位=0
