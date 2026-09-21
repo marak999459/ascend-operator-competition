@@ -2973,6 +2973,45 @@ if (pend) FlushChunk(pend)
 2. ⇒ **优先级翻转**：`big1/p6` 那两档的账（§15.38：**score 占 52~55 %、PV 占 17~30 %**、Cube 跑整份 score = **4.4~5.4×**）才是平台点的账；"地板占 41 %、纯 AIV 上限 2.4×"是**小形状 `p1` 的局部现象**，不该再拿来给 Cube 线判死刑。⇒ **#33（AIC 算 score）/#34（PV 上 Cube）升回头号**，#38（消标量扫描）仍然有效（它也是随 token 数线性增长的项），但它的收益上限要用**大形状**去量，不是 `p1`。
 3. ⚠️ 以上都是**从榜单相对量反推**，形状的绝对值仍然未知：`/api/testcases/{id}` 与 `/api/problems/{id}/testcases` 都 **403**，官方题面包 `sparse_flash_attention_code.zip` 里的 `test_sparse_flash_attention.cpp` 只有三个 CPU 仿真玩具档（`Q_D=64/32`、`Q_S≤4`）⇒ **平台形状拿不到**。⇒ **#39 改口径**：不去对单位，改成**"用大形状做靶"**——把 ablation/收益测量从 `p1` 迁到 `big1` 量级（甚至更大），并让选档代价模型在大形状上重新标定。
 
+### 15.43 ✅ 任务 #33 前置探针结案（新档 `cubexfer`）：**Cube→Vector 交接税 = 1.33~1.37 µs/轮、线性到 128 轮不漂移，而 AIV 每轮搬回 32 KB 完全免费** ⇒ M1 判"go"，真正的未知数换成"GM 暂存从哪来"
+
+**(a) 为什么先量这一条再动算子**：§15.31 只证明了"Cube 算完整份 score 快 4.4~5.4×"（`cubethr6`，**一个跨核旗标都不发**），§15.30(j) 只证明了"每轮一次完整链 + 配平双向握手"这个**协议**在 **3 轮**下成立（`xcoremm3` 那次 0.0334 ms 里全是发射开销，读不出每轮税）。M1 要的是"每轮既产一个真 tile、又交一次棒"，而两档之间那格从没填过：把协议拉到真实轮数（几十~几百）之后，旗标往返 + 锁步串行会不会把 0.45 ms 的节省吃光 ⇒ 吃光就不用动手了。**这一格现在是量出来的，不是推的。**
+
+**(b) 做法**：`mk_probe_cube.py` 新档 `cubexfer`，py 侧三个旋钮 `XFKIND` / `XR`（轮数）/ `XFBLK`（AIV 每轮搬回的 32 B 块数）。AIC 侧三档**逐字节同形**（= `cubethr6` 的每轮链：1 次 Nd2Nz B 片 64 KB + 4 刀 `Mmad(128×64×128)` + 1 次 `Fixpipe(128×64)` 落 `vGm_[(r&31)*16384]`），只差 AIV 那半边：
+- `prod` = AIV 报到即退 ⇒ 纯"Cube 产数"基线；
+- `read` = AIV 每轮 `DataCopy` 同一块 GM，**一个旗标都不发** ⇒ 只量"AIV 搬回 tile"的 MTE2 侧；
+- `lock` = 再加 `xcoremm3` 那套配平双向握手（AIC `PipeBarrier<PIPE_ALL>` → `CrossCoreSetFlag<2,PIPE_FIX>(5)` → 扇入 `CrossCoreWaitFlag<2,PIPE_FIX>(6)`；AIV `wait(5)` → `DataCopy` → `MTE2_V(0)` → `PipeBarrier<PIPE_ALL>` → `set(6)`）。
+
+BD=8（8 AIC + 16 AIV）、`cases/big1`、只看**批量口径**（连发 20 只 sync 一次，把 §15.17 那口 launch 固定项摊掉）、`TO=120 TO2=240`。日志 `code 3/npu_debug/cube_probe_xfer_010350.log`；七档跑完 trap 还原，末次复验 `p1` 的 `golden/p1.max`/`p1.sum` **逐位一致**、`0.1815 ms` ⇒ 远端副本已回到干净构建。
+
+**(c) 主表（批量 ms，同场次连跑）**
+
+| 档 | 轮数 R | AIV 每轮读回 | 批量 | 每轮 µs |
+|---|---|---|---|---|
+| `prod` | 32 | — | 0.0932 | 2.91 |
+| `read` | 32 | 32 KB | 0.0937 | 2.93 |
+| `lock` | 32 | 32 KB | 0.1357 | 4.24 |
+| `lock` | 128 | 32 KB | 0.5206 | 4.07 |
+| `prod` | 128 | — | 0.3455 | 2.70 |
+| `lock` | 32 | 16 KB | 0.1319 | 4.12 |
+| `prod` | 32（**复跑**） | — | **0.0932** | 2.91 ⇒ 与首跑差 **0.0 %** |
+
+三条读数：
+1. ✅ **AIV 每轮从 GM 搬回 32 KB 是免费的**：`read − prod` = 0.5 µs / 32 轮 = **0.016 µs/轮**（0.5 %）⇒ 它整个躲在 AIC 自己的 M 流水影子里，两个核各干各的。
+2. ⭐ **交接税 = `(lock − prod)/R` = 1.33 µs（R=32）/ 1.37 µs（R=128）** ⇒ **常数、线性、不累积**；128 轮既不挂也不漂移 ⇒ §15.29/§15.30 那一整串"3 轮就 rc=124"的老病，在"每轮有新 `Mmad` + 每轮新落点 + 配平扇入"这个形态下**彻底消失**（这条比时间数字更值钱：它是 M1/M2 整个流水结构的存活证明）。
+3. ✅ 读回量 32 KB→16 KB 只省 0.12 µs/轮 ⇒ 那 1.3 µs 里**几乎没有带宽成分**，全是 FFTS 往返 + 锁步等待。
+
+**(d) 判据回代到 M1 的真实 tile 形状**（⚠️ 探针是 128×64，M1 **不是**这个形状，别直接套比例）：每个 query token 的 sparse 列表互不相同 ⇒ **M 轴不能横跨 token，只能横铺头** ⇒ 真实 tile = **m=16（`N1`=8 头 pad 到 16）× n=64 keys** fp32 = 4 KB。这与内置 arch22 `ComputeMm1` 同构（`n = actualSingleProcessSInnerSize` = sparseLen、`m = M_SPLIT_SIZE`、`k = 576` 切 288×2、`kL0Size = 96`）。⇒ AIC 每轮的**生产**成本降到探针的 ~1/8（0.35~0.4 µs），**1.3 µs 的交接税反过来成了 AIC 侧的主导项** —— 但这不进关键路径：结构上是 **AIV-bound**（AIV 每轮的 softmax+PV 远贵于此），AIC 大部分时间本来就该在 `wait` 里闲着。判据 = **M1 动手，GO**（按 §15.38(f)：`big1` 0.76 → ~0.42 ms、`p6` → 1.6×）。
+
+**(e) 🔴 于是 M1 真正的新未知数只有一个：GM 暂存从哪来。** 内置走框架 workspace，我们走不了 —— §15.24 已证 MIX 下写 `usrWorkspace` 第 2 次 launch 必挂；本轮顺手把当时那条替代解释（"是不是 harness 根本没分配、我们写坏了 ACL 自己的堆"）**查死**：`code 3/npu_debug/test_sfa_dev.cpp:294` 确实是 `if (wsSize > 0) aclrtMalloc(&ws, wsSize, HUGE_FIRST)`，而 `wsmix` 那档 host 声明的是 `16 MB + 128 KB` ⇒ **写在界内，照样挂**，workspace 通道判死维持。
+⇒ 设计方案（下一步实现照这个写）：**借"本核尚未处理的后续 query token 的输出行"当暂存**。unit = 1 token × `nb=N1` 头时，它的 `attention_out` 行 = 8×512 fp16 = **8 KB 在 PV 收口前是死字节**；只要一个核按倒序消费自己的 token 列表（处理 token *i* 时用 *i+1…* 的行做 scratch），scratch 就**按核独占、天然不重叠**（§15.30(e) 那条"按 128 B/核切"的纪律自动满足），每核可得几十 KB ⇒ 够 2~4 个 4 KB tile 乒乓。代价 = M1 那一档强制 `nb_ == N1_` 且 `ks_ == 1`；而小形状本来就是地板 bound（§15.38(e)：`p1` 的 41 % 是地板）⇒ **M1 只上大形状**，`p1/p2` 继续走 P21 的纯 AIV 档。
+
+**(f) 下一轮（顺序即风险顺序）**
+1. #31（**平台 MIX 构建门**）：Cube 线的所有收益都要过"平台愿不愿意编译/启动一个 MIX 算子"这道门，而它**只有提交能裁** ⇒ 先把最小 MIX 探针提交包备好，**等用户确认再发**（AGENT.MD §2.5 + 榜单只认最后一次提交）。
+2. M1 实现全部关在 host 侧一个开关后面（新 tiling key / `SFA_CUBE`），关掉时产出的 kernel 与 P21 **逐字节相同** ⇒ `r1~r8` 双遍与 24 条 golden 闸门照旧作数。
+3. ⚠️ **记账一条**：Cube 的 `Mmad` 沿 k 的求和顺序与 AIV 的 fold-tree 不同 ⇒ 开 M1 的那一档**必然破"逐位一致"** ⇒ 要新锁一套 `golden_cube/`，那一档只看 `超差 N/M`（rtol=1e-2）不看不逐位。别把这件事当回归、更别拿它当"没坏"的证据。
+4. #34（PV 上 Cube）共用 (c) 这条交接税 ⇒ 同一个 tile 通道能一路带到 M2。
+
 ### 15.9 本轮的 on-machine 状态与未了项
 
 
@@ -2989,6 +3028,7 @@ if (pend) FlushChunk(pend)
 - ✅ **P21 档已提交比赛平台并出分（§15.42）**：`score = 20.64` / 榜单 30 名。⚠️ 提交源**只能是 `code 3/code/` 那四个文件**：§10.7 已明令"**绝不能再传 `code 3/submit/`**"（它是 9/19 的手抄包，`host_content.txt` 与 `tiling_key.h` 还留着 BF16，已经和真机验证过的 `code/` 分叉）。⇒ 下一次提交动作 = 重新采集 `code/` 四文件 md5 + `--dry-run` + **用户确认**（AGENT.MD §2.5，不连发），**同步 ≠ 提交**。
 - ✅ **trace 基础设施不是提交阻塞项**（本轮实测更正）：把 6/6 通过版 zip 解出来数了一遍 —— `code/op_kernel/sparse_flash_attention.cpp` 里 **trace/TRec 命中 14 处**、比赛平台的"不合规内容"闸门**照样放行**；四个文件的 `printf|fflush|cout|TODO|FIXME|#if 0|调试` **命中 0**。⇒ `traceGm_/TRec/traceOn_`（`trace==nullptr` 时运行期即返回）属于**已被平台验收的死代码**，删除它本身才是风险（多一次改动 = 多一次全量回归）。§3.2 的第 3 条 grep 仍是每次提交前的必做动作。
 - ✅ **Cube 线状态（§15.31 结案：功能 + 收益两条门都过，但**本轮不动 `code 3/code/`**）**：跨核交接原语已在真机通（`xcoremm3`，§15.30(j)），收益已定量（§15.31(d)(f)：整份 score 含真实 K 流量 = **0.104~0.126 ms** vs AIV ≈0.56 ms ⇒ **4.4~5.4×**）。⇒ P6 从"未裁定"改成"**可行、已量化、留作大形状后备**"，阻塞原因换成 §15.31(f) 的战略判断（平台 6 点全是小形状 ⇒ 并行度优先）。探针脚本这一轮全部只改 `code 3/probes/`（`mk_probe_cube.py` 新增 `cubeloop2/cubeloop3nb/cubemmad3/xcoremm3/cubethr` + `cubethr2~6` 共 11 档、`cube_harness_patch.py` v5→**v8**、`run_cube_probe.sh` 的 `PROBEENV` 档位表扩到 `cubethr*`），备份 `code 3/probes/backup/*.{bak_p15_xcorei,bak_p15_p6proto}`。⚠️ v8 起 harness 的**首次** sync 失败也会打设备侧错误码（`sync1…err=`），此前只有 rep 循环里有 ⇒ 新档第一次失败时别再看"0 字节日志"猜。
+  - 🔴 **上一条的战略判断已被 §15.42(f) + §15.43 推翻（2026-09-22 凌晨）**："平台 6 点全是小形状"这个前提是**错的**（榜单相对散布 3.96× vs 榜首 1.72× ⇒ 平台点工作量大概率在 `big1` 量级或以上），而 §15.43 补上了这条线上最后一格未知数（锁步交接税 = **1.33~1.37 µs/轮**、线性到 128 轮、AIV 读回 32 KB **不要钱**）。⇒ Cube 线状态从"可行、已量化、留作后备"改成 **"GO：P19-M1 开工"**，口径见 §15.43(d)(e)(f)。"地板占 41 %、纯 AIV 上限 2.4×"降级为 **`p1` 局部现象**，不再作为给 Cube 线判死刑的理由。
 - ✅ **§15.31 收尾复验（2026-09-21 16:10 本地）**：`code 3/code/` 四文件 md5 与上面"当前值"逐字吻合 —— kernel `3d366c52…`、host `fe679da0…`、`op_kernel/sparse_flash_attention_tiling.h` `b528cb55…`、**`op_kernel/tiling_key_sparse_flash_attention.h`** `02dd48f9…`（⚠️ 注意 `tiling_key…h` 在 **`op_kernel/`** 下，不在 `op_host/`；按 `op_host/` 找会"文件不存在"而被误读成 md5 丢了）。四文件禁用词 `grep -rc` 全为 **0**；目录里另有 `test_sparse_flash_attention.cpp`（禁用词 7 处）**不属于 §10.7 的四文件提交集**，采集时别顺手带上。
 - ⚠️ **本轮新增的探针只在远端副本上**：`#define SFA_PROBE_NO_VECTOR / _NO_SCORE / _NO_SOFTMAX` 由 `sed -i '1i …'` 注入远端 `~/sfa_real/code/op_kernel/…`，每次 `npu.sh sync` 会被本地覆盖 ⇒ 本地四文件**没有任何探针残留**（kernel md5 已回到 `b484b5db…`）。要复现 §15.10(b) 的差分计时，就在 `FlushChunk` 的两次调用上补同名 `#if !defined(...)` 保护。
 - ✅ **当前四文件 md5（P18，2026-09-21 夜复验本地 = 远端逐字节一致）**：kernel **`6ece0b8ae611b493edab1df62ee49210`**（链条 `3d366c52…(P15 注释) → 08a541d4…(P16) → 6ece0b8a…(P18 奇偶交错)`；改前备份 = `backup/kernel_sparse_flash_attention.cpp.bak_pre_p18`，**它的内容就是 P16 终版 `08a541d4…`** —— P16 那一轮只单独备份了 host `host_….bak_pre_p16`，kernel 没备，好在 P16 之后它只动过一次）、host `6e8080557a1aba7f864a0e226c10a32a`（P16 终版，未动）、`op_kernel/sparse_flash_attention_tiling.h` `6a67c65abd83ee72454599f62aa710f7`、`op_kernel/tiling_key_sparse_flash_attention.h` `02dd48f90480ac6d8774457e6f649b9b`。四文件禁用词 grep 全 **0**。远端 `~/sfa_real/cases/` = **37 个 `.bin`**（`r*8 / p*16 / q*3 / e*8 / big1`），`golden_pre_p18` 是本轮重锁前的整份金标备份（78 个文件）。

@@ -34,7 +34,7 @@ MODE = sys.argv[1] if len(sys.argv) > 1 else 'mmad'
 ALL = ('launch', 'bare', 'shim', 'wspeek', 'wsnw', 'wsmix', 'wshigh', 'wsaiv', 'wsmixo',
        'xcore', 'xcoreb', 'xcorec', 'xcored', 'xcoree', 'xcoref', 'xcoreg', 'xcorei', 'xcorej',
        'xcorep', 'cubeloop3', 'cubeloop3nb', 'cubeloop2', 'cubemmad3', 'xcoremm3', 'cubethr',
-       'cubethr2', 'cubethr3', 'cubethr4', 'cubethr5', 'cubethr6', 'mmad', 'aivlive')
+       'cubethr2', 'cubethr3', 'cubethr4', 'cubethr5', 'cubethr6', 'cubexfer', 'mmad', 'aivlive')
 assert MODE in ALL, MODE
 MIX = ALL                     # 全部加 MIX 入口宏
 # 官方 matmul_intf.h（真 clearWorkspace）只留给 launch/bare/wsmixo 做二分证据；
@@ -58,11 +58,11 @@ WS_WHO = {'wsaiv': 'aiv'}
 #   并且 AIV 把读回的值 echo 回 sumGm ⇒ 与 host 自己读到的同一格对照 ⇒ 一次跑分清
 #   "旗标通不通"（xcorec 已答）与"**Fixpipe 写的数跨核到底看不看得见**"（P6 押在这上面）。
 XCORE = ('xcore', 'xcoreb', 'xcorec', 'xcored', 'xcoree', 'xcoref', 'xcoreg', 'xcorei', 'xcorej',
-         'xcorep', 'cubeloop3', 'cubeloop3nb', 'cubeloop2', 'cubemmad3', 'xcoremm3')
+         'xcorep', 'cubeloop3', 'cubeloop3nb', 'cubeloop2', 'cubemmad3', 'xcoremm3', 'cubexfer')
 AIV_IDLE = ('launch', 'bare', 'shim', 'wspeek', 'wsnw', 'wsmix', 'wshigh', 'wsaiv', 'wsmixo',
             'xcore', 'xcoreb', 'xcorec', 'xcored', 'xcoree', 'xcoref', 'xcoreg', 'xcorei', 'xcorej',
-            'xcorep', 'cubeloop3', 'cubeloop3nb', 'cubeloop2', 'cubemmad3', 'xcoremm3', 'cubethr',
-            'cubethr2', 'cubethr3', 'cubethr4', 'cubethr5', 'cubethr6', 'mmad')
+            'xcorep', 'cubeloop3', 'cubeloop3nb', 'cubeloop2', 'cubemmad3', 'xcoremm3', 'cubexfer',
+            'cubethr', 'cubethr2', 'cubethr3', 'cubethr4', 'cubethr5', 'cubethr6', 'mmad')
 
 BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'code')
 SRC = os.path.join(BASE, 'op_kernel', 'sparse_flash_attention.cpp')
@@ -1332,6 +1332,168 @@ elif MODE == 'cubethr6':
 
 '''
     s = s.replace(A_MEMBER, PROBE_THR6 + A_MEMBER, 1)
+
+elif MODE == 'cubexfer':
+    # ---- 4s) cubexfer = M1 唯一还没量的那笔账：**交接税 = f(轮数)**。
+    # 为什么现在必须有这一档（§15.42(f) 把 Cube 线解冻成头号之后）：
+    #   `cubethr6` 已证"20 核算完整份 score"只要 0.104~0.126 ms（AIV ≈0.56 ms ⇒ 4.4~5.4×），
+    #   `xcoremm3` 已证"每轮一次完整链 + 配平双向握手"这个**协议**在 3 轮下通、数据逐位对得上。
+    #   但两档之间有洞：协议那档从没量过时间（3 轮 0.0334 ms 里全是发射开销，读不出每轮税），
+    #   吞吐那档一个跨核旗标都不发。M1 要的是**每轮既产一个真 tile、又交一次棒**，
+    #   而 §15.30(h) 已把死因钉在"同一块 L0C 没有新 Mmad 翻转搬出标志时被第 2 次 Fixpipe 读走"
+    #   ⇒ 旗标与 Fixpipe 共存能不能拉到真实轮数（32~256），是从没测过的。
+    # 三档只差 AIV 那半边，AIC 侧的 cube 链**逐字节同形**（含同一套寻址与同步）：
+    #   XFKIND=prod  AIV 报到即退 ⇒ 纯"Cube 产数"基线（≈ cubethr6 的 R 版）
+    #   XFKIND=read  AIV 每轮 DataCopy 同一块 GM，但**不发旗标** ⇒ 只量"AIV 搬回 tile"的 MTE2 侧
+    #   XFKIND=lock  再加 xcoremm3 那套配平双向握手（set(5) 广播 → 扇入 wait(6)）
+    #   ⇒ 每轮交接税 = (lock - prod) / XR，其中 (read - prod) 是"MTE2 读带宽"那部分，
+    #     剩下 (lock - read) 才是旗标 + 串行化。这个数决定 M1 的 tile 粒度：
+    #     ≤ 2 µs/轮 ⇒ 128 行 × 64 列的 tile 直接开做；
+    #     ≳ 20 µs/轮 ⇒ 必须把 R 压到个位数（一个 tile 覆盖整条 KV 轴），或者按 (b,s) 分批。
+    # 出口：只 [0]=7（AIC 走完）/ [64+bi]=6（AIV 报到）两格，其余留给计时 ⇒ PROBEENV 走 SFA_QUIET_XC3=1。
+    # ⚠️ 读数只看 `时间: 平均`，对拍必 FAIL（探针不算算子），这是预期的 rc=1，不是挂。
+    try:
+        XR = int(os.environ.get('XR', '32'))
+    except ValueError:
+        XR = 32
+    assert 1 <= XR <= 256, XR
+    KIND = os.environ.get('XFKIND', 'lock')
+    assert KIND in ('prod', 'read', 'lock'), KIND
+    # AIV 每轮搬回的 32 B 块数：512 = 16 KB（fp16 tile），1024 = 32 KB（fp32 tile）
+    try:
+        XFBLK = int(os.environ.get('XFBLK', '1024'))
+    except ValueError:
+        XFBLK = 1024
+    AIC_HAND = ('                PipeBarrier<PIPE_ALL>();\n'
+                '                CrossCoreSetFlag<2, PIPE_FIX>(5);   // 广播"本轮 tile 已落地"\n'
+                '                CrossCoreWaitFlag<2, PIPE_FIX>(6);  // 扇入：等本组两个 AIV 都读完\n'
+                ) if KIND == 'lock' else ''
+    AIV_LOOP = ('        for (uint32_t r = 0; r < @R@u; ++r) {\n' +
+                ('            CrossCoreWaitFlag<2, PIPE_V>(5);\n' if KIND == 'lock' else '') +
+                '            DataCopy(ub, vGm_[(r & 31u) * 16384u], DataCopyParams{1, @BLK@u, 0, 0});\n'
+                '            SetFlag<HardEvent::MTE2_V>(0);\n'
+                '            WaitFlag<HardEvent::MTE2_V>(0);\n' +
+                ('            PipeBarrier<PIPE_ALL>();\n'
+                 '            CrossCoreSetFlag<2, PIPE_MTE3>(6);   // 回执（两个 AIV 都 set ⇒ 凑齐扇入）\n'
+                 if KIND == 'lock' else '') +
+                '        }\n') if KIND != 'prod' else \
+               '        /* [prod] AIV 不参与：立刻报到退出 */\n'
+    PROBE_XFER = r'''
+    // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
+    // M1 交接税档：AIC 每轮一个真 tile（4 刀 Mmad(128×64×128) + 1 次 Fixpipe(128×64)），
+    // AIV 每轮 DataCopy 搬回 @BLK@×32 B。三档只差旗标那半边，见 py 侧注释。
+    __aicore__ inline void XcoreAic()
+    {
+        sumGm_.SetValue(0, 7.0f);
+        if constexpr (sizeof(DT_QUERY) == 2u) {
+            TBuf<TPosition::A1> bufl1;
+            TBuf<TPosition::A2> bufL0A;
+            TBuf<TPosition::B2> bufL0B;
+            TBuf<TPosition::CO1> bufL0C;
+            pipe_.InitBuffer(bufl1, 196608);     // A 片 128 KB + B 片 64 KB
+            pipe_.InitBuffer(bufL0A, 32768);     // 128×128 fp16
+            pipe_.InitBuffer(bufL0B, 16384);     // 128×64 fp16
+            pipe_.InitBuffer(bufL0C, 32768);     // 128×64 fp32
+            LocalTensor<DT_QUERY> l1a = bufl1.Get<DT_QUERY>();
+            LocalTensor<DT_QUERY> l1b = l1a[65536];
+            LocalTensor<DT_QUERY> l0a = bufL0A.Get<DT_QUERY>();
+            LocalTensor<DT_QUERY> l0b = bufL0B.Get<DT_QUERY>();
+            LocalTensor<float> l0c = bufL0C.Get<float>();
+            const uint32_t rowD = static_cast<uint32_t>(D_);
+            Nd2NzParams nzA;                     // A：128 行 × 512 列，整片一次、@R@ 轮全程复用
+            nzA.ndNum = 1;
+            nzA.nValue = 128;
+            nzA.dValue = 512;
+            nzA.srcDValue = rowD;
+            nzA.dstNzC0Stride = 128;
+            nzA.dstNzNStride = 1;
+            nzA.srcNdMatrixStride = 0;
+            nzA.dstNzMatrixStride = 0;
+            Nd2NzParams nzB;                     // B：512 行（k）× 64 列（n）
+            nzB.ndNum = 1;
+            nzB.nValue = 512;
+            nzB.dValue = 64;
+            nzB.srcDValue = rowD;
+            nzB.dstNzC0Stride = 512;
+            nzB.dstNzNStride = 1;
+            nzB.srcNdMatrixStride = 0;
+            nzB.dstNzMatrixStride = 0;
+            LoadData2DParams ldA;
+            ldA.startIndex = 0;
+            ldA.repeatTimes = 64;
+            ldA.srcStride = 1;
+            ldA.dstGap = 0;
+            ldA.ifTranspose = false;
+            ldA.sid = 0;
+            ldA.addrMode = 0;
+            LoadData2DParams ldB;
+            ldB.startIndex = 0;
+            ldB.repeatTimes = 32;
+            ldB.srcStride = 1;
+            ldB.dstGap = 0;
+            ldB.ifTranspose = false;
+            ldB.sid = 0;
+            ldB.addrMode = 0;
+            MmadParams mp;
+            mp.m = 128;
+            mp.n = 64;
+            mp.k = 128;
+            mp.cmatrixSource = false;
+            FixpipeParamsV220 fx;
+            fx.nSize = 64;
+            fx.mSize = 128;
+            fx.srcStride = 128;
+            fx.dstStride = 128;
+            fx.ndNum = 1;
+            fx.srcNdStride = 0;
+            fx.dstNdStride = 0;
+            fx.unitFlag = 0b11;
+            DataCopy(l1a, kGm_[0], nzA);
+            SetFlag<HardEvent::MTE2_MTE1>(0);
+            WaitFlag<HardEvent::MTE2_MTE1>(0);
+            for (uint32_t r = 0; r < @R@u; ++r) {
+                DataCopy(l1b, kGm_[2048u * rowD + (r & 3u) * 512u * rowD], nzB);
+                SetFlag<HardEvent::MTE2_MTE1>(0);
+                WaitFlag<HardEvent::MTE2_MTE1>(0);
+                for (uint32_t j = 0; j < 4u; ++j) {
+                    LoadData(l0a, l1a[j * 16384u], ldA);
+                    LoadData(l0b, l1b[j * 8192u], ldB);
+                    SetFlag<HardEvent::MTE1_M>(1);
+                    WaitFlag<HardEvent::MTE1_M>(1);
+                    mp.cmatrixInitVal = (j == 0u);
+                    mp.unitFlag = (j == 3u) ? 0b11 : 0b10;
+                    Mmad(l0c, l0a, l0b, mp);
+                    PipeBarrier<PIPE_ALL>();
+                }
+                SetFlag<HardEvent::M_FIX>(2);
+                WaitFlag<HardEvent::M_FIX>(2);
+                Fixpipe(vGm_[(r & 31u) * 16384u], l0c, fx);   // 每轮**同址**：量的是稳态交接，不是首刀
+@HAND@            }
+        }
+        PipeBarrier<PIPE_ALL>();
+        sumGm_.SetValue(0, 7.0f);
+    }
+
+    __aicore__ inline void XcoreAiv()
+    {
+        const uint32_t bi = GetBlockIdx();
+        if constexpr (sizeof(DT_QUERY) == 2u) {
+            pipe_.InitBuffer(probeBuf_, @UBYTES@u);
+            LocalTensor<DT_QUERY> ub = probeBuf_.Get<DT_QUERY>();
+@AIVLOOP@        }
+        PipeBarrier<PIPE_ALL>();
+        sumGm_.SetValue(64u + bi, 6.0f);
+    }
+
+'''
+    body = (PROBE_XFER.replace('@HAND@', AIC_HAND)
+            .replace('@AIVLOOP@', AIV_LOOP)
+            .replace('@R@', str(XR)).replace('@BLK@', str(XFBLK))
+            .replace('@UBYTES@', str(max(32768, XFBLK * 32))))
+    s = s.replace(A_MEMBER, body + A_MEMBER, 1)
+    s = s.replace('    TBuf<TPosition::VECCALC> qBuf_',
+                  '    TBuf<TPosition::VECCALC> probeBuf_;   // [CUBEPROBE] cubexfer：AIV 搬回 tile 的落点\n'
+                  '    TBuf<TPosition::VECCALC> qBuf_', 1)
 
 elif MODE == 'xcorec':
     # ---- 4c) xcorec：P6 真正要的**原语** = 同一对旗标在一次 launch 内**往返 3 轮** +

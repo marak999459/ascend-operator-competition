@@ -59,6 +59,8 @@ for m in "$@"; do
       PROBEENV='SFA_CBASE=128 SFA_CSTRIDE=16 SFA_P6=1 SFA_QUIET_XC3=1' ;;
     cubethr|cubethr2|cubethr3|cubethr4|cubethr5|cubethr6)   # 吞吐档只看 `时间:` 行（AIV 停工 ⇒ 对拍必失败，读数区全是空的）
       PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16 SFA_QUIET_XC3=1' ;;
+    cubexfer)   # 交接税档：出口只用 [0]/[64+bi] 两格，其余全是计时 ⇒ 关掉 XC3/P6 两屏
+      PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16 SFA_QUIET_XC3=1' ;;
     mmad)   # C 自己就落在 16..991，把 XC3 那屏关掉，否则 C 的数值被当成 echo 槽的"假读数"（§15.30）
       PROBEENV='SFA_QUIET_XC3=1' ;;
   esac
