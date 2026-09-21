@@ -1,0 +1,351 @@
+// mhc_expand 真机对拍启动器（非提交文件：只在真机调试目录，不进提交包）
+// 走 aclnn 两段式：aclCreateTensor -> aclnnMhcExpandGetWorkspaceSize -> aclnnMhcExpand
+// 用例矩阵与参考实现与 cpu_debug/test_mhc_expand_cpu.cpp 逐条同源，日志可直接对拍。
+#include <acl/acl.h>
+#include "aclnn_mhc_expand.h"
+
+#include <dlfcn.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+
+#ifndef ACLNN_SUCCESS
+#define ACLNN_SUCCESS 0
+#endif
+
+// 算子入口用 dlopen/dlsym 取，绝不做成链接期依赖：静态注册器在链接期加载时把
+// tiling func 写进本 DSO 的 LocalRegistry，框架查不到 → 561002 Do not find tiling func
+typedef aclnnStatus (*FnGetWs)(const aclTensor *, int64_t, bool, const aclTensor *,
+                               uint64_t *, aclOpExecutor **);
+typedef aclnnStatus (*FnRun)(void *, uint64_t, aclOpExecutor *, aclrtStream);
+static FnGetWs g_get_ws = nullptr;
+static FnRun g_run = nullptr;
+
+static const float TOL = 1e-2f;
+
+// ===== 位级转换：fp16 用 aarch64 原生 __fp16，bf16 手写 round-to-nearest-even =====
+static inline float h2f(uint16_t b) { __fp16 h; std::memcpy(&h, &b, 2); return (float)h; }
+static inline uint16_t f2h(float f) { __fp16 h = (__fp16)f; uint16_t b; std::memcpy(&b, &h, 2); return b; }
+static inline float bf2f(uint16_t b) {
+    uint32_t u = (uint32_t)b << 16; float f; std::memcpy(&f, &u, 4); return f;
+}
+static inline uint16_t f2bf(float f) {
+    uint32_t u; std::memcpy(&u, &f, 4);
+    if (((u >> 23) & 0xffu) == 0xffu) return (uint16_t)(u >> 16);   // inf / nan 直接截
+    u += 0x7fffu + ((u >> 16) & 1u);                                // RNE
+    return (uint16_t)(u >> 16);
+}
+
+enum DType { DT_FP16 = 0, DT_BF16 = 1 };
+
+// 输出缓冲预置 NaN：核若漏写某区域，必须能判成 FAIL —— 但 NaN 与任何数比较都是
+// false，所以比较前先显式识别 NaN，不能只靠 fabs(diff) > tol。
+static const uint16_t FILL_BITS = 0x7fffu;
+static inline bool is_nan16(uint16_t b) {
+    return (b & 0x7f80u) == 0x7f80u && (b & 0x007fu) != 0;
+}
+
+static inline float to_f(uint16_t b, int dt)  { return dt == DT_FP16 ? h2f(b) : bf2f(b); }
+static inline uint16_t from_f(float v, int dt) { return dt == DT_FP16 ? f2h(v) : f2bf(v); }
+
+// ===== host tiling 镜像（与 op_host/mhc_expand.cpp TilingFunc 决策一致） =====
+// 注意：这里的 blk/mode/tile 是**预测值**（按 num_aiv 复算），真机实际切分由设备上
+// 的 host tiling 决定；两者不一致时结果会 FAIL，精确观测值要等 msprof（§11.6）。
+static const uint32_t SPLIT_ROW = 0;
+static const uint32_t SPLIT_ROW_STREAM = 1;
+static const uint32_t SPLIT_ELEMENT = 2;
+
+struct Plan {
+    uint32_t dTileLen, dTileNum, dTailLen;
+    uint32_t splitMode, blockDim, rowsPerCore, tailRows;
+};
+
+static Plan plan_tiling(uint32_t S, uint32_t D, uint32_t m, bool backward,
+                        uint32_t num_aiv, uint32_t elem_size, uint64_t ub_budget) {
+    Plan t{};
+    t.dTileLen = D;
+    if ((uint64_t)D * elem_size > ub_budget) {
+        uint64_t tl = std::min<uint64_t>(2048, D);
+        tl = std::min(tl, ub_budget / (uint64_t)elem_size);
+        if (tl > 16) tl = (tl / 16) * 16;
+        if (tl < 16) tl = 16;
+        if (tl > D) tl = D;
+        if (tl < 1) tl = 1;
+        t.dTileLen = (uint32_t)tl;
+    }
+    t.dTileNum = (D + t.dTileLen - 1) / t.dTileLen;
+    t.dTailLen = D - (t.dTileNum - 1) * t.dTileLen;
+
+    uint64_t total_tasks = 0;
+    uint32_t block_dim = num_aiv;
+    if (S >= num_aiv) {
+        t.splitMode = SPLIT_ROW;
+        total_tasks = S;
+    } else if (!backward) {
+        uint64_t stream_tasks = (uint64_t)S * m;
+        if (stream_tasks >= num_aiv) {
+            t.splitMode = SPLIT_ROW_STREAM;
+            total_tasks = stream_tasks;
+        } else {
+            t.splitMode = SPLIT_ELEMENT;
+            total_tasks = (uint64_t)S * m * t.dTileNum;
+        }
+    } else {
+        t.splitMode = SPLIT_ELEMENT;
+        total_tasks = (uint64_t)S * t.dTileNum;
+    }
+    if (total_tasks < num_aiv) block_dim = (uint32_t)total_tasks;
+    if (block_dim == 0) block_dim = 1;
+    t.blockDim = block_dim;
+    t.rowsPerCore = (uint32_t)((total_tasks + block_dim - 1) / block_dim);
+    t.tailRows = (uint32_t)(total_tasks - (uint64_t)t.rowsPerCore * (block_dim - 1));
+    return t;
+}
+
+// ===== 参考实现（与 CPU harness 同源：fp32 累加） =====
+static void ref_forward(const std::vector<uint16_t>& x, std::vector<uint16_t>& o,
+                        int S, int D, int m) {
+    for (int s = 0; s < S; s++)
+        for (int k = 0; k < m; k++)
+            for (int j = 0; j < D; j++)
+                o[(size_t)s * m * D + (size_t)k * D + j] = x[(size_t)s * D + j];
+}
+static void ref_backward(const std::vector<uint16_t>& x, std::vector<uint16_t>& o,
+                         int S, int D, int m, int dt, int fill_mode) {
+    // 常数 32768：真机 Cast(CAST_RINT) 超量程按 IEEE 给 inf；CPU 仿真的 Cast 饱和到
+    // 65504（见 cpu_debug 同名分支的注释），两侧语义不同，这里以真机为准。
+    float sat = 0.0f;
+    if (fill_mode == 2) {
+        float sum = 32768.0f * (float)m;
+        sat = (dt == DT_FP16 && sum > 65504.0f) ? INFINITY : sum;
+    }
+    for (int s = 0; s < S; s++)
+        for (int j = 0; j < D; j++) {
+            if (fill_mode == 2) { o[(size_t)s * D + j] = from_f(sat, dt); continue; }
+            float acc = 0.0f;
+            for (int k = 0; k < m; k++) acc += to_f(x[(size_t)(s * m + k) * D + j], dt);
+            o[(size_t)s * D + j] = from_f(acc, dt);
+        }
+}
+
+static int g_num_aiv = 50;          // 真机 910B3 AIV 数，仅用于预测切分；可参数覆盖
+static uint64_t g_ub_budget = 64 * 1024;   // 910B UB 256KB / 4（§9.1 推导口径）
+
+static aclrtStream g_stream = nullptr;
+
+// 返回 0=PASS 1=FAIL 2=ERROR（接口/内存失败，不计入 PASS 数）
+static int run_case(const char* name, uint32_t S, uint32_t D, uint32_t m,
+                    bool bwd, int dt, int fill_mode) {
+    const size_t in_elems = bwd ? (size_t)S * m * D : (size_t)S * D;
+    const size_t out_elems = bwd ? (size_t)S * D : (size_t)S * m * D;
+    const size_t in_bytes = in_elems * 2, out_bytes = out_elems * 2;
+    const aclDataType adt = (dt == DT_FP16) ? ACL_FLOAT16 : ACL_BF16;
+
+    Plan p = plan_tiling(S, D, m, bwd, (uint32_t)g_num_aiv, 2, g_ub_budget);
+
+    std::vector<uint16_t> hx(in_elems), href(out_elems), hout(out_elems, FILL_BITS);
+    for (size_t i = 0; i < in_elems; i++)
+        hx[i] = (fill_mode == 1) ? from_f(1.0f, dt)
+              : (fill_mode == 2) ? from_f(32768.0f, dt)
+              : from_f((float)((int64_t)((i * 37 + 11) % 29) - 14) * 0.125f, dt);
+    if (bwd) ref_backward(hx, href, (int)S, (int)D, (int)m, dt, fill_mode);
+    else     ref_forward(hx, href, (int)S, (int)D, (int)m);
+
+    int rc = 2;
+    void *dx = nullptr, *dout = nullptr, *dws = nullptr;
+    aclTensor *tx = nullptr, *to = nullptr;
+    uint64_t ws_size = 0;
+    aclOpExecutor* ex = nullptr;
+    double kern_s = 0.0;
+
+    do {
+        if (aclrtMalloc(&dx, in_bytes, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) break;
+        if (aclrtMalloc(&dout, out_bytes, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) break;
+        if (aclrtMemcpy(dx, in_bytes, hx.data(), in_bytes, ACL_MEMCPY_HOST_TO_DEVICE) != ACL_SUCCESS) break;
+        // 预置 0xffff（fp16 NaN）：核没写到的区域会在对拍里一眼暴露
+        if (aclrtMemcpy(dout, out_bytes, hout.data(), out_bytes, ACL_MEMCPY_HOST_TO_DEVICE) != ACL_SUCCESS) break;
+
+        int64_t xd[3], od[3];
+        uint64_t xn, on;
+        if (bwd) { xd[0] = S; xd[1] = m; xd[2] = D; xn = 3; od[0] = S; od[1] = D; on = 2; }
+        else     { xd[0] = S; xd[1] = D; xn = 2; od[0] = S; od[1] = m; od[2] = D; on = 3; }
+
+        tx = aclCreateTensor(xd, xn, adt, nullptr, 0, ACL_FORMAT_ND, xd, xn, dx);
+        to = aclCreateTensor(od, on, adt, nullptr, 0, ACL_FORMAT_ND, od, on, dout);
+        if (tx == nullptr || to == nullptr) break;
+
+        aclnnStatus st = g_get_ws(tx, (int64_t)m, bwd, to, &ws_size, &ex);
+        if (st != ACLNN_SUCCESS) { printf("    [%s] GetWorkspaceSize failed st=%d\n", name, (int)st); break; }
+        if (ws_size > 0 && aclrtMalloc(&dws, ws_size, ACL_MEM_MALLOC_NORMAL_ONLY) != ACL_SUCCESS) break;
+
+        st = g_run(dws, ws_size, ex, g_stream);
+        if (st != ACLNN_SUCCESS) { printf("    [%s] launch failed st=%d\n", name, (int)st); break; }
+        auto t0 = std::chrono::steady_clock::now();
+        if (aclrtSynchronizeStream(g_stream) != ACL_SUCCESS) { printf("    [%s] sync failed\n", name); break; }
+        kern_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+
+        if (aclrtMemcpy(hout.data(), out_bytes, dout, out_bytes, ACL_MEMCPY_DEVICE_TO_HOST) != ACL_SUCCESS) break;
+        rc = 0;
+    } while (false);
+
+    size_t mismatch = 0, bitmis = 0, nan_cnt = 0; float maxdiff = 0.0f;
+    uint32_t bad[8]; size_t nbad = 0;
+    for (size_t i = 0; i < out_elems; i++) {
+        if (hout[i] != href[i]) bitmis++;
+        // NaN 与任何数比较都为 false：漏写区域必须单独判，不能只靠 fabs(diff) > tol
+        bool nan = is_nan16(hout[i]) && !is_nan16(href[i]);
+        if (nan) nan_cnt++;
+        float d = std::fabs(to_f(hout[i], dt) - to_f(href[i], dt));
+        if (nan) d = INFINITY;
+        if (d > maxdiff) maxdiff = d;
+        if (d > TOL) { mismatch++; if (nbad < 8) bad[nbad++] = (uint32_t)i; }
+    }
+    // 与 CPU harness 同一行格式，便于两份日志逐条对拍；ws= 是设备侧 host tiling 真实
+    // 申请的 workspace 字节数（0 = 本实现不用 workspace），可旁证 tiling 已被执行
+    printf("[%s] S=%u D=%u m=%u blk=%u mode=%u tile=%u ws=%llu kern=%.3fs -> maxdiff=%.5f mismatch=%zu/%zu %s\n",
+           name, S, D, m, p.blockDim, p.splitMode, p.dTileLen,
+           (unsigned long long)ws_size, kern_s,
+           maxdiff, mismatch, out_elems, (rc != 2) ? (mismatch ? "FAIL" : "PASS") : "ERROR");
+    if (nbad > 0) {
+        printf("    first mismatches:");
+        for (size_t i = 0; i < nbad; i++) {
+            uint32_t idx = bad[i];
+            uint32_t row = bwd ? idx / D : idx / (m * D);
+            printf(" [i=%u row=%u got=%.4f ref=%.4f]", idx, row, to_f(hout[idx], dt), to_f(href[idx], dt));
+        }
+        printf("  bitmis=%zu nan_unwritten=%zu\n", bitmis, nan_cnt);
+    }
+
+    if (tx) aclDestroyTensor(tx);
+    if (to) aclDestroyTensor(to);
+    if (dx) aclrtFree(dx);
+    if (dout) aclrtFree(dout);
+    if (dws) aclrtFree(dws);
+    if (rc == 2) return 2;
+    return mismatch ? 1 : 0;
+}
+
+int main(int argc, char** argv) {
+    if (argc > 1) g_num_aiv = atoi(argv[1]);
+    if (argc > 2) g_ub_budget = (uint64_t)atol(argv[2]) * 1024;
+    const char* mode = (argc > 3) ? argv[3] : "quick";
+
+    const uint32_t A = (uint32_t)g_num_aiv;
+    int fail = 0, err = 0, done = 0;
+    bool quick  = !strcmp(mode, "quick")  || !strcmp(mode, "all");
+    bool medium = !strcmp(mode, "medium") || !strcmp(mode, "all");
+    bool large  = !strcmp(mode, "large")  || !strcmp(mode, "all");
+    bool mtile  = !strcmp(mode, "mtile")  || !strcmp(mode, "all") || !strcmp(mode, "bnd");
+    bool bnd    = !strcmp(mode, "bnd");
+    bool ub48   = !strcmp(mode, "ub48");
+    if (ub48) g_ub_budget = 48 * 1024;
+
+    printf("=== mhc_expand NPU matrix test (aiv=%u ub_budget=%lluKB mode=%s) ===\n",
+           A, (unsigned long long)(g_ub_budget / 1024), mode);
+
+    if (aclInit(nullptr) != ACL_SUCCESS) { printf("aclInit failed\n"); return 2; }
+    uint32_t dev_cnt = 0;
+    if (aclrtGetDeviceCount(&dev_cnt) != ACL_SUCCESS || dev_cnt == 0) {
+        printf("no NPU device visible (cnt=%u)\n", dev_cnt); aclFinalize(); return 2;
+    }
+    if (aclrtSetDevice(0) != ACL_SUCCESS) { printf("aclrtSetDevice(0) failed\n"); aclFinalize(); return 2; }
+    printf("### device visible: count=%u id=0\n", dev_cnt);
+    if (aclrtCreateStream(&g_stream) != ACL_SUCCESS) { printf("create stream failed\n"); aclFinalize(); return 2; }
+
+    // 算子入口只在运行期取：框架按 ASCEND_CUSTOM_OPP_PATH 装载 op api so 并提交注册表，
+    // 这里 dlopen 命中同一路径（已加载则只加引用），保证只存在一份注册表
+    const char* so_path = getenv("MHC_OPAPI_SO");
+    if (so_path == nullptr || so_path[0] == '\0') so_path = "libcust_opapi.so";
+    void* h = dlopen(so_path, RTLD_NOW | RTLD_GLOBAL);
+    if (h == nullptr) { printf("dlopen %s failed: %s\n", so_path, dlerror()); aclFinalize(); return 2; }
+    g_get_ws = (FnGetWs)dlsym(h, "aclnnMhcExpandGetWorkspaceSize");
+    g_run = (FnRun)dlsym(h, "aclnnMhcExpand");
+    if (g_get_ws == nullptr || g_run == nullptr) {
+        printf("dlsym failed (getws=%p run=%p)\n", (void*)g_get_ws, (void*)g_run);
+        aclFinalize(); return 2;
+    }
+    printf("### opapi so=%s\n", so_path);
+
+#define RUN(nm, bwd, dt, fm, S_, D_, m_) do {                                       \
+        int r_ = run_case(nm, S_, D_, m_, bwd, dt, fm);                             \
+        done++; if (r_ == 2) err++; else if (r_) fail++;                            \
+    } while (0)
+
+    if (quick) {
+        RUN("fwd-fp16-small",  false, DT_FP16, 0, 64, 256, 2);
+        RUN("fwd-fp16-D100",   false, DT_FP16, 0, 7, 100, 2);
+        RUN("fwd-fp16-D7167",  false, DT_FP16, 0, 3, 7167, 2);
+        RUN("fwd-fp16-S1D1",   false, DT_FP16, 0, 1, 1, 2);
+        RUN("fwd-fp16-m1",     false, DT_FP16, 0, 5, 33, 1);
+        RUN("fwd-fp16-m16",    false, DT_FP16, 0, 64, 512, 16);
+        RUN("bwd-fp16-small",  true,  DT_FP16, 0, 64, 256, 2);
+        RUN("bwd-fp16-D100",   true,  DT_FP16, 0, 4, 100, 2);
+        RUN("bwd-fp16-D7167",  true,  DT_FP16, 0, 2, 7167, 2);
+        RUN("bwd-fp16-S1D1",   true,  DT_FP16, 0, 1, 1, 2);
+        RUN("bwd-fp16-m1",     true,  DT_FP16, 0, 5, 33, 1);
+        RUN("bwd-fp16-m16",    true,  DT_FP16, 0, 64, 512, 16);
+        RUN("bwd-fp16-sat-m1", true,  DT_FP16, 2, 4, 128, 1);
+        RUN("bwd-fp16-sat-m2", true,  DT_FP16, 2, 4, 128, 2);
+        RUN("fwd-bf16-small",  false, DT_BF16, 0, 64, 256, 2);
+        RUN("fwd-bf16-D7167",  false, DT_BF16, 0, 3, 7167, 2);
+        RUN("bwd-bf16-small",  true,  DT_BF16, 0, 64, 256, 2);
+        RUN("bwd-bf16-D7167",  true,  DT_BF16, 0, 2, 7167, 2);
+        RUN("fwd-fp16-ROW-m8", false, DT_FP16, 0, 4, 2048, 8);
+        RUN("bwd-fp16-m2",     true,  DT_FP16, 0, 8, 256, 2);
+        RUN("bwd-fp16-m3",     true,  DT_FP16, 0, 8, 256, 3);
+        RUN("bwd-fp16-m4",     true,  DT_FP16, 0, 8, 256, 4);
+        RUN("bwd-fp16-m5",     true,  DT_FP16, 0, 8, 256, 5);
+        RUN("bwd-fp16-D7167-m5", true, DT_FP16, 0, 2, 7167, 5);
+        RUN("bwd-bf16-m4",     true,  DT_BF16, 0, 8, 256, 4);
+    }
+    if (medium) {
+        RUN("fwd-fp16-medium", false, DT_FP16, 0, 1024, 4096, 4);
+        RUN("bwd-fp16-medium", true,  DT_FP16, 0, 1024, 4096, 4);
+        RUN("fwd-bf16-medium", false, DT_BF16, 0, 1024, 4096, 4);
+        RUN("bwd-bf16-medium", true,  DT_BF16, 0, 1024, 4096, 4);
+    }
+    if (large) {
+        RUN("fwd-fp16-large",  false, DT_FP16, 0, 8192, 7168, 8);
+        RUN("fwd-bf16-large",  false, DT_BF16, 0, 8192, 7168, 8);
+        RUN("bwd-fp16-large",  true,  DT_FP16, 0, 8192, 7168, 8);
+        RUN("bwd-bf16-large",  true,  DT_BF16, 0, 8192, 7168, 8);
+    }
+    if (mtile) {
+        RUN("bwd-fp16-MT-ELEM",    true,  DT_FP16, 0, 4, 4096, 16);
+        RUN("bwd-fp16-MT-ODD",     true,  DT_FP16, 0, 2, 7167, 8);
+        RUN("bwd-bf16-MT-ELEM",    true,  DT_BF16, 0, 4, 4096, 16);
+        RUN("bwd-bf16-MT-ODD",     true,  DT_BF16, 0, 2, 7167, 8);
+        RUN("bwd-fp16-MTL-D70000-m8", true, DT_FP16, 0, 2, 70000, 8);
+        RUN("bwd-fp16-MTL-D70000-m2", true, DT_FP16, 0, 2, 70000, 2);
+        RUN("bwd-fp16-MTL-D33000-m8", true, DT_FP16, 0, 1, 33000, 8);
+        RUN("bwd-bf16-MTL-D70000-m2", true, DT_BF16, 0, 2, 70000, 2);
+        RUN("fwd-fp16-MTL-D70000-m2", false, DT_FP16, 0, 1, 70000, 2);
+        RUN("bwd-fp16-MTL-D70001-m2", true, DT_FP16, 0, 2, 70001, 2);
+        RUN("bwd-bf16-MTL-D33001-m8", true, DT_BF16, 0, 1, 33001, 8);
+        RUN("fwd-fp16-MTL-D70001-m2", false, DT_FP16, 0, 1, 70001, 2);
+    }
+    if (bnd) {
+        RUN("bwd-fp16-BND-D32768-m2", true,  DT_FP16, 0, 2, 32768, 2);
+        RUN("bwd-fp16-BND-D32769-m2", true,  DT_FP16, 0, 2, 32769, 2);
+        RUN("fwd-fp16-BND-D32769-m4", false, DT_FP16, 0, 1, 32769, 4);
+    }
+    if (ub48) {
+        RUN("bwd-fp16-UB48-D26001-m2", true,  DT_FP16, 0, 2, 26001, 2);
+        RUN("fwd-fp16-UB48-D26000-m4", false, DT_FP16, 0, 2, 26000, 4);
+        RUN("bwd-fp16-BND-D24576-m2",  true,  DT_FP16, 0, 2, 24576, 2);
+        RUN("bwd-fp16-BND-D24577-m2",  true,  DT_FP16, 0, 2, 24577, 2);
+    }
+
+    printf("=== %s | cases=%d fail=%d err=%d ===\n",
+           (fail || err) ? "HAS FAIL" : "ALL PASS", done, fail, err);
+    aclrtDestroyStream(g_stream);
+    aclrtResetDevice(0);
+    aclFinalize();
+    return fail ? 1 : (err ? 2 : 0);
+}

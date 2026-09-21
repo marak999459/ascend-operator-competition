@@ -25,3 +25,10 @@ __pycache__/
 # ===== 备份文件 =====
 *.bak
 *.orig
+
+# ===== 外部开源参考库（只读参考，源码不入库）=====
+# CANN 官方开源算子库，赛题的参考池；口径与逐题可用性见各 codeN.md §10
+ops-transformer-master/
+
+# CANN 9.0.0 Ascend C 头文件镜像（真机拉取，只读参考，不入库）
+code 3/npu_debug/cann_include/

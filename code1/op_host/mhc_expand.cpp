@@ -79,15 +79,16 @@ namespace optiling {
         tiling->backward = backward ? 1u : 0u;
 
         // D 方向大 tile：32B 对齐（fp16/bf16 = 16 元素），典型 512~2048；
-        // 若整行 m*D 能放进 UB 的 1/4，则整行一次 DMA（最优），否则分 tile。
+        // 核内同时只持有 1 份 D（前向读 1 次写 m 次、反向逐副本读），
+        // 故只需 D*elem_size 放得进 UB 的 1/4 即可整行一次 DMA。
         const uint64_t elem_size = static_cast<uint64_t>(dtype_size_x);
         const uint64_t ub_budget = ub_size / 4;
         uint32_t d_tile_len = 0;
-        if (static_cast<uint64_t>(m) * D * elem_size <= ub_budget) {
-            d_tile_len = D;                              // 整行模式：dTileNum = 1，一次读 m*D
+        if (static_cast<uint64_t>(D) * elem_size <= ub_budget) {
+            d_tile_len = D;                              // 整行模式：dTileNum = 1
         } else {
             uint64_t t = std::min<uint64_t>(2048, D);
-            uint64_t max_t = ub_budget / (static_cast<uint64_t>(m) * elem_size);
+            uint64_t max_t = ub_budget / elem_size;
             t = std::min(t, max_t);
             if (t > 16) t = (t / 16) * 16;               // 32B 对齐
             if (t < 16) t = 16;

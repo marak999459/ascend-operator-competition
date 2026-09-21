@@ -1,0 +1,96 @@
+#!/bin/bash
+# P6 前置探针（任务 #21）：arch22 手写 Cube 流水能否在本构建流程编译 + 跑通。
+# ⚠️ 只改远端副本（kernel / host blockDim / harness 读数），trap 一律还原成干净构建。
+# 用法: run_cube_probe.sh [launch|mmad|aivlive ...]      默认 mmad
+set -u
+REPO="/home/fszqsn/ops_comp/ascend-operator-competition"
+H="devenvc_3gfcn.bd23984d636345e490f7c1d42dbef049.atomgit.0"
+C="-F $HOME/.atomgitdevenv/.ssh/config"
+KER="code/op_kernel/sparse_flash_attention.cpp"
+HOST="op_host/sparse_flash_attention.cpp"   # ⚠️ 下面用它的地方都先 cd ~/sfa_real/code
+ENVR='source ~/Ascend/cann-9.0.0/set_env.sh 2>/dev/null; cd ~/sfa_real; export ASCEND_CUSTOM_OPP_PATH=$HOME/sfa_real/vendor/custom; export LD_LIBRARY_PATH=$HOME/sfa_real/vendor/custom/op_api/lib:$HOME/Ascend/cann-9.0.0/aarch64-linux/lib64:${LD_LIBRARY_PATH:-}'
+LINK="-I\$HOME/Ascend/cann-9.0.0/aarch64-linux/include -I\$HOME/sfa_real/vendor/custom/op_api/include -L\$HOME/Ascend/cann-9.0.0/aarch64-linux/lib64 -L\$HOME/sfa_real/vendor/custom/op_api/lib -lascendcl -lcust_opapi"
+# ⚠️ 和 refs/sfa/run.sh 一致：先 -lnnopcapbase，失败退 -lnnopbase；且先写到 /tmp/tsd，
+#    免得链接失败把已有的 test_sfa_dev 打成不存在（§15.20 踩坑备忘）。
+HLINK="$LINK -lnnopcapbase"
+HLINK2="$LINK -lnnopbase"
+rssh() { timeout "${T:-1500}" ssh $C -o ConnectTimeout=25 "$H" "$@"; }
+SOC() { rssh "cd ~/sfa_real/code && \
+    sed -i 's/set(ASCEND_COMPUTE_UNIT ascend910b)/set(ASCEND_COMPUTE_UNIT ascend910_93)/' CMakeLists.txt && \
+    sed -i 's|\.AddConfig(\"ascend910b\")|.AddConfig(\"ascend910b\").AddConfig(\"ascend910_93\")|' op_host/sparse_flash_attention.cpp && \
+    grep -c ascend910_93 CMakeLists.txt op_host/sparse_flash_attention.cpp"; }
+# ⚠️ BUILDH 必须**响亮地**失败：g++ 挂掉时若 test_sfa_dev 还在，就会静默沿用上一次编好的旧二进制
+#    ⇒ 打出来的是旧 harness 格式 + 旧 kernel 行为（本轮 wsnw/wsmix 那批废数就是这么来的）。
+BUILDH() { local o; o=$(rssh "cd ~/sfa_real && source ~/Ascend/cann-9.0.0/set_env.sh 2>/dev/null; \
+    rm -f /tmp/tsd; \
+    { g++ -std=c++17 -O2 test_sfa_dev.cpp -o /tmp/tsd $HLINK 2>/dev/null || \
+      g++ -std=c++17 -O2 test_sfa_dev.cpp -o /tmp/tsd $HLINK2 2>&1 | head -8; } ; \
+    if [ -x /tmp/tsd ]; then mv -f /tmp/tsd test_sfa_dev; echo 'HARNESS OK'; ls -la test_sfa_dev; \
+    else echo 'HARNESS BUILD FAIL'; fi" 2>&1 | tail -4)
+  printf '%s\n' "$o"
+  case "$o" in *"HARNESS OK"*) return 0;; *) return 1;; esac; }
+CLEANBUILD() { bash "$REPO/code 3/npu_debug/npu.sh" sync >/dev/null 2>&1; SOC >/dev/null; \
+    rssh "$ENVR; bash build.sh" 2>&1 | grep -aE "构建 OK|CMAKE FAIL|MAKE FAIL|error" | head -6; \
+    rssh "cat > /tmp/cube_harness_patch.py" < "$REPO/code 3/probes/cube_harness_patch.py"; \
+    rssh "cd ~/sfa_real && python3 /tmp/cube_harness_patch.py" || { echo 'HARNESS PATCH FAIL'; return 1; }; \
+    BUILDH; }
+
+restore() { echo "=== 还原干净构建 ==="; CLEANBUILD >/dev/null 2>&1; \
+    rssh "$ENVR; ./test_sfa_dev cases/p1.bin 3 diff" 2>&1 | grep -aE "超差|时间|逐位" | tail -3; }
+trap restore EXIT
+
+echo "=== 0) 拉回干净态 + SoC 补丁 + harness 探针 + 首次构建 ==="
+CLEANBUILD || { echo "前置 harness 构建失败 ⇒ 全部档位放弃（否则读到的是旧二进制的假数）"; exit 1; }
+
+if [ "$#" -eq 0 ]; then set -- mmad; fi
+for m in "$@"; do
+  echo "########## cube probe = $m ##########"
+  PROBEENV=''    # 传给 harness 的探针侧环境变量（C 的基址/行距）
+  CLEANBUILD >/dev/null || { echo ">>> $m: 前置构建失败，跳过"; continue; }   # 每档从"host 声明 = 0、本地干净源"起步
+  python3 "$REPO/code 3/probes/mk_probe_cube.py" "$m" | rssh "cat > ~/sfa_real/$KER" || { echo "PUSH FAIL"; continue; }
+  case "$m" in
+    wspeek)   # 有真 workspace 可对照：host 声明 128 KB，让调用方真的 malloc 一块（§15.21 的口径）
+      rssh "cd ~/sfa_real/code && sed -i 's|if (currentWorkspace != nullptr) { currentWorkspace\[0\] = 0; }|if (currentWorkspace != nullptr) { currentWorkspace[0] = 128u * 1024u; }  // WSPEEK|' $HOST && grep -n 'WSPEEK' $HOST | head -2" ;;
+    wsnw|wsmix|wshigh|wsaiv|wsmixo)   # usrWorkspace = 调用方 ws + 16 MB 保留区 ⇒ 必须声明 16 MB + 可用量
+      rssh "cd ~/sfa_real/code && sed -i 's|if (currentWorkspace != nullptr) { currentWorkspace\[0\] = 0; }|if (currentWorkspace != nullptr) { currentWorkspace[0] = 16u * 1024u * 1024u + 128u * 1024u; }  // WSMIX|' $HOST && grep -n 'WSMIX' $HOST | head -2" ;;
+    xcoree|xcoref|xcoreg|xcorei|xcorej|xcorep|cubeloop3|cubeloop3nb|cubeloop2|cubemmad3)   # C 的落点改成"基址 32 / 行距 16"（只占 32..271），否则 Fixpipe 会把 echo 槽盖光
+      PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16' ;;
+    mmad)   # C 自己就落在 16..991，把 XC3 那屏关掉，否则 C 的数值被当成 echo 槽的"假读数"（§15.30）
+      PROBEENV='SFA_QUIET_XC3=1' ;;
+  esac
+  # aivlive 用 BD 扫并行度（12/24/40）；其余档默认 3 组 = 3AIC+6AIV 的最小 MIX（BD=1 可退化成单组）
+  if [ "$m" = "aivlive" ]; then
+    if [ -n "${BD:-}" ]; then
+      rssh "cd ~/sfa_real/code && sed -i 's|context->SetBlockDim(blockDim);|context->SetBlockDim($BD);  // CUBEPROBE BD|' $HOST && grep -n SetBlockDim $HOST | head -2"
+    fi
+  else
+    BDN="${BD:-3}"
+    # ⚠️ 这段字符串整体在双引号里，内层绝不能再出现双引号（bash 会在第一个内引号处断开 ⇒
+    #    "syntax error near unexpected token '('"，而且错误发生在**每档 build 之前**，很容易被当成构建失败误判）。
+    rssh "cd ~/sfa_real/code && sed -i 's|context->SetBlockDim(blockDim);|context->SetBlockDim($BDN);  // CUBEPROBE BD|' $HOST && grep -n SetBlockDim $HOST | head -2"
+  fi
+  echo "--- build ---"
+  # ⚠️ 时间读数必须和**生效的 blockDim**同屏：本脚本对 host 的 `SetBlockDim($BD)` sed 曾经
+  #    把 aivlive 档整算子压到 3 个块上跑，于是量出"8.08 ms"被读成"MIX 的并行度墙"
+  #    （真机复验见 code3.md §15.28：pol0@BD=3 = 8.0812 ms，差 0.05 %）。
+  rssh "cd ~/sfa_real/code && grep -n 'SetBlockDim' $HOST | head -3"
+  BOUT=$(rssh "$ENVR; bash build.sh" 2>&1)
+  printf '%s\n' "$BOUT" | grep -aE "构建 OK|CMAKE FAIL|MAKE FAIL|error:|Error" | head -20
+  # ⚠️ 算子构建失败时旧的 .so 还在 ⇒ test_sfa_dev 会跑上一档的 kernel（wsnw 那次就是这样
+  #    读到了 P14 的 0.7871 ms / wsSize=0）。没有"构建 OK"就直接放弃这一档。
+  if ! printf '%s\n' "$BOUT" | grep -aq "构建 OK"; then
+    echo ">>> $m: 算子构建失败 ⇒ 跳过（避免沿用上一次 .so 读假数）"; continue
+  fi
+  if [ "$m" = "aivlive" ]; then
+    rssh "$ENVR; for n in p1 p4 big1; do printf '%-6s ' \$n; timeout 300 ./test_sfa_dev cases/\$n.bin 3 diff >/tmp/cp_\$n.txt 2>&1; echo \"rc=\$?\"; grep -aoE '超差 [0-9]+/[0-9]+|LSE 超差 [0-9]+/[0-9]+|平均 [0-9.]+ ms|逐位一致|不逐位' /tmp/cp_\$n.txt | tr '\n' '|'; echo; done"
+  else
+    # (a) 只跑到 launch#1 的读数（SFA_CUBE_EXIT=1 ⇒ 读完 return 7）
+    # ⚠️ 必须 `stdbuf -o0`：stdout 重定向到文件是**全缓冲**的，进程被 timeout 打死时缓冲区整个丢掉
+    #    ⇒ 上一版 xcored 挂死时 /tmp/cp.txt 是 0 字节，连"host 有没有跑到 launch"都说不清（§15.29(e)）。
+    rssh "$ENVR; $PROBEENV SFA_CUBE_EXIT=1 timeout ${TO:-300} stdbuf -o0 -e0 ./test_sfa_dev cases/big1.bin 1 none >/tmp/cp.txt 2>&1; echo \"rc=\$?\"; grep -aE '\[CUBE\]|^case=' /tmp/cp.txt | grep -av C4x4; grep -aiE 'error|fail' /tmp/cp.txt | head -6; echo '--- tail(不通也看得见走到哪) ---'; tail -4 /tmp/cp.txt"
+    # (b) 反复 launch：1 + 5 reps + 批量 20×3 ⇒ 专查"第 2 次 launch 挂"这个老现象（现在带设备侧错误码）
+    if [ "$m" != "wspeek" ] && [ -z "${SOLO:-}" ]; then
+      rssh "$ENVR; $PROBEENV timeout ${TO2:-600} stdbuf -o0 -e0 ./test_sfa_dev cases/big1.bin 5 none >/tmp/cp2.txt 2>&1; echo \"rc=\$?\"; grep -aE '\[CUBE\] AIC|\[CUBE\] AIV|\[CUBE\] XC3|\[CUBE\] wsScan|\[CUBE\] mismatchC|\[FAIL\]|平均' /tmp/cp2.txt | head -12; echo '--- tail ---'; tail -4 /tmp/cp2.txt"
+    fi
+  fi
+done

@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""在**远端**给 test_sfa_dev.cpp 注入 Cube/workspace 探针读数（跑完由 run_cube_probe.sh 的 trap 还原）。
+
+四处注入：
+  1) GetWorkspaceSize 之后打印框架真正报给调用方的 wsSize/地址，并把 **usrWorkspace 那一窗口清零**
+     —— ⚠️ 不清零就会读到上一次进程留下的标记（本轮第一次跑 wsmix 就被这个坑读过假数：
+     "6 个 AIV 块全写进去了"其实是上一档 wsmix 的残留）。
+  2) 每次 launch 前把两个出口缓冲（d_max/d_sum）清零：探针标记挤在那儿头几百个槽。
+  3) **第一次** launch+sync 之后立刻自带一次 D2H 并打印探针出口，然后按 SFA_CUBE_EXIT 决定
+     return 7 ⇒ 把"launch#1 到底跑没跑通"和"launch#2 为什么挂"分开测（否则 rep0 一挂就永远走不到读数）。
+  4) 计时循环里的 sync 失败补上 `aclGetRecentErrMsg()` ⇒ 分不清"我们写越界"还是"框架自己越界"时，
+     设备侧错误码是唯一能定性的证据。
+
+探针出口布局（softmax_sum_out 的 **int32 视图**，每块 8 格，AIC 基址 100 / AIV 基址 500）：
+  [+0/+1] (workspace - attention_out) lo/hi 字节   [+4] blockIdx        [+6] 9 = 活着走出 workspace 真写
+  [+2/+3] (tiling - attention_out)    lo/hi        [+5] 7 = 到达入口探针  [+7] ——
+对拍口径（mmad 档）：C[i][j] = Σ_k key[i][k] · key[16+j][k]，k=0..15，元素行距 = D。
+同时给出 C^T 的期望值 ⇒ 一次跑就能分清"数值错"还是"m/n 转置错"。
+"""
+import io
+import os
+
+p = os.path.join(os.path.expanduser('~'), 'sfa_real', 'test_sfa_dev.cpp')
+t = io.open(p, encoding='utf-8').read()
+T0 = t
+BR0 = t.count('{') - t.count('}')
+if '[CUBEPROBE]' in t:
+    # ⚠️ 必须认得出"是不是本版"：上一版探针跑完后残留的旧 harness 会让本脚本早退，
+    #    于是 g++ 编的还是旧读数格式 ⇒ 打出来的字符串看着像新数据，其实是旧二进制（本轮踩过）。
+    #    幂等 key 要用**只有本版才有**的串（`XC3 AICalive` 从 v3.x 就在，不能单独当 key）。
+    if all(k in t for k in ('SFA_CBASE', 'scRead=', 'Cdiag=', 'SFA_QUIET_XC3')):
+        print('harness already patched (v6)')
+        raise SystemExit(0)
+    raise SystemExit('[CUBEPROBE] 残留的是**旧版** harness（v5 之前），拒绝在其上叠加 ⇒ 先还原 test_sfa_dev.cpp')
+
+# ---- 1) wsSize / 地址实测值 + usrWorkspace 窗口清零 ----
+AW = '    if (wsSize > 0 && aclrtMalloc'
+assert t.count(AW) == 1, 'anchor miss (wsSize): %d' % t.count(AW)
+i = t.index(AW)
+j = t.index('\n', i) + 1
+t = t[:j] + ('    std::printf("[CUBE] wsSize=%llu ws=%p out=%p key=%p dsum=%p\\n", (unsigned long long)wsSize, ws, d_out, d_k, d_sum);   // [CUBEPROBE]\n'
+             '    if (wsSize > 16777216u) {   // [CUBEPROBE] 保留区之后那段必须清零，否则读到上一次的残留\n'
+             '        aclrtMemset(static_cast<char *>(ws) + 16777216, (size_t)(wsSize - 16777216u), 0, (size_t)(wsSize - 16777216u));\n'
+             '    }\n' + t[j:])
+
+# ---- 2) 探针出口缓冲区清零 ----
+# ⚠️ 探针把标记写在 softmax_sum_out 的头几百个槽上，而 d_sum 是 aclrtMalloc 出来的**未初始化**内存，
+#    上一次进程留下的标记会被下一次当成"这次的结果"读出来。⇒ 每次 launch 前先 memset 这两个出口缓冲。
+AM = '    auto RunOnce = [&]'
+assert t.count(AM) == 1, 'anchor miss (memset): %d' % t.count(AM)
+i = t.index(AM)
+j = t.index('\n', i) + 1
+t = t[:j] + ('    aclrtMemset(d_sum, nlse * 4, 0, nlse * 4);            // [CUBEPROBE] 标记区清零\n'
+             '    aclrtMemset(d_max, nlse * 4, 0, nlse * 4);            // [CUBEPROBE]\n'
+             '    if (wsSize > 16777216u) { aclrtMemset(static_cast<char *>(ws) + 16777216, (size_t)(wsSize - 16777216u), 0, (size_t)(wsSize - 16777216u)); }   // [CUBEPROBE]\n') + t[j:]
+
+# ---- 4) sync 失败时把设备侧错误码打出来 ----
+AS = 'std::printf("[FAIL] sync rep%d\\n", r);'
+assert t.count(AS) == 1, 'anchor miss (syncRep): %d' % t.count(AS)
+# ⚠️ 这一处替换的是 `if (...) { printf(...); return 2; }` 的**行中部**：
+#    绝对不能在替换串末尾加 `// [CUBEPROBE]` —— 它会把原行剩下的 ` return 2; }` 注释掉，
+#    整个文件少一个右花括号，g++ 报 "expected '}' at end of input"，
+#    而 BUILDH 的失败是静默的（旧二进制被沿用）⇒ 本轮那一批 wsnw/wsmix 读数全部作废。
+t = t.replace(AS, 'std::printf("[CUBE][FAIL] sync rep%d err=%s\\n", r, aclGetRecentErrMsg());', 1)
+
+# ---- 3) 首次 launch 后的探针读数 ----
+A = '（kernel 挂了？）'
+assert t.count(A) == 1, 'anchor miss (sync1): %d' % t.count(A)
+j = t.index('\n', t.index(A)) + 1
+
+INJ = '''    {   /* [CUBEPROBE] 只读探针出口，不做算子正确性判定 */
+        std::vector<float> pm(nlse), pg(nlse);
+        if (aclrtMemcpy(pm.data(), nlse * 4, d_max, nlse * 4, ACL_MEMCPY_DEVICE_TO_HOST) != ACL_SUCCESS ||
+            aclrtMemcpy(pg.data(), nlse * 4, d_sum, nlse * 4, ACL_MEMCPY_DEVICE_TO_HOST) != ACL_SUCCESS) {
+            std::printf("[CUBE] D2H fail\\n");
+        }
+        const float *gsum = pg.data();
+        const uint16_t *kk = c.key.data();
+        const size_t DD = (size_t)c.D;
+        std::printf("[CUBE] nlse=%zu reach=%.0f tail=%.0f AICbi=", nlse, (double)gsum[0], (double)gsum[15]);
+        /* launch/shim 档：AIC 在 [1+blockIdx] 写 5、AIV 在 [64+blockIdx] 写 6 ⇒ 一次跑清两个通道的 blockIdx 空间 */
+        for (int i = 1; i < 64; ++i) { if (gsum[i] != 0.f) { std::printf("%d:%.0f,", i - 1, (double)gsum[i]); } }
+        std::printf(" AIVbi=");
+        for (int i = 64; i < 128; ++i) { if (gsum[i] != 0.f) { std::printf("%d:%.0f,", i - 64, (double)gsum[i]); } }
+        /* 入口探针档（wspeek/wsnw/wsmix/wsmixo）：AIC 记录在 int32[100+8bi]，AIV 在 [500+8bi] */
+        if (nlse > 600) {
+            const int32_t *ri = reinterpret_cast<const int32_t *>(pg.data());
+            auto rec = [&](const char *tag, int base) {
+                std::printf("[CUBE] %-4s ", tag);
+                for (int b = 0; b < 8; ++b) {
+                    const int s = base + 8 * b;
+                    if (ri[s + 5] == 0 && ri[s] == 0) { continue; }        // 这一块的记录整条不存在
+                    const int64_t d = ((int64_t)(uint32_t)ri[s]) | ((int64_t)ri[s + 1] << 32);
+                    const int64_t dt = ((int64_t)(uint32_t)ri[s + 2]) | ((int64_t)ri[s + 3] << 32);
+                    std::printf("b%d{bi=%d ws-out=%.0fB t-out=%.0fB arrive=%d survWS=%d} ", b,
+                                ri[s + 4], (double)d, (double)dt, ri[s + 5], ri[s + 6]);
+                }
+                std::printf("\\n");
+            };
+            rec("AIC", 100);
+            rec("AIV", 500);
+            std::printf("[CUBE] 参照: (caller ws - out) = %.0f B, +16MB 后 = %.0f B\\n",
+                        (double)((int64_t)(char *)ws - (int64_t)(char *)d_out),
+                        (double)((int64_t)(char *)ws - (int64_t)(char *)d_out + 16777216));
+        }
+        /* wsmix/wsmixo 档：host 声明 16 MB + 128 KB ⇒ usrWorkspace = ws + 16 MB，
+           kernel 在那儿写 float=5(AIC)/6(AIV)、紧随其后的 int32 = blockIdx。直接 memcpy 回来数命中。 */
+        if (ws != nullptr && wsSize > 16777216) {
+            const size_t n = static_cast<size_t>(wsSize - 16777216) / 4;
+            std::vector<float> wv(n, 0.f);
+            const aclError me = aclrtMemcpy(wv.data(), n * 4,
+                                            static_cast<char *>(ws) + 16777216, n * 4,
+                                            ACL_MEMCPY_DEVICE_TO_HOST);
+            std::printf("[CUBE] wsScan n=%zu usr=%p memcpy=%d:", n,
+                        static_cast<void *>(static_cast<char *>(ws) + 16777216), (int)me);
+            if (me == ACL_SUCCESS) {
+                const int32_t *wi = reinterpret_cast<const int32_t *>(wv.data());
+                int c5 = 0, c6 = 0, shown = 0;
+                for (size_t q = 0; q + 1 < n; ++q) {
+                    if (wv[q] != 5.f && wv[q] != 6.f) { continue; }
+                    if (wv[q] == 5.f) { ++c5; } else { ++c6; }
+                    if (shown < 16) { std::printf(" [%zu]%.0f/bi=%d", q, (double)wv[q], wi[q + 1]); ++shown; }
+                }
+                std::printf(" hitAIC=%d hitAIV=%d\\n", c5, c6);
+            }
+        }
+        /* xcore/xcoreb 档：AIC 写 maxGm_[64bi..] = 3+bi，AIV 读回来落到 sumGm_[700+bi]，
+           一次跑同时裁定"旗标通不通 / 数据通不通 / 1AIC:2AIV 的配对到底是哪种"。 */
+        if (nlse > 780) {
+            std::printf("[CUBE] XC  AIC alive=%.0f bi9=", (double)gsum[0]);
+            for (int i = 8; i < 16; ++i) { if (gsum[i] != 0.f) { std::printf("%d:%.0f,", i - 8, (double)gsum[i]); } }
+            std::printf(" AIVrd=");
+            for (int i = 700; i < 716; ++i) { if (gsum[i] != 0.f) { std::printf("%d:%.2f,", i - 700, (double)gsum[i]); } }
+            std::printf(" AIVarrive=");
+            for (int i = 764; i < 780; ++i) { if (gsum[i] != 0.f) { std::printf("%d:%.0f,", i - 764, (double)gsum[i]); } }
+            std::printf("\\n");
+        }
+        /* xcorec/xcored/xcoree 档：echo 槽 600+bi*4+r = AIV 的**标量直读**、680+bi*4+r = AIV 走
+           MTE2(DataCopy 进 UB) 读到的同一格，到达位 760+bi ⇒ 与 host 自己读到的 Cdiag 三方对照。
+           ⚠️ C 的基址/行距走环境变量：xcored 把 C 放在 16+i*64+j（浮点 16..991）会把 echo 槽和
+           到达位整个盖掉，xcoree 改成 32+i*16+j 才留得下标记区。 */
+        const int CB = (std::getenv("SFA_CBASE") != nullptr) ? std::atoi(std::getenv("SFA_CBASE")) : 16;
+        const int CS = (std::getenv("SFA_CSTRIDE") != nullptr) ? std::atoi(std::getenv("SFA_CSTRIDE")) : 64;
+        /* ⚠️ mmad 档的 C 就落在 16+i*64+j（浮点 16..991），与下面 600..792 的 echo/到达槽**整段重叠**
+           ⇒ 那一屏打出来的"scRead=v0[1.61,1.26,..]"不是未初始化内存，是 C 矩阵自己的值。
+           本轮就把它当成"清零没生效"查过一次 ⇒ 非 xcore 档用 SFA_QUIET_XC3=1 关掉这段读数。 */
+        if (nlse > 800 && std::getenv("SFA_QUIET_XC3") == nullptr) {
+            int any3 = 0;
+            for (int i = 600; i < 744; ++i) { if (gsum[i] != 0.f) { any3 = 1; break; } }
+            std::printf("[CUBE] XC3 AICalive=%.0f AICbi=", (double)gsum[0]);
+            for (int i = 8; i < 24; ++i) { if (gsum[i] != 0.f) { std::printf("%d:%.0f,", i - 8, (double)gsum[i]); } }
+            std::printf(" scRead=");
+            if (!any3) {
+                std::printf("NONE(600..743 all zero)");
+            } else {
+                for (int bi = 0; bi < 32; ++bi) {
+                    const float *sv = &gsum[600 + bi * 4];
+                    const float *mv = &gsum[680 + bi * 4];
+                    if (sv[0] == 0.f && sv[1] == 0.f && sv[2] == 0.f &&
+                        mv[0] == 0.f && mv[1] == 0.f && mv[2] == 0.f) { continue; }
+                    std::printf("v%d[%.2f,%.2f,%.2f|%.2f,%.2f,%.2f]", bi,
+                                (double)sv[0], (double)sv[1], (double)sv[2],
+                                (double)mv[0], (double)mv[1], (double)mv[2]);
+                }
+            }
+            std::printf(" | Cdiag=[%.2f,%.2f,%.2f]@%d/%d", (double)gsum[CB],
+                        (double)gsum[CB + CS + 1], (double)gsum[CB + 2 * CS + 2], CB, CS);
+            std::printf(" AIVarrive=");
+            for (int i = 760; i < 792; ++i) { if (gsum[i] != 0.f) { std::printf("%d:%.0f,", i - 760, (double)gsum[i]); } }
+            std::printf("\\n");
+        }
+        int bad = 0, badT = 0;
+        std::printf("\\n[CUBE] C4x4:");
+        for (int ii = 0; ii < 4; ++ii) {
+            for (int jj = 0; jj < 4; ++jj) {
+                float e = 0.f, et = 0.f;
+                for (int k = 0; k < 16; ++k) {
+                    const float a  = HalfToFloat(kk[(size_t)ii * DD + k]);
+                    const float b  = HalfToFloat(kk[(size_t)(16 + jj) * DD + k]);
+                    const float a2 = HalfToFloat(kk[(size_t)jj * DD + k]);
+                    const float b2 = HalfToFloat(kk[(size_t)(16 + ii) * DD + k]);
+                    e += a * b;
+                    et += a2 * b2;
+                }
+                const float g = gsum[CB + ii * CS + jj];
+                if (std::fabs(g - e) > 1e-2f) { ++bad; }
+                if (std::fabs(g - et) > 1e-2f) { ++badT; }
+                std::printf(" (%d,%d)g=%.4f e=%.4f et=%.4f", ii, jj, (double)g, (double)e, (double)et);
+            }
+        }
+        std::printf("\\n[CUBE] mismatchC=%d mismatchCT=%d\\n", bad, badT);
+        if (std::getenv("SFA_CUBE_EXIT") != nullptr) { return 7; }
+    }
+'''
+
+t = t[:j] + INJ + t[j:]
+if '#include <cmath>' not in t:
+    i = t.index('#include')
+    k = t.index('\n', i) + 1
+    t = t[:k] + '#include <cmath>\n' + t[k:]
+
+# ---- 落盘前自检：注入不能改变花括号平衡（平衡被吞 = g++ 必挂，而挂是静默的）----
+BR = t.count('{') - t.count('}')
+if BR != BR0:
+    raise SystemExit('[FAIL] 注入后花括号平衡从 %d 变成 %d ⇒ 有注入吞掉了原行的右花括号，拒绝落盘' % (BR0, BR))
+for m in ('dsum=%p', 'sync rep%d err=', '标记区清零', 'scRead=', 'NONE(600..743 all zero)',
+          'Cdiag=', 'SFA_CBASE', 'gsum[CB + ii * CS + jj]', 'SFA_QUIET_XC3'):
+    assert m in t, '注入缺失: %s' % m
+io.open(p, 'w', encoding='utf-8').write(t)
+print('harness patched: [CUBEPROBE] v6 (braces %+d)' % BR)

@@ -9,6 +9,31 @@
 
 #include <cstdint>
 
+// 分数向量化的 token 组大小。kernel 的 scratch 尺寸与 host 的 UB 预算式必须同源，
+// 所以放在两边共享的头里，不要各自写死。
+// 取 16 的依据（code3.md §15.12/§15.13）：一条向量调用的固定开销 ≈29 cycle，
+// 一组越宽，同样的 fold/reduce 调用摊到的点积越多 —— GRP 8→16 使 big1 0.967→0.829 ms。
+// ⚠️ 它是 UB 预算式里的乘数：kfBuf_/pfBuf_/krfBuf_/prfBuf_ 四项合计
+//    2*GRP*(Q_D+Dr)*4 字节（Q_D=512、Dr=64 时 = 73728 B，占整块 UB 的 37%）。
+//    再往上调之前先复核 §15.13 记的余量（选中分块下仅剩 ~6 KB）。
+// ⚠️ kernel 侧 rdBuf_ 的切片宽度是 max(nb, GRP)（一次批量 reduce 出 GRP 行行和），
+//    host 预算式用同一口径 —— 改这里两边会自动一致，只改一边会越界。
+constexpr uint32_t SFA_SC_GRP = 16;
+
+// P13：**只有一个头**的单位（nb==1）里，K 的 fp32 展开 kf 在一组内只被读一次
+// （头循环只有 1 轮）⇒ 广播乘可以**就地**写在 kf 上，pf/prf 两块 scratch 直接省掉，
+// 于是同一份 UB 预算能装下 2 倍宽的组。组宽 16→32 ⇒ 每 chunk 的 fold/mul/reduce
+// 调用条数不变、但**每组一次**的那 22 条只剩一半（code3.md §15.16）。
+// ⚠️ 仅对 nb==1 生效：nb>1 时 kf 要被 nbCur 个头各读一次，就地写会把后面的头读脏。
+constexpr uint32_t SFA_SC_GRP_W = 32;
+
+// P21：一个 chunk 的 gather **段数**上限 = kernel 里"扫描前置"那块定长暂存数组的尺寸。
+// host 的 n_blk 候选因此钳在 <= 它：一段至少贡献 1 个 token，所以 n_blk 个 token 最多
+// n_blk 段。D=512/fp16 下 n_blk=64 仅 kBuf+vBuf 就要 131072 B，加 kfBuf_（32 组宽 ×512×4）
+// 65536 B 早已越过 UB ⇒ 这一钳对【选档】是空操作，它只是把"暂存数组不会越界"从
+// UB 预算式的事实变成结构上的事实，kernel 里因此不需要越界分支。
+constexpr uint32_t SFA_STAGE_MAX = 32;
+
 struct SparseFlashAttentionTilingData {
     // ---- 原骨架字段（保持顺序不变）----
     uint32_t B;
@@ -34,6 +59,12 @@ struct SparseFlashAttentionTilingData {
     uint32_t actual_q_len_size;   // actual_seq_lengths_query 元素个数（0=未传）
     uint32_t actual_kv_len_size;  // actual_seq_lengths_kv  元素个数（0=未传）
 
-    // ---- bf16 支持：host 检测 dtype，1=输入是 bf16，kernel 用软件解码 ----
-    uint32_t is_bf16;
+    // ---- P11v2：sparse 列表（KV 轴）切给几个核 ----
+    // 只有 1（不切）与 2（切成前后两半，两半各一个核）两种取值。
+    // 归并通道是**本算子自己的输出张量**（分片 0 照常写 attention_out / LSE，分片 1 在
+    // SyncAll 之后读回来并覆盖写），所以不能用 workspace —— arch22 的自定义算子路径上
+    // GetUserWorkspace() 返回的是恒定的未映射地址（§15.21），而跨核**标量** SetValue/GetValue
+    // 也读不到（§15.32 实测：40 块里只有 2~3 块看得见，批量 DataCopy 才是全通的）。
+    // ⚠️ 追加在结构体末尾：前面的字段顺序是原骨架口径，device 侧按字节布局读，不能重排。
+    uint32_t kv_shard;
 };

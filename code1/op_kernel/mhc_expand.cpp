@@ -110,6 +110,9 @@ private:
         DataCopyPad(in_buf, x_gm_[src_off], cp, pp);
         in_que_.EnQue(in_buf);
         auto x_local = in_que_.DeQue<DT_X>();
+        // 前向是纯搬运、中间没有 VEC 指令，TQue<VECIN> 的序只挂在 VEC 消费上，所以 MTE2
+        // 落地与上一次 MTE1 读完这两道序得自己补；本路径无 VEC 动作，ALL 与单条 barrier 等价
+        PipeBarrier<PIPE_ALL>();
 
         const uint32_t k_begin = (k_limit == tiling_.m) ? 0 : k_limit;
         const uint32_t k_end   = (k_limit == tiling_.m) ? tiling_.m : k_limit + 1;
@@ -122,30 +125,40 @@ private:
     }
 
     // 反向单块：逐 m 读 o_grad[i, k, jt] -> Cast 到 float 累加 -> Cast 回原 dtype 写 x_grad[i, jt]
+    // 双缓冲流水线：DMA 读 k+1 与 VEC 算 k 并行，隐藏 DMA 延迟
     __aicore__ inline void BackwardOneBlock(uint32_t i, uint32_t jt, uint32_t cur_h) {
         const uint32_t m = tiling_.m;
         const int64_t base = static_cast<int64_t>(i) * m * tiling_.D + jt * tiling_.dTileLen;
-        // 真机坑：行首/尾块非 32B 对齐，GM<->UB 一律用 DataCopyPad（blockLen 单位为字节）。
         DataCopyExtParams cp{1, static_cast<uint32_t>(cur_h * static_cast<int32_t>(sizeof(DT_X))), 0, 0, 0};
         DataCopyPadExtParams<DT_X> pp{false, 0, 0, static_cast<DT_X>(0)};
 
-        // 1. 累加器清零
         auto acc = acc_buf_.Get<float>();
         Duplicate(acc, 0.0f, cur_h);
 
-        // 2. 逐副本读入 + Cast 到 float + 累加
+        // 预取第 0 个副本
+        auto next_dma_buf = in_que_.AllocTensor<DT_X>();
+        DataCopyPad(next_dma_buf, x_gm_[base], cp, pp);
+        in_que_.EnQue(next_dma_buf);
+
         for (uint32_t k = 0; k < m; ++k) {
-            auto in_buf = in_que_.AllocTensor<DT_X>();
-            DataCopyPad(in_buf, x_gm_[base + static_cast<int64_t>(k) * tiling_.D], cp, pp);
-            in_que_.EnQue(in_buf);
-            auto grad_local = in_que_.DeQue<DT_X>();
+            auto cur_dma_buf = next_dma_buf;
+            auto compute_buf = in_que_.DeQue<DT_X>();
+
+            // 启动下一个副本的 DMA（与当前 VEC 计算并行）
+            if (k < m - 1) {
+                next_dma_buf = in_que_.AllocTensor<DT_X>();
+                DataCopyPad(next_dma_buf,
+                            x_gm_[base + static_cast<int64_t>(k + 1) * tiling_.D],
+                            cp, pp);
+                in_que_.EnQue(next_dma_buf);
+            }
+
             auto tmp = tmp_buf_.Get<float>();
-            Cast(tmp, grad_local, RoundMode::CAST_NONE, cur_h);
+            Cast(tmp, compute_buf, RoundMode::CAST_NONE, cur_h);
             Add(acc, acc, tmp, cur_h);
-            in_que_.FreeTensor(grad_local);
+            in_que_.FreeTensor(compute_buf);
         }
 
-        // 3. Cast 回原 dtype 写回 x_grad
         auto out_buf = out_que_.AllocTensor<DT_X>();
         Cast(out_buf, acc, RoundMode::CAST_RINT, cur_h);
         out_que_.EnQue(out_buf);

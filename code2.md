@@ -26,7 +26,7 @@
 | 工程目录 | `code2/`（`op_host/`、`op_kernel/`） |
 | 目标芯片 | `ascend910b`（真机 910B3，64GB HBM，**coreNum = 40**，CANN 9.0.0） |
 | 正确性 | ✅ **真机 5/5 通过**（比赛平台 5 个测试点全部 Pass）—— ⚠️ 通过的是**标量版**，见下一行 |
-| ✅ 提交源当前状态 | `op_kernel/mhc_sinkhorn.cpp` = **step-1 向量版（`bdd8dfa83e6d`，208 行）**，本轮**已在云端仿真机编译通过 + 39 项对拍全 PASS**（含 fp32 / iters=1·100 / 非对齐 batch / ±60 大数），确定性 `bitdiff=0`。⛔ **真机仍未验证**，5/5 的标量版留在同目录 `.bak` |
+| ✅ 提交源当前状态 | `op_kernel/mhc_sinkhorn.cpp` = **step-2 向量版（`07b86a7944ec`，199 行）** —— step-1 基础上做 5 项优化：WholeReduceMax/Sum 替 n 次归约、删 tmp_buf_、删 NEG_PAD 哨兵、ColNormalize 单次 stride Div、Add 用 count=n。⛔ **仿真机/真机均未验证**，需先过编译门 + 对拍 |
 | 性能 | ⏳ **303µs**，最优 **1.46µs**（"慢约 200 倍"），目标 **~1.5µs**；计时工具 `bench_sinkhorn.cpp` 已就绪，**等真机**（仿真机无计时意义） |
 | 病根（已定位） | **指令数**，不是数据量 —— 内层是逐元素标量访问 |
 | 目标平台配置 | `.AddConfig("ascend910b")` |
@@ -326,10 +326,11 @@ batch=20 / 40 核时"每核 1 矩阵"已是延迟最优；把 20 个矩阵打包
 
 | 文件 | md5(12) | 是什么 |
 |---|---|---|
-| `code2/op_kernel/mhc_sinkhorn.cpp` | `bdd8dfa83e6d` | ✅ **step-1 向量版（Brcb 版）**：仿真机编译通过 + 39 对拍全 PASS，**真机未验** |
+| `code2/op_kernel/mhc_sinkhorn.cpp` | `07b86a7944ec` | ✅ **step-2 向量版**：WholeReduce + stride Div，⛔ 仿真机/真机均未验 |
+| `code2/op_kernel/mhc_sinkhorn.cpp.bak_step1` | `bdd8dfa83e6d` | step-1 向量版（Brcb 版）：仿真机 39 对拍全 PASS，真机未验 |
 | `code2/op_kernel/mhc_sinkhorn.cpp.bak` | `0121995bbae2` | 真机 5/5 的标量版 ← **可提交基线** |
-| `code2/op_kernel/mhc_sinkhorn.cpp.bak_movemask` | `bcaea02b061a` | 本轮中间稿：用 `MoveMask` 广播（**910B 不存在该指令，已作废**，见 §9.7） |
-| `code2/op_kernel/mhc_sinkhorn.cpp.bak_vec1` | `6ba8a8deda88` | 9-19 那版旧向量实现（含 §9.1 的三个问题） |
+| `code2/op_kernel/mhc_sinkhorn.cpp.bak_movemask` | `bcaea02b061a` | 中间稿：`MoveMask`（910B 不存在，作废） |
+| `code2/op_kernel/mhc_sinkhorn.cpp.bak_vec1` | `6ba8a8deda88` | 旧向量实现（含 §9.1 的三个问题） |
 | `code2/op_kernel/mhc_sinkhorn_tiling.h` | `c42f9443e835` | 本轮**未改**（6 字段 tiling 够用） |
 | `code2/op_kernel/tiling_key_mhc_sinkhorn.h` | `86fb67fb8a30` | 本轮**未改** |
 | `code2/op_host/mhc_sinkhorn.cpp` | `6fcd98d51a66` | 本轮**未改** |
@@ -577,3 +578,51 @@ int64_t accVal = get_acc_val();   *(dst) = *(reinterpret_cast<T*>(&accVal));   /
 ```
 
 ⇒ **每次 `ReduceSum`/`ReduceMax` 内部都含一次 V↔S 域切换 + `get_acc_val()` + 标量写**（`sharedTmpBuffer` 在 2201 这一支压根没用上，参数是摆设）。所以 §9.7 末尾"每轮 ~29 条、内层零标量访问"这句要改口径：**源码层零标量访问成立，但归约把 n 次标量往返藏进了 API 里**，而标量访问正是 §5.2 排在第一位的病根。换成 `WholeReduce*`（函数体就一条 `vcadd`，结果直接落 UB）是**第一次真正消掉内层标量往返**，省的不只是"8 条→1 条"的计数差。⇒ 这一刀的收益应重新估，且**优先级高于 §10.3 的其余两刀**。
+
+---
+
+## 11. step-2 优化：WholeReduce + stride Div（2026-09-20，代码已写，待验证）
+
+> 口径：基于 §10.6/§10.7 的 API 探测结论 + SFA 参考代码（`refs/sfa/cann_builtin_900/sparse_flash_attention_service_vector_mla.h:1335-1380`）的 stride Div 模式。代码已写入 `op_kernel/mhc_sinkhorn.cpp`（md5 `07b86a7944ec`，199 行），step-1 版保留为 `.bak_step1`（md5 `bdd8dfa83e6d`）。
+
+### 11.1 改动清单（5 项，一次提交）
+
+| # | 改动 | 影响 |
+|---|---|---|
+| 1 | `SubtractRowMax`：n 次 `ReduceMax<float>(red[i], mat[i*RS], tmp, n)` → 1 次 `WholeReduceMax<float>(red, mat, n, n, 1, 1, 1, ORDER_ONLY_VALUE)` | 消掉 n 次 V↔S 域切换 + get_acc_val + 标量写回；删 tmp 参数 |
+| 2 | `RowNormalize`：n 次 `ReduceSum<float>(red[i], mat[i*RS], tmp, n)` → 1 次 `WholeReduceSum<float>(red, mat, n, n, 1, 1, 1)` | 同上 |
+| 3 | 删除 `tmp_buf_`（sharedTmpBuffer）：WholeReduce 不需要 workBuffer | 省 256B UB |
+| 4 | 删除 `NEG_PAD` 哨兵播种：`Duplicate(mat, NEG_PAD, n*RS)` → `Duplicate(mat, 0.0f, n*RS)`。WholeReduce 用 `count=n` 只读前 n 个 lane，padding 不进归约 | 省 1 条 Duplicate |
+| 5 | `ColNormalize`：n 次 `Div(mat[i*RS], mat[i*RS], cs, RS)` → 1 次 `Div(mat, mat, cs, uint64_t(RS), uint8_t(n), BinaryRepeatParams(1,1,0,RS,RS,0))`。`src1BlkStride=0, src1RepStride=0` 广播 cs 块 | n 条 Div → 1 条 |
+
+附带：`ColNormalize` 的 `Add(cs, cs, mat[i*RS], RS)` → `Add(cs, cs, mat[i*RS], n)`，用 count=n 只累加有效元素。
+
+### 11.2 每轮指令数对比（n=8）
+
+| 阶段 | step-1（条） | step-2（条） | 说明 |
+|---|---|---|---|
+| SubtractRowMax | 8 ReduceMax + SetFlag/WaitFlag ×8 + Brcb + Sub = ~19 | 1 WholeReduceMax + Brcb + Sub = **3** | 消 8 次标量往返 |
+| RowNormalize | 8 ReduceSum + SetFlag/WaitFlag ×8 + Adds + Brcb + Div = ~20 | 1 WholeReduceSum + Adds + Brcb + Div = **4** | 同上 |
+| ColNormalize | Duplicate + 8 Add + Adds + 8 Div = ~19 | Duplicate + 8 Add + Adds + 1 Div = **12** | Div 合并 |
+| **每轮合计** | **~58** | **~19** | **~3× 减少** |
+| 20 轮总计 | ~1160 | ~380 | 加上初始化段差异更大 |
+
+### 11.3 预期性能收益
+
+- §10.7E 已证明：`ReduceSum` 在 2201 上每次内部含 V↔S 切换 + 标量写回 ⇒ step-1 的"源码层零标量"实际**每轮仍有 2n 次标量往返**（ReduceMax + ReduceSum 各 n 次）
+- step-2 的 WholeReduce 函数体就一条 `vcadd`/`vcmax`，结果直接落 UB，**真正消除内层标量往返**
+- 保守估计 **3–5×** 加速（303µs → 60–100µs）；能否到 ~1.5µs 还取决于 DMA 重叠、栅栏开销等
+
+### 11.4 ⛔ 待验证（按优先级）
+
+1. **编译门**：推到云端仿真机，`build_cpu.sh` 编译。重点观察 `WholeReduceMax<float>(..., ORDER_ONLY_VALUE)` 和 `Div(..., uint64_t, uint8_t, BinaryRepeatParams)` 是否过编译
+2. **对拍**：`run_cpu.sh 20 quick` → `mag` → `det`，全绿才进真机
+3. **真机计时**：`BENCH=1 bash run.sh` 同形状同 reps 对比 `.bak`（标量版）和 `.bak_step1`（step-1 版）
+
+### 11.5 风险点
+
+| 风险 | 缓解 |
+|---|---|
+| `Div` Level 0 的 mask 语义（per-block element count vs total）与 Level 2 不同 | SFA 参考代码 `RowDivs` 用 `mask=8`（=fp32 block size）+ `repeatTime=dealRowCount`，已验证模式 |
+| `BinaryRepeatParams` 的 `src1RepStride=0` 是否被硬件支持 | SFA 参考 `RowDivs` 的 `src1BlkStride=0` 已验证（除数块固定）；但 `src1RepStride=0` 同时固定 repeat 维度，SFA 未用此组合。若失败，退回 Brcb+全区 Div（多 2 条指令） |
+| `Add(cs, cs, mat[i*RS], n)` count<n 是否改变 padding lane | Level 2 API 只处理前 count 个元素，padding 不变。已确认安全 |

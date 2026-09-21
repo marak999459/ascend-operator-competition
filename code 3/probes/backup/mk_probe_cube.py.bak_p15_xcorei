@@ -1,0 +1,619 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""P6 前置探针（任务 #21）：arch22 手写 Cube 流水在本构建流程上是否可用。
+
+用法: mk_probe_cube.py <launch|bare|shim|wspeek|wsnw|wsmix|wshigh|wsaiv|wsmixo|mmad|aivlive>   —— 把打完探针补丁的 kernel 打到 stdout
+⚠️ 产物**只推到远端副本** ~/sfa_real/code/...，本地提交源一个字节都不写（探针纪律，§15.14(f)）。
+
+各模式（全部加 MIX 入口宏）：
+  launch   + **官方** matmul_intf.h；AIC 只往 GM 写到达标记；AIV 停工。
+           ⇒ 裁定"MIX 形态能不能被启动、AIC 到底有没有块、blockIdx 怎么映射"。
+  bare     同 launch，但 **AIC 一个字都不写** —— 用来把"框架在入口桩里插的
+           matmul::clearWorkspace 越界"和"我们自己在 cube 核上写 GM 越界"分开（二分）。
+  shim     不引官方头，改为给 `matmul::clearWorkspace` 一个空实现（本算子不碰 KFC）。
+           ⇒ 已裁定：launch/bare 挂的那个 MTE DDR 越界在框架的 ClearWorkspaceImpl 里，
+             空实现后 MIX 反复启动全部干净 ⇒ **cube 相关档位一律走 shim**。
+  wspeek   shim + 入口报址档：AIC/AIV 各自报出 (workspace-attention_out) 与 (tiling-attention_out)，
+           不碰 workspace ⇒ 裁定 MIX 下 KFC 基址寄存器到底有没有被装上（§15.23(i)）。
+  wsnw     **kernel 代码与 wspeek 完全相同**，只是 host 侧声明改成 `16 MB + 128 KB` ⇒
+           这是 wsmix 的**对照组**：若 wsnw 反复 launch 干净而 wsmix 挂在 rep0，就证明"挂"是
+           **我们自己写 usrWorkspace** 造成的，不是"声明 16 MB"或 MIX 形态本身。
+  wsmix    shim + 入口报址 + **真往 workspace 形参指向的 GM 写数据**，host 声明 `16 MB + 128 KB`
+           （保留区之后才有可写空间）⇒ 裁定"MIX 下官方 workspace 通道能否当跨核暂存"。
+  wsmixo   同 wsmix，但走**官方** matmul_intf.h（真 clearWorkspace）⇒ 回答"声明够大以后还要不要 shim"。
+  mmad     shim + GM--Nd2Nz-->L1--LoadData-->L0A/L0B--Mmad-->L0C--Fixpipe-->GM 全链，
+           结果落在 softmax_sum_out[16 + i*64 + j]，由 harness 侧和 CPU 参考值对拍。
+  aivlive  shim + 只加入口宏，AIV 照常跑**真实算子**（正确性 + 计时）
+           ⇒ 裁定 MIX 形态下 AIV 路径是否不受影响（1AIC:2AIV 会不会把 AIV 挤成 26 块）。
+"""
+import io
+import os
+import sys
+
+MODE = sys.argv[1] if len(sys.argv) > 1 else 'mmad'
+ALL = ('launch', 'bare', 'shim', 'wspeek', 'wsnw', 'wsmix', 'wshigh', 'wsaiv', 'wsmixo',
+       'xcore', 'xcoreb', 'xcorec', 'xcored', 'xcoree', 'xcoref', 'xcoreg', 'xcorei', 'xcorep',
+       'mmad', 'aivlive')
+assert MODE in ALL, MODE
+MIX = ALL                     # 全部加 MIX 入口宏
+# 官方 matmul_intf.h（真 clearWorkspace）只留给 launch/bare/wsmixo 做二分证据；
+# 其余档一律用空实现 —— 真机实证官方那条路在"声明 0/4/20 MB"下第 2 次 launch 必挂（§15.20(b)）。
+OFFICIAL_INC = ('launch', 'bare', 'wsmixo')
+SHIM_INC = tuple(m for m in ALL if m not in OFFICIAL_INC)
+ENTRY_PROBE = ('wspeek', 'wsnw', 'wsmix', 'wshigh', 'wsaiv', 'wsmixo')     # 装入口报址块
+WRITE_WS = ('wsmix', 'wshigh', 'wsaiv', 'wsmixo')                          # 其中真写 workspace 的
+# 写点基址：wshigh 把两组写点整体抬到 usrWorkspace + 64 KB，用来二分"第 2 次 launch 必挂"
+# 是不是因为我们踩了框架在 usrWorkspace **头部**维护的 MIX/KFC 控制结构。
+WS_BASE = {'wsmix': 0, 'wshigh': 16384, 'wsaiv': 0, 'wsmixo': 0}
+# 谁写：wsaiv 只让 AIV 写（AIC 一个字不碰）⇒ 另一路二分。
+WS_WHO = {'wsaiv': 'aiv'}
+# xcore = 只测正向（AIC 写普通输出张量 + CrossCoreSetFlag ⇒ AIV 等待并读回）；
+# xcoreb = 再加反向回执（AIV → AIC 的 CrossCoreSetFlag，AIC 等它）⇒ 真流水要的是双向。
+#          ⛔ 真机卡死（rc=124）：它只让偶数号 AIV 回执 ⇒ 违反"AIV→AIC 是**扇入**"（§15.26(b)）。
+# xcorec = 修好扇入（两个 AIV 都回执）+ **同一对旗标在一次 launch 内往返 3 轮** ⇒ P6 要的原语。
+#   真机结论（§15.29）：**握手全绿**（3 轮 + 反复 launch 不挂），但 AIV 从"AIC 的标量 SetValue"
+#   读回 0 ⇒ 标量写跨核不可见/不排序。P6 的写方是 Fixpipe，不是标量写 ⇒ 再加 xcored。
+# xcored = 同一套 3 轮握手，但 AIC 的**数据**改走 `Mmad → Fixpipe → GM`（P6 的真实形态），
+#   并且 AIV 把读回的值 echo 回 sumGm ⇒ 与 host 自己读到的同一格对照 ⇒ 一次跑分清
+#   "旗标通不通"（xcorec 已答）与"**Fixpipe 写的数跨核到底看不看得见**"（P6 押在这上面）。
+XCORE = ('xcore', 'xcoreb', 'xcorec', 'xcored', 'xcoree', 'xcoref', 'xcoreg')
+AIV_IDLE = ('launch', 'bare', 'shim', 'wspeek', 'wsnw', 'wsmix', 'wshigh', 'wsaiv', 'wsmixo',
+            'xcore', 'xcoreb', 'xcorec', 'xcored', 'xcoree', 'xcoref', 'xcoreg', 'mmad')
+
+BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'code')
+SRC = os.path.join(BASE, 'op_kernel', 'sparse_flash_attention.cpp')
+s = io.open(SRC, encoding='utf-8').read()
+
+KER_INC = '#include "kernel_operator.h"\n'
+assert s.count(KER_INC) == 1, 'include anchor miss'
+# 根因（9.0.0 代码实证）：只要 kernel 被判定为 MIX，构建侧生成的入口桩就会插
+#   `#ifdef MIX_CORE_MACRO / if constexpr (g_coreType == AIC) matmul::clearWorkspace(workspace);`
+#   （asc_op_compile_base/asc_op_compiler/compile_op.py:450-456），
+# 而配套的 `#include ".../matmul_intf.h"` 只在 **c310 且开 dump** 时才写（同文件 576-579），
+# ⇒ arch22 上纯 AIV 算子改成 MIX 必然报 `use of undeclared identifier 'matmul'`。
+# 官方 arch22 MIX 算子（内置 SFA）靠自带 `lib/matmul_intf.h` 绕过；本安装没有 lib/ 目录，
+# 公开路径是 adv_api/matmul_intf.h，它在 __NPU_ARCH__==2201 时拉进 AscendC::clearWorkspace。
+if MODE in OFFICIAL_INC:
+    s = s.replace(KER_INC, KER_INC + '#include "adv_api/matmul_intf.h"   // [CUBEPROBE] MIX 入口桩要 matmul::clearWorkspace\n', 1)
+# shim 档：不引官方头，改为在 namespace matmul 里给桩要调的符号一个空实现。
+# 动机（真机实证）：launch/bare 两档都在**第 2 次 launch**稳定挂在 clearWorkspace 内部的
+# "MTE DDR address out of range"（bare 档 AIC 一个字都不写、同样挂 ⇒ 越界点在框架插的
+# AscendC::ClearWorkspaceImpl 里，不是我们的 cube 代码），而本算子只用裸 Mmad/Fixpipe，
+# 完全不碰 KFC 消息队列 ⇒ 清空实现语义上是安全的。
+if MODE in SHIM_INC:
+    s = s.replace(KER_INC, KER_INC + (
+        '\n// [CUBEPROBE] 入口桩会调 matmul::clearWorkspace(workspace)；本算子不用 KFC/Matmul API，\n'
+        '// ⇒ 给一个空实现，MIX 形态就不依赖 op 声明的 workspace 布局。\n'
+        'namespace matmul { __aicore__ inline void clearWorkspace(GM_ADDR) {} }\n'), 1)
+
+# ---- 1) 入口：声明 MIX 1AIC:2AIV（官方 arch22 同款，B:sparse_flash_attention.cpp:41）----
+A_ENTRY = '    REGISTER_TILING_DEFAULT(SparseFlashAttentionTilingData);'
+assert s.count(A_ENTRY) == 1, 'entry anchor miss'
+if MODE in MIX:
+    s = s.replace(A_ENTRY,
+                  '    KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);   // [CUBEPROBE]\n' + A_ENTRY, 1)
+
+# ---- 2) 入口探针：每块一条 **8 个 int32** 的记录（AIC 基址 100 / AIV 基址 500 ⇒ blockDim ≤ 48 不重叠）
+# 动机（§15.21/§15.23）：AIV-only 形态下 workspace 形参恒等于 0x1000000（KFC 寄存器为 0 + 16 MB 保留区），
+# 而 MIX 形态下运行**可能**给每个线程装好 KFC 基址 ⇒ P6 的 GM 暂存能不能走官方通道，全看这一档。
+# ⚠️ 第一版按"每块 4 格"跨步却写了 6 格 ⇒ 相邻块互相覆盖，读数像"只有 b0/b1 活着"（本轮踩过）。
+# ⚠️ 第二版让两条通道挤在同一段上（AIV 分支写 float[64+bi]，入口块写 int32[400+8bi]）⇒ 分不清
+#    "块没启动"和"标记被另一条通道覆盖"。现在各占一段，且**到达 / 存活**两位分开：
+#      [+0/+1] (workspace - attention_out) lo/hi（字节）  [+4] blockIdx   [+5] 7 = 到达探针
+#      [+2/+3] (tiling - attention_out)    lo/hi          [+6] 9 = 活着走出对 usrWorkspace 的真写
+def ENTRY(write_ws, base=0, who='both'):
+    w = ''
+    if write_ws:
+        cond = 'if ASCEND_IS_AIV {' if who == 'aiv' else '{'
+        w = '''        %s   // 真写 usrWorkspace：AIC 从 float[%d] 起每块 64 格，AIV 再错开 8 KB ⇒ 一次跑分清两个通道
+            uint32_t slot = %du + 64u * bi;
+            float tag = 5.0f;
+            if ASCEND_IS_AIV { slot += 2048u; tag = 6.0f; }
+            GlobalTensor<float> wg;
+            wg.SetGlobalBuffer(pws + slot);
+            wg.SetValue(0, tag);
+            GlobalTensor<int32_t> wb;
+            wb.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(pws + slot) + 1);
+            wb.SetValue(0, static_cast<int32_t>(bi));
+            rg.SetValue(s + 6, 9);   // [CUBEPROBE] 活着走出 workspace 写（挂了这格就没有）
+        }
+''' % (cond, base, base)
+    return '''
+    {   // [CUBEPROBE][WSENTRY]
+        const uint32_t bi = GetBlockIdx();
+        __gm__ float *pws = reinterpret_cast<__gm__ float *>(workspace);
+        __gm__ float *pout = reinterpret_cast<__gm__ float *>(attentionOut);
+        const int64_t d = pws - pout;
+        const int64_t dt = (reinterpret_cast<__gm__ float *>(tiling)) - pout;
+        GlobalTensor<int32_t> rg;
+        rg.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(softmaxSumOut));
+        uint32_t s = 100u + 8u * bi;
+        if ASCEND_IS_AIV { s = 500u + 8u * bi; }
+        rg.SetValue(s + 0, static_cast<int32_t>(d & 0xFFFFFFFF));
+        rg.SetValue(s + 1, static_cast<int32_t>(d >> 32));
+        rg.SetValue(s + 2, static_cast<int32_t>(dt & 0xFFFFFFFF));
+        rg.SetValue(s + 3, static_cast<int32_t>(dt >> 32));
+        rg.SetValue(s + 4, static_cast<int32_t>(bi));
+        rg.SetValue(s + 5, 7);
+''' + w + '''    }
+'''
+
+
+if MODE in ENTRY_PROBE:
+    s = s.replace(A_ENTRY, A_ENTRY + ENTRY(MODE in WRITE_WS, WS_BASE.get(MODE, 0),
+                                           WS_WHO.get(MODE, 'both')), 1)
+
+# ---- 3) AIC 分支：跑探针；AIV 分支：停工，独占 max/sum 缓冲当探针出口 ----
+A_AIC = ('        if ASCEND_IS_AIC {\n'
+         '            unitBegin_ = 0; unitEnd_ = 0; unitStep_ = 1;\n'
+         '            return;\n'
+         '        }\n')
+assert s.count(A_AIC) == 1, 'AIC anchor miss'
+if MODE in AIV_IDLE:
+    NEW_AIC = ('        if ASCEND_IS_AIC {\n'
+               '            unitBegin_ = 0; unitEnd_ = 0; unitStep_ = 1;\n'
+               + ('            XcoreAic();\n' if MODE in XCORE else
+                  ('            CubeProbe();\n'
+                   if MODE not in ('bare', 'wsmix', 'wshigh', 'wsaiv', 'wsmixo') else '')) +
+               '            return;\n'
+               '        }\n'
+               '        if ASCEND_IS_AIV {   // [CUBEPROBE] AIV 停工，把 sum 缓冲让给探针当出口\n'
+               '            unitBegin_ = 0; unitEnd_ = 0; unitStep_ = 1;\n'
+               + ('            XcoreAiv();\n' if MODE in XCORE else
+                  ('            sumGm_.SetValue(64u + GetBlockIdx(), 6.0f);   // [CUBEPROBE] AIV 的 blockIdx 空间\n'
+                   if MODE in ('launch', 'bare', 'shim') else '')) +
+               '            return;\n'
+               '        }\n')
+    s = s.replace(A_AIC, NEW_AIC, 1)
+
+# ---- 4) 探针函数本体 ----
+PROBE_MIN = r'''
+    // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
+    // launch 档：只证明 "MIX 形态下 AIC 真有块在跑、且 AIC 能写 GM"。
+    // 出口 = softmax_sum_out：[0]=7 到达、[1+blockIdx%8]=5 谁被启动。
+    __aicore__ inline void CubeProbe()
+    {
+        sumGm_.SetValue(0, 7.0f);
+        const uint32_t bi = GetBlockIdx();
+        sumGm_.SetValue(1u + (bi % 8u), 5.0f);
+    }
+
+'''
+PROBE = r'''
+    // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
+    // C[i][j] = Σ_k A[i][k]·B[j][k]，A = key 行 0..15 列 0..15，B = key 行 16..31 列 0..15。
+    // 出口 = softmax_sum_out：[0]=7 到达、[1+blockIdx%8]=5 谁被启动、[15]=9 全链走完、
+    // [16 + i*64 + j] = C[i][j]（fp32，ND）。对拍在 harness 侧做（cube_harness_patch.py）。
+    __aicore__ inline void CubeProbe()
+    {
+        sumGm_.SetValue(0, 7.0f);
+        const uint32_t bi = GetBlockIdx();
+        sumGm_.SetValue(1u + (bi % 8u), 5.0f);
+        if constexpr (sizeof(DT_QUERY) == 2u) {   // Mmad 的 A/B 只收 fp16/bf16
+            TBuf<TPosition::A1> bufl1;
+            TBuf<TPosition::A2> bufL0A;
+            TBuf<TPosition::B2> bufL0B;
+            TBuf<TPosition::CO1> bufL0C;
+            pipe_.InitBuffer(bufl1, 4096);
+            pipe_.InitBuffer(bufL0A, 2048);
+            pipe_.InitBuffer(bufL0B, 2048);
+            pipe_.InitBuffer(bufL0C, 4096);
+            LocalTensor<DT_QUERY> l1 = bufl1.Get<DT_QUERY>();
+            const uint32_t rowD = static_cast<uint32_t>(D_);   // 512
+            // 一个 16x16 的 fp16 分形 = 16 个 32B 行块 = 256 个元素
+            Nd2NzParams nz;
+            nz.ndNum = 1;
+            nz.nValue = 16;
+            nz.dValue = 16;
+            nz.srcDValue = rowD;
+            nz.dstNzC0Stride = 16;
+            nz.dstNzNStride = 1;
+            nz.srcNdMatrixStride = 0;
+            nz.dstNzMatrixStride = 0;
+            DataCopy(l1, kGm_, nz);
+            DataCopy(l1[256], kGm_[16u * rowD], nz);
+            SetFlag<HardEvent::MTE2_MTE1>(0);
+            WaitFlag<HardEvent::MTE2_MTE1>(0);
+            LocalTensor<DT_QUERY> l0a = bufL0A.Get<DT_QUERY>();
+            LocalTensor<DT_QUERY> l0b = bufL0B.Get<DT_QUERY>();
+            LoadData2DParams ld;
+            ld.startIndex = 0;
+            ld.repeatTimes = 1;
+            ld.srcStride = 1;
+            ld.dstGap = 0;
+            ld.ifTranspose = false;
+            ld.sid = 0;
+            ld.addrMode = 0;
+            LoadData(l0a, l1, ld);
+            LoadData(l0b, l1[256], ld);
+            SetFlag<HardEvent::MTE1_M>(1);
+            WaitFlag<HardEvent::MTE1_M>(1);
+            LocalTensor<float> l0c = bufL0C.Get<float>();
+            MmadParams mp;
+            mp.m = 16;
+            mp.n = 16;
+            mp.k = 16;
+            mp.cmatrixInitVal = true;
+            mp.cmatrixSource = false;
+            mp.unitFlag = 0b11;
+            Mmad(l0c, l0a, l0b, mp);
+            SetFlag<HardEvent::M_FIX>(2);
+            WaitFlag<HardEvent::M_FIX>(2);
+            FixpipeParamsV220 fx;
+            fx.nSize = 16;
+            fx.mSize = 16;
+            fx.srcStride = 16;
+            fx.dstStride = 64;      // 行距 64 个 float = 256B（>16，好暴露转置/步长错）
+            fx.ndNum = 1;
+            fx.srcNdStride = 0;
+            fx.dstNdStride = 0;
+            fx.unitFlag = 0b11;
+            Fixpipe(sumGm_[16], l0c, fx);
+            PipeBarrier<PIPE_ALL>();
+            sumGm_.SetValue(15, 9.0f);
+        }
+    }
+
+'''
+A_MEMBER = '    TPipe pipe_;'
+assert s.count(A_MEMBER) == 1, 'member anchor miss'
+# ⚠️ 上一版只给 launch/shim 注入 CubeProbe()，而 wspeek/wsnw 的 AIC 分支同样会调它
+#    ⇒ 真机 `error: use of undeclared identifier 'CubeProbe'`，那一档读数全是旧 .so 的假数。
+# ---- 4b) xcore / xcoreb：Cube 与 Vector 之间"过一块普通输出张量 + FFTS 旗标"的中继 ----
+# 为什么还有戏（§15.24 把 usrWorkspace 判死）：内置 arch22 SFA 用的
+#   `CrossCoreSetFlag<2, pipe>(id)` / `CrossCoreWaitFlag<2, pipe>(id)` 在本安装的
+#   `dav_c220/kernel_operator_sync_impl.h:429-440` 是**真指令**（`ffts_cross_core_sync` /
+#   `wait_flag_dev`），不是别的 arch 上那种 `ASCENDC_ASSERT(false)` 占位；而"AIC 往普通 GM 张量写
+#   + 反复 launch"已由 shim/mmad 两档证明干净（poison 只跟"写 usrWorkspace"绑定）。
+# ⇒ P6 的中间量传输可以不走 workspace：**每个单元独占 LSE/输出张量的一小段**，AIC 把 score 写进
+#   本单元那段、发旗标，AIV 等旗标读走算 softmax，（xcoreb）再回执给 AIC。
+# 出口（都在 softmax_sum_out 的 float 视图）：
+#   [0]      = 7.0  AIC 活着走出旗标回合      [8+bi]   = 9.0 AIC 到达位
+#   [700+bi] = AIV 从 GM 读回的**值**（3..10 ⇒ 配对 g=bi/2 成立；0 ⇒ 读到垃圾）
+#   [764+bi] = 6.0  AIV 到达位
+PROBE_XC = r'''
+    // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
+    // AIC → GM → AIV 的中继：不碰 workspace，用 softmax_max_out（fp32 LSE 输出）当暂存。
+    __aicore__ inline void XcoreAic()
+    {
+        const uint32_t bi = GetBlockIdx();
+        static constexpr float TAGV[8] = {3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f};
+        const float t = TAGV[bi & 7u];        // 每块一个可区分的值 ⇒ 一次跑读出配对关系
+        const uint32_t base = 64u * bi;
+        for (uint32_t i = 0; i < 16u; ++i) { maxGm_.SetValue(base + i, t); }
+        PipeBarrier<PIPE_ALL>();
+        CrossCoreSetFlag<2, PIPE_FIX>(5);
+        %s
+        sumGm_.SetValue(0, 7.0f);
+        sumGm_.SetValue(8u + (bi & 7u), 9.0f);
+    }
+
+    __aicore__ inline void XcoreAiv()
+    {
+        const uint32_t bi = GetBlockIdx();
+        CrossCoreWaitFlag<2, PIPE_V>(5);
+        const uint32_t g = bi >> 1;           // 1AIC:2AIV 的猜测配对：AIV bi ↔ AIC g
+        sumGm_.SetValue(700u + bi, maxGm_.GetValue(64u * g + 3u));
+        sumGm_.SetValue(764u + bi, 6.0f);
+        %s
+    }
+
+'''
+# ---- 4d) xcored：把"跨核数据"换成 P6 的真实形态 = AIC 的 `Mmad → Fixpipe → GM` ----
+# xcorec 已经答完"旗标"这一半（3 轮复用同一对 + 双向扇入 + 反复 launch 不挂），但它的数据格
+# 读回 0 ⇒ AIC 的**标量 SetValue** 对同组 AIV 不可见（而 host 在任务结束后读得到，见
+# `AIC alive=7`）⇒ P6 不能靠标量写跨核，必须走 Fixpipe（官方 arch22 SFA 也正是这么交接的）。
+# 本档：AIC 用与 `mmad` 档**完全相同**的一份数据算同一个 16x16 C（A = key 行 0..15，
+#   B = key 行 16..31，K=16），每轮把 C 整块 Fixpipe 到 `sumGm_[16 + i*64 + j]`（= mmad 档
+#   的出口布局 ⇒ harness 里现成的 `mismatchC` 直接校验 host 侧看到的值），
+#   同时 AIV 每轮 echo 它读到的 `C[r][r]` 到 `sumGm_[600 + bi*4 + r]`。
+# ⇒ 判据：`rd=vN[..,..,..]` 三格都等于 host 侧那同一格的期望值 ⇒ **Cube 写的数 AIV 读得到**；
+#   读到 0 ⇒ 还缺一道 flush；读到上一轮的值 ⇒ 旗标没排住 Fixpipe。
+# ⚠️ 两侧都用 `if constexpr (sizeof(DT_QUERY)==2)` 包起来：Mmad 的 A/B 只收 fp16/bf16，
+#   若只包 AIC 侧，fp32 实例的 AIV 会死等一个没人发的旗标。
+PROBE_XCD = r'''
+    // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
+    __aicore__ inline void XcoreAic()
+    {
+        const uint32_t bi = GetBlockIdx();
+        sumGm_.SetValue(8u + (bi & 15u), 9.0f);
+        if constexpr (sizeof(DT_QUERY) == 2u) {
+            TBuf<TPosition::A1> bufl1;
+            TBuf<TPosition::A2> bufL0A;
+            TBuf<TPosition::B2> bufL0B;
+            TBuf<TPosition::CO1> bufL0C;
+            pipe_.InitBuffer(bufl1, 4096);
+            pipe_.InitBuffer(bufL0A, 2048);
+            pipe_.InitBuffer(bufL0B, 2048);
+            pipe_.InitBuffer(bufL0C, 4096);
+            LocalTensor<DT_QUERY> l1 = bufl1.Get<DT_QUERY>();
+            const uint32_t rowD = static_cast<uint32_t>(D_);
+            Nd2NzParams nz;
+            nz.ndNum = 1;
+            nz.nValue = 16;
+            nz.dValue = 16;
+            nz.srcDValue = rowD;
+            nz.dstNzC0Stride = 16;
+            nz.dstNzNStride = 1;
+            nz.srcNdMatrixStride = 0;
+            nz.dstNzMatrixStride = 0;
+            DataCopy(l1, kGm_, nz);
+            DataCopy(l1[256], kGm_[16u * rowD], nz);
+            SetFlag<HardEvent::MTE2_MTE1>(0);
+            WaitFlag<HardEvent::MTE2_MTE1>(0);
+            LocalTensor<DT_QUERY> l0a = bufL0A.Get<DT_QUERY>();
+            LocalTensor<DT_QUERY> l0b = bufL0B.Get<DT_QUERY>();
+            LoadData2DParams ld;
+            ld.startIndex = 0;
+            ld.repeatTimes = 1;
+            ld.srcStride = 1;
+            ld.dstGap = 0;
+            ld.ifTranspose = false;
+            ld.sid = 0;
+            ld.addrMode = 0;
+            LoadData(l0a, l1, ld);
+            LoadData(l0b, l1[256], ld);
+            SetFlag<HardEvent::MTE1_M>(1);
+            WaitFlag<HardEvent::MTE1_M>(1);
+            LocalTensor<float> l0c = bufL0C.Get<float>();
+            MmadParams mp;
+            mp.m = 16;
+            mp.n = 16;
+            mp.k = 16;
+            mp.cmatrixInitVal = true;
+            mp.cmatrixSource = false;
+            mp.unitFlag = 0b11;
+            Mmad(l0c, l0a, l0b, mp);
+            SetFlag<HardEvent::M_FIX>(2);
+            WaitFlag<HardEvent::M_FIX>(2);
+            FixpipeParamsV220 fx;
+            fx.nSize = 16;
+            fx.mSize = 16;
+            fx.srcStride = 16;
+            fx.dstStride = 64;
+            fx.ndNum = 1;
+            fx.srcNdStride = 0;
+            fx.dstNdStride = 0;
+            fx.unitFlag = 0b11;
+            for (uint32_t r = 0; r < 3u; ++r) {
+                Fixpipe(sumGm_[16], l0c, fx);       // C 落 GM（mmad 档同一布局）
+                PipeBarrier<PIPE_ALL>();
+                CrossCoreSetFlag<2, PIPE_FIX>(5);   // 广播给本组两个 AIV
+                CrossCoreWaitFlag<2, PIPE_FIX>(6);   // 等本组两个 AIV 都回执（扇入）
+            }
+        }
+        PipeBarrier<PIPE_ALL>();
+        sumGm_.SetValue(0, 7.0f);
+    }
+
+    __aicore__ inline void XcoreAiv()
+    {
+        const uint32_t bi = GetBlockIdx();
+        const uint32_t g = bi >> 1;
+        if constexpr (sizeof(DT_QUERY) == 2u) {
+            for (uint32_t r = 0; r < 3u; ++r) {
+                CrossCoreWaitFlag<2, PIPE_V>(5);
+                const float v = sumGm_.GetValue(16u + r * 64u + r);   // C[r][r]
+                PipeBarrier<PIPE_ALL>();
+                sumGm_.SetValue(600u + bi * 4u + r, v);
+                CrossCoreSetFlag<2, PIPE_MTE3>(6);
+            }
+        }
+        sumGm_.SetValue(760u + bi, 6.0f);
+    }
+
+'''
+if MODE == 'xcored':
+    s = s.replace(A_MEMBER, PROBE_XCD + A_MEMBER, 1)
+elif MODE in ('xcoree', 'xcoref', 'xcoreg'):
+    # ---- 4e) xcoree：修掉 xcored 的"出口布局自毁"，再把两个变量拆开 ----
+    # `xcored` 真机 rc=124（挂）+ `/tmp/cp*.txt` 0 字节（stdout 全缓冲，被 timeout 打死时没落盘）。
+    # 复盘发现**它的布局本来就不成立**：C 落在 `sumGm_[16 + i*64 + j]`（i,j<16）⇒ 浮点
+    #   16..991 整片被占，把 AIV 的 echo 槽 600..662 与到达位 760..775 **全覆盖**；
+    #   而且那三格到达位是 AIV 用标量写的、写完才被下一轮 Fixpipe 抹掉 ⇒ 就算不挂也什么都读不出。
+    # 本档一次改三件事，每件都对应一个之前说不清的岔口：
+    #   ① **布局**：C 的 `dstStride` 从 64 改成 16、基址 32 ⇒ 只占 32..271，标记区（0/8..23/
+    #      600../680../760..）全在 C 之外；harness 侧基址与行距改走环境变量
+    #      `SFA_CBASE`/`SFA_CSTRIDE`（默认 16/64 ⇒ `mmad` 档的对拍口径一个字都不动）。
+    #   ② **单向**：AIC 每轮广播旗标 5、**不等回执** ⇒ 把"cube 流水与 AIV 共存"和"扇入回执"
+    #      两个变量拆开（`xcorec` 已单独证明后者在没有 cube 时是通的）。
+    #   ③ **AIV 两条读路径各存一份**：标量 `GetValue` → `600+bi*4+r`；`DataCopy`(MTE2) 进 UB
+    #      再读 → `680+bi*4+r` ⇒ 一次跑分清"Fixpipe 写的数 AIV 看不看得见"与
+    #      "是不是只有走 MTE2 才看得见"（内置 arch22 SFA 的向量侧正是后者：DataCopy 进 UB 再算）。
+    # ⚠️ 三轮写的是**同一块 C、同一个 l0c** ⇒ 值与轮次无关：本档只裁可见性，不裁顺序
+    #    （顺序那半边由 `xcorec` 的查表标签答过了）。
+    PROBE_XEE = r'''
+    // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
+    __aicore__ inline void XcoreAic()
+    {
+        const uint32_t bi = GetBlockIdx();
+        sumGm_.SetValue(8u + (bi & 15u), 9.0f);
+        if constexpr (sizeof(DT_QUERY) == 2u) {
+            TBuf<TPosition::A1> bufl1;
+            TBuf<TPosition::A2> bufL0A;
+            TBuf<TPosition::B2> bufL0B;
+            TBuf<TPosition::CO1> bufL0C;
+            pipe_.InitBuffer(bufl1, 4096);
+            pipe_.InitBuffer(bufL0A, 2048);
+            pipe_.InitBuffer(bufL0B, 2048);
+            pipe_.InitBuffer(bufL0C, 4096);
+            LocalTensor<DT_QUERY> l1 = bufl1.Get<DT_QUERY>();
+            const uint32_t rowD = static_cast<uint32_t>(D_);
+            Nd2NzParams nz;
+            nz.ndNum = 1;
+            nz.nValue = 16;
+            nz.dValue = 16;
+            nz.srcDValue = rowD;
+            nz.dstNzC0Stride = 16;
+            nz.dstNzNStride = 1;
+            nz.srcNdMatrixStride = 0;
+            nz.dstNzMatrixStride = 0;
+            DataCopy(l1, kGm_, nz);
+            DataCopy(l1[256], kGm_[16u * rowD], nz);
+            SetFlag<HardEvent::MTE2_MTE1>(0);
+            WaitFlag<HardEvent::MTE2_MTE1>(0);
+            LocalTensor<DT_QUERY> l0a = bufL0A.Get<DT_QUERY>();
+            LocalTensor<DT_QUERY> l0b = bufL0B.Get<DT_QUERY>();
+            LoadData2DParams ld;
+            ld.startIndex = 0;
+            ld.repeatTimes = 1;
+            ld.srcStride = 1;
+            ld.dstGap = 0;
+            ld.ifTranspose = false;
+            ld.sid = 0;
+            ld.addrMode = 0;
+            LoadData(l0a, l1, ld);
+            LoadData(l0b, l1[256], ld);
+            SetFlag<HardEvent::MTE1_M>(1);
+            WaitFlag<HardEvent::MTE1_M>(1);
+            LocalTensor<float> l0c = bufL0C.Get<float>();
+            MmadParams mp;
+            mp.m = 16;
+            mp.n = 16;
+            mp.k = 16;
+            mp.cmatrixInitVal = true;
+            mp.cmatrixSource = false;
+            mp.unitFlag = 0b11;
+            Mmad(l0c, l0a, l0b, mp);
+            SetFlag<HardEvent::M_FIX>(2);
+            WaitFlag<HardEvent::M_FIX>(2);
+            FixpipeParamsV220 fx;
+            fx.nSize = 16;
+            fx.mSize = 16;
+            fx.srcStride = 16;
+            fx.dstStride = 16;       // 行距 16 个 float = 64B ⇒ C 只占 sumGm_[32..271]
+            fx.ndNum = 1;
+            fx.srcNdStride = 0;
+            fx.dstNdStride = 0;
+            fx.unitFlag = 0b11;
+            for (uint32_t r = 0; r < 3u; ++r) {
+                Fixpipe(sumGm_[32], l0c, fx);
+                PipeBarrier<PIPE_ALL>();
+                CrossCoreSetFlag<2, PIPE_FIX>(5);   // 只广播，不等回执（单向）
+            }
+        }
+        PipeBarrier<PIPE_ALL>();
+        sumGm_.SetValue(0, 7.0f);
+    }
+
+    __aicore__ inline void XcoreAiv()
+    {
+        const uint32_t bi = GetBlockIdx();
+        if constexpr (sizeof(DT_QUERY) == 2u) {
+            // 事件号 3/4：0..2 是 AIC 那半边的 cube 链在用，5/6 是跨核旗标 ⇒ 本组两个 AIV 各占一个，
+            // ⛔ 不能都写死同一个号（若 arch22 的事件寄存器是**按物理核**而非按 subcore 分的，
+            //    同核两个 AIV 会互相吃掉对方的 wait）。
+            const uint8_t fid = static_cast<uint8_t>(3u + (bi & 1u));
+            // %UBDECL%
+            for (uint32_t r = 0; r < 3u; ++r) {
+                CrossCoreWaitFlag<2, PIPE_V>(5);
+                const float sv = sumGm_.GetValue(32u + 17u * r);      // C[r][r]，标量直读 GM
+                // %UBREAD%
+                sumGm_.SetValue(600u + bi * 4u + r, sv);
+                sumGm_.SetValue(680u + bi * 4u + r, mv);
+            }
+        }
+        PipeBarrier<PIPE_ALL>();
+        sumGm_.SetValue(760u + bi, 6.0f);
+    }
+
+'''
+    # AIV 的"MTE2 读"那半边做成可开关：xcoree 全开，xcoref 关掉（只留标量直读）。
+    # 为什么要有 xcoref：`xcoree` 与 `xcored` 都在**设备侧**死锁（stdbuf 之后看得见 host 已经
+    # 走到 launch、打完 wsSize 就再没输出），而单向档已经把"扇入回执"排除了 ⇒ 剩下的嫌疑里
+    # 最贵的一条是"AIV 为读 GM 而 InitBuffer 了一块 UB，同时 AIC 正占着 L1/L0A/L0B/L0C"
+    # （`mmad` 档能过，恰恰因为它的 AIV 一个字节的 UB 都不分配、也不等任何旗标）。
+    # ⇒ xcoref = xcoree **只**去掉 AIV 的 UB/DataCopy：
+    #     通过 ⇒ 死锁点定位到"AIV 用 UB/MTE2 与 AIC 用 L1/L0 共存"，顺带拿到标量可见性判据；
+    #     仍挂 ⇒ 与 UB 无关，下一步换"旗标换成 FIX 之外的 pipe / AIC 不做 Mmad"继续二分。
+    XEE_UBDECL = ('            pipe_.InitBuffer(probeBuf_, 128);\n'
+                  '            LocalTensor<float> ub = probeBuf_.Get<float>();')
+    XEE_UBREAD = ('                DataCopy(ub, sumGm_[32u + 16u * r], DataCopyParams{1, 2, 0, 0});'
+                  '   // C[r][0..15] 走 MTE2\n'
+                  '                SetFlag<HardEvent::MTE2_V>(fid);\n'
+                  '                WaitFlag<HardEvent::MTE2_V>(fid);\n'
+                  '                const float mv = ub.GetValue(r);   // 同一格，MTE2 路径')
+    body = PROBE_XEE
+    if MODE == 'xcoref':
+        body = body.replace('            // %UBDECL%', '').replace(
+            '                // %UBREAD%',
+            '                const float mv = -7.0f;   // [xcoref] MTE2 那半边关掉，哨兵值 -7 一眼可辨')
+    else:
+        body = body.replace('            // %UBDECL%', XEE_UBDECL).replace(
+            '                // %UBREAD%', XEE_UBREAD)
+    if MODE == 'xcoreg':
+        # 为什么要这一档：xcoree 里 AIV 的 MTE2->V 同步用的是我**自己挑的** 3/4 号事件
+        # （"怕同核两个 AIV 撞号"），而提交版 kernel 一直是两个 AIV 各用 0 号、跑了无数遍都干净
+        # ⇒ arch22 上 MTE2->V 这一对的事件号空间很可能就是**按 subcore 分**的，那我"避撞"反而
+        #   越界了（超范围的 event id 在 2201 上是静默错，不是编译错误）。xcoreg 换回 0 号：
+        #   通过 ⇒ xcoree 的挂与 UB/MTE2 无关，就是事件号；仍挂 ⇒ 事件号排除，剩下 UB 分配共存。
+        body = body.replace('static_cast<uint8_t>(3u + (bi & 1u))', 'static_cast<uint8_t>(0u)')
+    s = s.replace(A_MEMBER, body + A_MEMBER, 1)
+    # AIV 侧要一块自己的 UB 当 MTE2 落点（只有全开的 xcoree 引用它）
+    if MODE in ('xcoree', 'xcoreg'):
+        s = s.replace('    TBuf<TPosition::VECCALC> qBuf_',
+                      '    TBuf<TPosition::VECCALC> probeBuf_;   // [CUBEPROBE] xcoree：AIV 的 MTE2 落点\n'
+                      '    TBuf<TPosition::VECCALC> qBuf_', 1)
+
+elif MODE == 'xcorec':
+    # ---- 4c) xcorec：P6 真正要的**原语** = 同一对旗标在一次 launch 内**往返 3 轮** +
+    #   AIV→AIC 走**扇入**（本组两个 AIV 都 set，AIC 一次 wait 才醒）。
+    #   依据（§15.26(b)）：`xcoreb` 卡死的因 = 只让偶数号 AIV 发回执 ⇒ 扇入永远凑不齐。
+    #   这一档一次钉掉 P6 依赖的三件事：
+    #     ① 扇入修法成立（两个 AIV 都 set ⇒ AIC 醒，不再挂）；
+    #     ② 旗标计数**不因轮次漂移**（3 轮复用同一对 5/6 ⇒ 若 set/wait 配不平，第 2 轮就死）；
+    #     ③ **跨 launch 不漂移**（harness 的 1 + 5 reps + 20×3 批量 ⇒ 上一次任务不许留余量）。
+    #   出口（softmax_sum_out 的 float 视图，big1 有 1024 格 ⇒ BD≤16）：
+    #     [0]=7.0 AIC 走完全部轮   [8+bi]=9.0 AIC 到达   [760+bi]=6.0 AIV 到达
+    #     [600+bi*4+r] = AIV 第 r 轮从本组 GM 分片读回的值（期望 3.0+r ⇒ 数据与**顺序**都对；
+    #                    读到 5.0 = AIC 提前覆盖了这一轮 ⇒ 回执里缺一道 PipeBarrier）
+    PROBE_XC3 = r'''
+    // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
+    // 3 轮 ping-pong，同一对旗标 (5: AIC→AIV 广播, 6: AIV→AIC 扇入)，暂存走本组独占的
+    // softmax_max_out 分片（每块 64 格）——**完全不碰 workspace**（§15.24 已判死那条路）。
+    // ⚠️ 轮次标签一律查表：aicore 里 `static_cast<float>(uint32_t)` 直接被编译器拒绝
+    //    （`cast between floating and unsigned integer variable is not allowed in aicore function`，
+    //     真机实证）⇒ 想要"每轮一个可区分的值"只能用 float 常量数组。
+    __aicore__ inline void XcoreAic()
+    {
+        static constexpr float RV[3] = {3.0f, 4.0f, 5.0f};
+        const uint32_t bi = GetBlockIdx();
+        const uint32_t base = 64u * bi;
+        sumGm_.SetValue(8u + (bi & 15u), 9.0f);
+        for (uint32_t r = 0; r < 3u; ++r) {
+            maxGm_.SetValue(base + r, RV[r]);
+            PipeBarrier<PIPE_ALL>();
+            CrossCoreSetFlag<2, PIPE_FIX>(5);       // 广播：本组两个 AIV 都醒
+            CrossCoreWaitFlag<2, PIPE_FIX>(6);      // 扇入：两个 AIV 都 set 才醒
+        }
+        PipeBarrier<PIPE_ALL>();
+        sumGm_.SetValue(0, 7.0f);
+    }
+
+    __aicore__ inline void XcoreAiv()
+    {
+        const uint32_t bi = GetBlockIdx();
+        const uint32_t g = bi >> 1;                 // §15.26(a)：AIV bi = group*2 + sub
+        for (uint32_t r = 0; r < 3u; ++r) {
+            CrossCoreWaitFlag<2, PIPE_V>(5);
+            const float v = maxGm_.GetValue(64u * g + r);
+            PipeBarrier<PIPE_ALL>();                // 读落地之后再回执，否则下一轮会覆盖
+            sumGm_.SetValue(600u + bi * 4u + r, v);
+            CrossCoreSetFlag<2, PIPE_MTE3>(6);      // 两个 AIV 都 set ⇒ 凑齐一次扇入
+        }
+        sumGm_.SetValue(760u + bi, 6.0f);
+    }
+
+'''
+    s = s.replace(A_MEMBER, PROBE_XC3 + A_MEMBER, 1)
+elif MODE in XCORE:
+    s = s.replace(A_MEMBER, (PROBE_XC % (
+        'CrossCoreWaitFlag<2, PIPE_FIX>(6);' if MODE == 'xcoreb' else '(void)0;',
+        'if ((bi & 1u) == 0u) { PipeBarrier<PIPE_ALL>(); CrossCoreSetFlag<2, PIPE_MTE3>(6); }'
+        if MODE == 'xcoreb' else '(void)0;')) + A_MEMBER, 1)
+elif MODE in ('launch', 'shim', 'wspeek', 'wsnw'):
+    s = s.replace(A_MEMBER, PROBE_MIN + A_MEMBER, 1)
+elif MODE == 'mmad':
+    s = s.replace(A_MEMBER, PROBE + A_MEMBER, 1)
+
+sys.stdout.write(s)

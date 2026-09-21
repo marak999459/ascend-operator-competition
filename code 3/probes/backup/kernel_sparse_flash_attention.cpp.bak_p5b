@@ -1,0 +1,635 @@
+// Kernel侧核函数实现：SparseFlashAttention（分块 + 在线 softmax）
+//
+// ============================================================
+// 语义依据：官方 SFA kernel 源码（见 _sfa/SEMANTICS.md，逐条有出处）
+//   - sparseIndices 是【块号】: token 区间 = [blk*SBS, blk*SBS+SBS)
+//   - -1 是无效哨兵，【遇到即停止扫描】
+//   - 块被 thr 截断: end = min(begin+SBS, thr)
+//   - mode3: thr = (act_kv - act_q) + s + 1  ← 等价于官方因果掩码判据
+//   - 展开时按 thr 截断即已实现掩码，无需逐元素比较
+//   - 全 mask 行 -> 输出全 0, LSE = (-2e38, 0)
+//   - 变长: actual_seq_lengths 是 per-batch 值 arr[b]（长度 1 时广播）
+//
+// 结构（从第一天就是快的）：
+//   核间：按 B*Q_S 个 query token 展平均分，核间无重叠 -> 无需任何核间同步
+//         ⚠️ 绝不用 SyncAll（上道题的死锁根因）
+//   核内：for tok -> for head-block(nb) -> for KV-chunk(n_blk)
+//         在线 softmax：只保留 O[nb,D] + m[nb] + l[nb]，与稀疏长度 m 无关
+//
+// 当前状态：score、softmax、PV 三段都已向量化（P3a/P2）；剩下的标量热点是
+//   Q 的逐元素装载与 attention_out 的逐元素写回（P5）。
+// ============================================================
+#include "kernel_operator.h"
+
+#include "sparse_flash_attention_tiling.h"
+#include "tiling_key_sparse_flash_attention.h"
+
+using namespace AscendC;
+
+namespace sfa {
+constexpr float  SOFTMAX_MIN_NUM = -2e38f;   // 官方 SOFTMAX_MIN_NUM
+constexpr int32_t HQ_DIM   = 512;            // Q_D / KV_D
+constexpr int32_t ROPE_DIM = 64;             // Dr
+constexpr int32_t QD_ROPE  = HQ_DIM + ROPE_DIM;   // 576
+constexpr uint32_t UB_BLK  = 32u;            // UB 最小块 = 256 bit
+constexpr uint32_t F32_PER_BLK = UB_BLK / 4u;   // 一个块里的 fp32 个数 = 8
+constexpr uint32_t LANES_PER_REP = 64u;         // 向量一次 repeat 的 fp32 lane 数 = 256B/4B
+
+// 归约类 API（WholeReduceSum/Max）一次 repeat 最多处理的 fp32 元素数。
+// 结构上 2201 的 low/high mask 合计可到 128，但官方 softmax 实现按 64 用，
+// 这里也取保守值：超过就分块再跨块归约（当前 tiling 的 n_blk<=64，只走一块）。
+constexpr uint32_t RED_SLAB = 64u;
+// 硬件 vexp 的输入下限：指数小于它就先夹到该值，exp(-88)≈1e-38 等价于 0。
+// 没有这个下限，标量版时代由手写 ExpPoly 的 `x < -87 -> 0` 承担同一职责。
+constexpr float EXP_FLOOR = -88.0f;
+
+// InitBuffer 的入参向上对齐到 UB 块；host 的预算式用同样的对齐口径
+__aicore__ inline uint32_t UbAlignBuf(uint32_t len)
+{
+    return (len + UB_BLK - 1u) / UB_BLK * UB_BLK;
+}
+
+
+}  // namespace sfa
+
+template <typename DT_QUERY>
+class KernelSparseFlashAttention {
+public:
+    __aicore__ inline KernelSparseFlashAttention() {}
+
+    __aicore__ inline void Init(GM_ADDR query, GM_ADDR key, GM_ADDR value,
+                                GM_ADDR sparse_indices, GM_ADDR actual_seq_lengths_query,
+                                GM_ADDR actual_seq_lengths_kv, GM_ADDR query_rope, GM_ADDR key_rope,
+                                GM_ADDR attention_out, GM_ADDR softmax_max_out, GM_ADDR softmax_sum_out,
+                                const SparseFlashAttentionTilingData &tiling_data, GM_ADDR trace)
+    {
+        B_    = tiling_data.B;
+        S1_   = tiling_data.Q_S;
+        S2_   = tiling_data.KV_S;
+        N1_  = tiling_data.Q_N;
+        D_   = static_cast<int32_t>(tiling_data.Q_D);
+        Dr_  = static_cast<int32_t>(tiling_data.Dr);
+        scale_ = tiling_data.scale_value;
+        mode_  = tiling_data.sparse_mode;
+        sbs_   = tiling_data.sparse_block_size;
+        sparseCount_ = tiling_data.sparse_count;
+        nb_    = (tiling_data.nb   == 0) ? 1u : tiling_data.nb;
+        nBlk_  = (tiling_data.n_blk == 0) ? 1u : tiling_data.n_blk;
+        nHeadBlk_ = (N1_ + nb_ - 1) / nb_;
+        lseOn_ = (softmax_max_out != nullptr) && (softmax_sum_out != nullptr);
+        // ⚠️ 官方 BSND 变长语义：actual_seq_lengths 是【per-batch 值】arr[b]；
+        //    数组长度为 1 时广播 arr[0]；未传时用满 padded 的 Q_S / KV_S
+        //    （见 SEMANTICS.md §3）。
+        //    注意：host 若探测不到数组长度会下发 0；此处对"缓冲存在但长度未知"
+        //    按 1（广播）处理 —— 因为回退到 padded 长度会静默算错。
+        qLenSize_  = tiling_data.actual_q_len_size;
+        kvLenSize_ = tiling_data.actual_kv_len_size;
+
+        if (trace != nullptr) {
+            traceGm_.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(trace));
+            traceOn_ = true;
+            // ⚠️ 真机 ccec 禁止 aicore 函数里 float<->整数 的隐式转换，
+            //    所以这里必须显式 static_cast<float>。
+            const float bidx = static_cast<float>(GetBlockIdx());
+            const float bnum = static_cast<float>(GetBlockNum());
+            if ASCEND_IS_AIV {
+                TRec(9.0f, bidx, bnum, 1.0f, 0.0f);
+            } else {
+                TRec(9.0f, bidx, bnum, 0.0f, 0.0f);
+            }
+        }
+
+        qGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(query));
+        kGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(key));
+        vGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(value));
+        idxGm_.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(sparse_indices));
+        qrGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(query_rope));
+        krGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(key_rope));
+        outGm_.SetGlobalBuffer(reinterpret_cast<__gm__ DT_QUERY *>(attention_out));
+        if (softmax_max_out != nullptr) { maxGm_.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(softmax_max_out)); }
+        if (softmax_sum_out != nullptr) { sumGm_.SetGlobalBuffer(reinterpret_cast<__gm__ float *>(softmax_sum_out)); }
+        // 变长长度张量：int32 一维，BSND 下是 per-batch 值
+        if (actual_seq_lengths_query != nullptr) {
+            qLenGm_.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_query));
+            qLenOn_ = true;
+            if (qLenSize_ == 0u) { qLenSize_ = 1u; }   // 长度未知 -> 按广播处理
+        }
+        if (actual_seq_lengths_kv != nullptr) {
+            kvLenGm_.SetGlobalBuffer(reinterpret_cast<__gm__ int32_t *>(actual_seq_lengths_kv));
+            kvLenOn_ = true;
+            if (kvLenSize_ == 0u) { kvLenSize_ = 1u; } // 长度未知 -> 按广播处理
+        }
+
+        // ---- 核间切分：按 B*Q_S 个 token 展平均分 ----
+        // ⚠️ 只有向量核做工（本算子无 Cube 计算）。用 ASCEND_IS_AIV 与官方一致。
+        if ASCEND_IS_AIC {
+            tokBegin_ = 0; tokEnd_ = 0;
+            return;
+        }
+        const uint32_t total = B_ * S1_;
+        const uint32_t coreNum = GetBlockNum();
+        const uint32_t coreIdx = GetBlockIdx();
+        if (coreNum == 0 || coreIdx >= coreNum) { tokBegin_ = 0; tokEnd_ = 0; return; }
+        const uint32_t perCore = (total + coreNum - 1) / coreNum;
+        tokBegin_ = coreIdx * perCore;
+        tokEnd_ = tokBegin_ + perCore;
+        if (tokBegin_ > total) { tokBegin_ = total; }
+        if (tokEnd_ > total)   { tokEnd_ = total; }
+        if (tokEnd_ < tokBegin_) { tokEnd_ = tokBegin_; }
+
+        // ---- UB 缓冲（大小由 host 的 UB 预算反算保证）----
+        // ⚠️ 每个尺寸都自己向上对齐到一个 UB 块（32B = 256bit）再交给 InitBuffer：
+        //    这样每个缓冲的起始地址必然 256bit 对齐，DataCopy/DataCopyPad 才不会
+        //    报 ADDR_MISALIGN；不对齐时行为取决于 TPipe 内部的取整方向，不可依赖。
+        //    host 侧 CalcUbNeed 用同一口径逐项对齐，两边必须一致。
+        pipe_.InitBuffer(qBuf_,   sfa::UbAlignBuf(nb_   * (D_ + Dr_) * sizeof(float)));
+        pipe_.InitBuffer(oBuf_,   sfa::UbAlignBuf(nb_   * D_  * sizeof(float)));
+        pipe_.InitBuffer(kBuf_,   sfa::UbAlignBuf(nBlk_ * D_  * sizeof(DT_QUERY)));
+        pipe_.InitBuffer(vBuf_,   sfa::UbAlignBuf(nBlk_ * D_  * sizeof(DT_QUERY)));
+        pipe_.InitBuffer(krBuf_,  sfa::UbAlignBuf(nBlk_ * Dr_ * sizeof(DT_QUERY)));
+        pipe_.InitBuffer(sBuf_,   sfa::UbAlignBuf(nb_   * nBlk_ * sizeof(float)));
+        pipe_.InitBuffer(pBuf_,   sfa::UbAlignBuf(nb_   * nBlk_ * sizeof(float)));
+        pipe_.InitBuffer(mlBuf_,  sfa::UbAlignBuf(3 * nb_ * sizeof(float)));
+        // 两个半区各占整块：sum 半区的 UB 地址因此必然 256bit 对齐，
+        // DataCopyPad 才不会报 ADDR_MISALIGN。
+        pipe_.InitBuffer(lseBuf_, 2u * sfa::UbAlignBuf((nb_) * sizeof(float)));
+        // ---- 向量化 scratch ----
+        // kfBuf_/krfBuf_：一组 SFA_SC_GRP 个 token 的 K/K-rope fp32 展开（每组只 Cast 一次，
+        //   供全部头复用）；P2 之后 PV 只借用 kfBuf_ 的一行放 V 的 fp32 展开。
+        // pfBuf_/prfBuf_：点积的部分积，就地折叠后归约。
+        // rdBuf_：三个宽度为 nb_ 的归约工作区，P3a 用 [0]=content 行和、[nb_]=rope 行和，
+        //   P2 复用同两块（[0]=Σp、[nb_]=分块临时）并另用 [2nb_]=alpha 向量。
+        //   按 nb_ 而不是 SFA_SC_GRP 定宽 —— 头数多于 8 时归约结果也放得下且块对齐。
+        pipe_.InitBuffer(kfBuf_,  sfa::UbAlignBuf(SFA_SC_GRP * D_ * sizeof(float)));
+        pipe_.InitBuffer(pfBuf_,  sfa::UbAlignBuf(SFA_SC_GRP * D_ * sizeof(float)));
+        pipe_.InitBuffer(krfBuf_, sfa::UbAlignBuf(SFA_SC_GRP * Dr_ * sizeof(float)));
+        pipe_.InitBuffer(prfBuf_, sfa::UbAlignBuf(SFA_SC_GRP * Dr_ * sizeof(float)));
+        pipe_.InitBuffer(rdBuf_,  3u * sfa::UbAlignBuf(nb_ * sizeof(float)));
+    }
+
+    __aicore__ inline void Process()
+    {
+        for (uint32_t tok = tokBegin_; tok < tokEnd_; ++tok) {
+            const uint32_t b = tok / S1_;
+            const uint32_t s = tok - b * S1_;
+            ProcessToken(b, s);
+        }
+    }
+
+    // 有效长度：官方 BSND 变长语义 = per-batch 值 arr[b]（见 SEMANTICS.md §3）
+    //   size==1 -> 广播 arr[0]；未传 -> 用满 padded 的 Q_S / KV_S
+    __aicore__ inline void GetActualLens(uint32_t b, uint32_t &actQ, uint32_t &actKV) const
+    {
+        actQ = S1_;
+        if (qLenOn_ && qLenSize_ > 0) {
+            const uint32_t idx = (qLenSize_ == 1) ? 0u : b;
+            if (idx < qLenSize_) {
+                const int32_t v = qLenGm_.GetValue(idx);
+                if (v >= 0 && static_cast<uint32_t>(v) < actQ) {
+                    actQ = static_cast<uint32_t>(v);
+                }
+            }
+        }
+        actKV = S2_;
+        if (kvLenOn_ && kvLenSize_ > 0) {
+            const uint32_t idx = (kvLenSize_ == 1) ? 0u : b;
+            if (idx < kvLenSize_) {
+                const int32_t v = kvLenGm_.GetValue(idx);
+                if (v >= 0 && static_cast<uint32_t>(v) < actKV) {
+                    actKV = static_cast<uint32_t>(v);
+                }
+            }
+        }
+    }
+
+private:
+    // GM -> UB 整批搬运。前提：elems*sizeof(DT_QUERY) 是 32B 的整数倍，
+    // 且两端地址都 256bit 对齐 —— 由 D_=512 / Dr_=64 与 UB 分块对齐共同保证。
+    __aicore__ inline void CopyGm2Ub(const LocalTensor<DT_QUERY> &dst,
+                                     const GlobalTensor<DT_QUERY> &src, uint32_t elems) const
+    {
+        DataCopy(dst, src, DataCopyParams{1, static_cast<uint16_t>(elems * sizeof(DT_QUERY) / sfa::UB_BLK), 0, 0});
+    }
+
+    // ---- traceGm_ 保留为空实现的写入路径（正式提交时 trace == nullptr，编译期即消除）----
+    __aicore__ inline void TRec(float tag, float a, float b, float c, float d) const
+    {
+        if (!traceOn_) { return; }
+        GlobalTensor<float> &g = const_cast<GlobalTensor<float> &>(traceGm_);
+        uint32_t &o = const_cast<uint32_t &>(traceOff_);
+        if (o + 5 > 4096) { return; }
+        g.SetValue(o + 0, tag);
+        g.SetValue(o + 1, a);
+        g.SetValue(o + 2, b);
+        g.SetValue(o + 3, c);
+        g.SetValue(o + 4, d);
+        o += 5;
+    }
+
+    __aicore__ inline int64_t CalcThreshold(uint32_t s, uint32_t actQ, uint32_t actKV) const
+    {
+        if (mode_ == 3) {
+            return static_cast<int64_t>(actKV) - static_cast<int64_t>(actQ)
+                   + static_cast<int64_t>(s) + 1;
+        }
+        return static_cast<int64_t>(actKV);
+    }
+
+    // 读一个有效稀疏块 -> token 区间 [begin, end)；false 表示扫描结束
+    __aicore__ inline bool NextTokenBlock(uint64_t idxBase, uint32_t &tokIdx,
+                                          int64_t thr, int64_t &begin, int64_t &end) const
+    {
+        while (tokIdx < sparseCount_) {
+            const int32_t blk = idxGm_.GetValue(idxBase + tokIdx);
+            ++tokIdx;
+            if (blk < 0) { return false; }                 // 官方：遇 -1 即停
+            const int64_t b0 = static_cast<int64_t>(blk) * static_cast<int64_t>(sbs_);
+            if (b0 >= thr) { continue; }                    // 官方此处是 continue 而非 break
+            int64_t e0 = b0 + static_cast<int64_t>(sbs_);
+            if (e0 > thr) { e0 = thr; }                     // 块被 threshold 截断
+            begin = b0; end = e0;
+            return true;
+        }
+        return false;
+    }
+
+    __aicore__ inline void ProcessToken(uint32_t b, uint32_t s)
+    {
+        uint32_t actQ = 0, actKV = 0;
+        GetActualLens(b, actQ, actKV);
+
+        const uint32_t s1Base   = static_cast<uint32_t>(((static_cast<uint64_t>(b) * S1_ + s) * N1_) * D_);
+        const uint32_t ropeBase = static_cast<uint32_t>(((static_cast<uint64_t>(b) * S1_ + s) * N1_) * Dr_);
+        const uint64_t idxBase  = (static_cast<uint64_t>(b) * S1_ + s) * sparseCount_;
+
+        // ⚠️ padding query 行（s >= 真实 query 长度）：输出全 0，LSE 取官方哨兵值。
+        //    官方参考语义见 SEMANTICS.md 附录 C：`if s >= s1: continue`（输出保持 0）。
+        if (s >= actQ) {
+            for (uint32_t n = 0; n < N1_; ++n) {
+                const uint32_t outOff = s1Base + n * D_;
+                for (int32_t d = 0; d < D_; ++d) {
+                    outGm_.SetValue(outOff + d, static_cast<DT_QUERY>(0.0f));
+                }
+            }
+            if (lseOn_) {
+                // ⚠️ 修复：padding 行 LSE 改为 UB + DataCopyPad 写（与正常分支同机制）。
+                //    标量 GM 写在本算子多核并发下偶发整行丢失（VARSBS8 复现 0xAA 残留）。
+                LocalTensor<float> lseP = lseBuf_.Get<float>();
+                for (uint32_t hb = 0; hb < nHeadBlk_; ++hb) {
+                    const uint32_t n0 = hb * nb_;
+                    uint32_t nbCur = N1_ - n0;
+                    if (nbCur > nb_) { nbCur = nb_; }
+                    for (uint32_t i = 0; i < nbCur; ++i) {
+                        lseP.SetValue(i, 0.0f);
+                        lseP.SetValue(nb_ + i, 0.0f);
+                    }
+                    const uint32_t lseOff = (static_cast<uint64_t>(b) * S1_ + s) * N1_ + n0;
+                    DataCopyPad(maxGm_[lseOff], lseP,     DataCopyExtParams{1, static_cast<uint32_t>(nbCur * sizeof(float)), 0, 0, 0});
+                    DataCopyPad(sumGm_[lseOff], lseP[nb_], DataCopyExtParams{1, static_cast<uint32_t>(nbCur * sizeof(float)), 0, 0, 0});
+                }
+            }
+            return;
+        }
+
+        const int64_t thr = CalcThreshold(s, actQ, actKV);
+
+        LocalTensor<float> q  = qBuf_.Get<float>();
+        LocalTensor<float> o  = oBuf_.Get<float>();
+        LocalTensor<DT_QUERY> kb = kBuf_.Get<DT_QUERY>();
+        LocalTensor<DT_QUERY> vb = vBuf_.Get<DT_QUERY>();
+        LocalTensor<DT_QUERY> kr = krBuf_.Get<DT_QUERY>();
+        LocalTensor<float> sc = sBuf_.Get<float>();
+        LocalTensor<float> ml = mlBuf_.Get<float>();
+
+        for (uint32_t hb = 0; hb < nHeadBlk_; ++hb) {
+            const uint32_t n0 = hb * nb_;
+            uint32_t nbCur = N1_ - n0;
+            if (nbCur > nb_) { nbCur = nb_; }
+
+            // Q 与 Qrope 拼接：前 512 content，后 64 rope
+            for (uint32_t i = 0; i < nbCur; ++i) {
+                const uint32_t qOff = s1Base + (n0 + i) * D_;
+                const uint32_t rOff = ropeBase + (n0 + i) * Dr_;
+                for (int32_t d = 0; d < D_; ++d) {
+                    q.SetValue(i * (D_ + Dr_) + d, static_cast<float>(qGm_.GetValue(qOff + d)));
+                }
+                for (int32_t d = 0; d < Dr_; ++d) {
+                    q.SetValue(i * (D_ + Dr_) + D_ + d, static_cast<float>(qrGm_.GetValue(rOff + d)));
+                }
+
+
+            }
+            for (uint32_t i = 0; i < nbCur; ++i) {
+                for (int32_t d = 0; d < D_; ++d) { o.SetValue(i * D_ + d, 0.0f); }
+                ml.SetValue(i, sfa::SOFTMAX_MIN_NUM);
+                ml.SetValue(nb_ + i, 0.0f);
+            }
+
+            uint32_t tokIdx = 0;
+            int64_t curBegin = 0, curEnd = 0;
+            bool hasBlock = false;
+            uint32_t filled = 0;
+
+            // ⚠️ 必须支持"一个 sparse block 跨越多个 chunk"（sparseBlockSize 最大 128，
+            //    而 UB 只能放下 n_blk 个 token；nBlk_ < sbs_ 时旧写法会越界/错算）。
+            //    做法：缓冲区满就 flush，稀疏块的断点（curBegin/curEnd/hasBlock）跨 flush 保留，
+            //    由 FlushChunk 的在线 softmax（mOld/mNew 重缩放）保证分段累加等价。
+            //    当 nBlk_ >= sbs_ 时（如 SBS=8、nBlk=16）此循环与原逻辑逐位等价。
+            //
+            // 搬运：块内 token 在 GM 里是【连续】的（KV_N=1，key 布局 (B,S2,1,D)），
+            //   所以一段连续区间用一条 DataCopy 整批搬进 UB，代替逐元素 GetValue/SetValue。
+            //   一次 query 要 gather ~sparse_count 个 token、每 token 1088 个元素，
+            //   这条聚合是"标量搬运 -> MTE 块搬运"的开关（P1）。
+            //   对齐前提：D_/Dr_ 与 DT_QUERY 的乘积必为 32B 的整数倍（512/64 × 2/4 都满足），
+            //   且 chunk 内每段起点偏移 = filled*D_*sizeof，同样是 32B 的倍数。
+            while (true) {
+                if (!hasBlock) {
+                    if (!NextTokenBlock(idxBase, tokIdx, thr, curBegin, curEnd)) { break; }
+                    hasBlock = true;
+                }
+                if (filled == nBlk_) {
+                    FlushChunk(q, o, kb, vb, kr, sc, ml, nbCur, filled);
+                    filled = 0;
+                }
+                uint32_t run = static_cast<uint32_t>(curEnd - curBegin);
+                const uint32_t space = nBlk_ - filled;      // >0：上面刚 flush 过
+                if (run > space) { run = space; }
+                const int64_t kOff = (static_cast<int64_t>(b) * S2_ + curBegin) * D_;
+                const int64_t rOff = (static_cast<int64_t>(b) * S2_ + curBegin) * Dr_;
+                CopyGm2Ub(kb[filled * D_],     kGm_[kOff],  run * D_);
+                CopyGm2Ub(vb[filled * D_],     vGm_[kOff],  run * D_);
+                CopyGm2Ub(kr[filled * Dr_],    krGm_[rOff], run * Dr_);
+                filled += run;
+                curBegin += run;
+                if (curBegin >= curEnd) { hasBlock = false; }
+            }
+            if (filled > 0) { FlushChunk(q, o, kb, vb, kr, sc, ml, nbCur, filled); }
+
+            // 归一化并写回
+        LocalTensor<float> lse = lseBuf_.Get<float>();   // sum 半区在 lse[nb_]：nb_≥8 = 一个 256bit 块，见 host NB_MIN
+            for (uint32_t i = 0; i < nbCur; ++i) {
+                const float l = ml.GetValue(nb_ + i);
+                const uint32_t outOff = s1Base + (n0 + i) * D_;
+                for (int32_t d = 0; d < D_; ++d) {
+                    const float val = (l > 0.0f) ? (o.GetValue(i * D_ + d) / l) : 0.0f;
+                    o.SetValue(i * D_ + d, val);
+                }
+                if (lseOn_) {
+                    const uint32_t lseOff = (static_cast<uint64_t>(b) * S1_ + s) * N1_ + (n0 + i);
+                    // ⚠️ softmaxMax 写【未缩放】的行最大（即 ml 里存的 mx）。
+                    //    真机双对拍实测：若在此乘 scale_，max 会恰好偏小 1/scale=22.6274 倍
+                    //    （同一用例的 softmax_sum 同时完全正确，证明缩放在 softmax 内部完成、
+                    //     不进入 LSE）。此前真机只对拍 attention_out，所以这个错误长期未被发现。
+                    lse.SetValue(i,     (l > 0.0f) ? ml.GetValue(i) : 0.0f);
+                    lse.SetValue(nb_ + i, (l > 0.0f) ? l : 0.0f);
+                }
+            }
+            if (lseOn_) {
+                const uint32_t lseOff = (static_cast<uint64_t>(b) * S1_ + s) * N1_ + n0;
+                DataCopyPad(maxGm_[lseOff], lse,     DataCopyExtParams{1, static_cast<uint32_t>(nbCur * sizeof(float)), 0, 0, 0});
+                DataCopyPad(sumGm_[lseOff], lse[nb_], DataCopyExtParams{1, static_cast<uint32_t>(nbCur * sizeof(float)), 0, 0, 0});
+            }
+            for (uint32_t i = 0; i < nbCur; ++i) {
+                const uint32_t outOff = s1Base + (n0 + i) * D_;
+                for (int32_t d = 0; d < D_; ++d) {
+                    outGm_.SetValue(outOff + d, static_cast<DT_QUERY>(o.GetValue(i * D_ + d)));
+                }
+            }
+        }
+    }
+
+    // 把一行 len 个连续 fp32 就地折成 <=64 个有效 lane（向量一次 repeat 的宽度）：
+    // 每步一条原地块加 dst[0:h] += dst[h:2h]。512 -> 3 步、64 -> 0 步。
+    __aicore__ inline void FoldRow(LocalTensor<float> row, uint32_t len) const
+    {
+        for (uint32_t h = len / 2u; h >= sfa::LANES_PER_REP; h >>= 1) {
+            Add(row, row, row[h], h);
+        }
+    }
+
+    // 折叠后每行的有效 lane 数（FoldRow 的同一条折半规则，两处必须一致）
+    __aicore__ inline uint32_t FoldedLen(uint32_t len) const
+    {
+        while (len > sfa::LANES_PER_REP) { len >>= 1; }
+        return len;
+    }
+
+    /**
+     * score[i][j] = ( q_i[0:D] · k_j[0:D] + q_i[D:D+Dr] · k_rope_j[0:Dr] ) * scale
+     *
+     * 向量化口径（取代原先每对 (i,j) 576 次标量乘加）：
+     *   1) 本组 SFA_SC_GRP 个 token 的 K / K-rope 各整行 Cast 成 fp32 —— 只做一次，
+     *      供该组内全部头复用；fp16 -> fp32 是精确扩展，不引入误差。
+     *   2) 每条 512/64 维点积 = 一次整条 `Mul` + 折半块加 + 一次 `WholeReduceSum`，
+     *      且 `WholeReduceSum` 的 repeatTime=组内 token 数 ⇒ **一条指令出 G 个行和**，
+     *      结果紧凑落在 sc 的行切片上（dst 步长单位=元素，已实测）。
+     *   3) 归约维（512）超过一次 repeat 的 64 lane ⇒ 先用 FoldRow 折到 64 再归约。
+     * 与标量版的差别只有 fp32 求和顺序（树形 vs 顺序），量级 ~1e-7 相对。
+     */
+    __aicore__ inline void ComputeScores(LocalTensor<float> &q, LocalTensor<DT_QUERY> &kb,
+                                         LocalTensor<DT_QUERY> &kr, LocalTensor<float> &sc,
+                                         uint32_t nbCur, uint32_t m)
+    {
+        LocalTensor<float> kf = kfBuf_.Get<float>();
+        LocalTensor<float> pf = pfBuf_.Get<float>();
+        LocalTensor<float> krf = krfBuf_.Get<float>();
+        LocalTensor<float> prf = prfBuf_.Get<float>();
+        LocalTensor<float> rd = rdBuf_.Get<float>();
+        LocalTensor<float> rd2 = rd[nb_];
+
+        const uint32_t rowC = static_cast<uint32_t>(D_);
+        const uint32_t rowR = static_cast<uint32_t>(Dr_);
+        const uint32_t vc = FoldedLen(rowC);
+        const uint32_t vr = FoldedLen(rowR);
+
+        for (uint32_t g0 = 0; g0 < m; g0 += SFA_SC_GRP) {
+            const uint32_t g = (m - g0 < SFA_SC_GRP) ? (m - g0) : SFA_SC_GRP;
+            for (uint32_t t = 0; t < g; ++t) {
+                Cast(kf[t * rowC], kb[(g0 + t) * rowC], RoundMode::CAST_NONE, rowC);
+                Cast(krf[t * rowR], kr[(g0 + t) * rowR], RoundMode::CAST_NONE, rowR);
+            }
+            for (uint32_t i = 0; i < nbCur; ++i) {
+                const uint32_t qb = i * (rowC + rowR);
+                LocalTensor<float> qc = q[qb];
+                LocalTensor<float> qr = q[qb + rowC];
+                for (uint32_t t = 0; t < g; ++t) {
+                    LocalTensor<float> pc = pf[t * rowC];
+                    LocalTensor<float> prr = prf[t * rowR];
+                    Mul(pc, kf[t * rowC], qc, rowC);
+                    FoldRow(pc, rowC);
+                    Mul(prr, krf[t * rowR], qr, rowR);
+                    FoldRow(prr, rowR);
+                }
+                // 行与行的块间距 = rowC / 每块元素数；一次调用做完本组 g 行
+                LocalTensor<float> out = sc[i * nBlk_ + g0];
+                WholeReduceSum(rd, pf, vc, g, 1, 1, rowC / sfa::F32_PER_BLK);
+                WholeReduceSum(rd2, prf, vr, g, 1, 1, rowR / sfa::F32_PER_BLK);
+                Add(out, rd, rd2, g);
+                Muls(out, out, scale_, g);
+            }
+        }
+    }
+
+    /** 处理一个 KV chunk：score -> 在线 softmax 更新 (m, l, O) */
+    __aicore__ inline void FlushChunk(LocalTensor<float> &q, LocalTensor<float> &o,
+                                      LocalTensor<DT_QUERY> &kb, LocalTensor<DT_QUERY> &vb,
+                                      LocalTensor<DT_QUERY> &kr, LocalTensor<float> &sc,
+                                      LocalTensor<float> &ml, uint32_t nbCur, uint32_t m)
+    {
+        // ⚠️ 跨流水线同步（CANN 9.0.0 / arch2201 不插自动同步，实测反汇编里
+        //    没有任何 set_flag/wait_flag）：
+        //   MTE2 -> V：本 chunk 的 kb/vb/kr 是刚由 DataCopy 搬进来的，V 读之前
+        //     必须等 MTE2 队列走到这个标记点。
+        //   V -> MTE2：调用方下一次 DataCopy 会覆盖同一块 UB，必须先等本函数的
+        //     V 读完。
+        //  两对都是"紧挨着的 set+wait"，同 id 严格配对 —— 不会出现 wait 多于 set
+        //  的死锁（上道题 SyncAll 就是这类坑）。P4 双缓冲时把第二对换成对侧槽位。
+        SetFlag<HardEvent::MTE2_V>(0);
+        WaitFlag<HardEvent::MTE2_V>(0);
+        // 1) score = (q·k + q_rope·k_rope) * scale   —— 向量化（P3a）
+        ComputeScores(q, kb, kr, sc, nbCur, m);
+        // 2) 行最大 + 在线 softmax + PV 累加 —— 向量化（P2）
+        SoftmaxPv(o, vb, sc, ml, nbCur, m);
+        SetFlag<HardEvent::V_MTE2>(0);
+        WaitFlag<HardEvent::V_MTE2>(0);
+    }
+
+    /**
+     * 在线 softmax 的后半段，全向量化（取代原先每 chunk nbCur*m*D_ 次标量乘加）：
+     *   mNew = max(mOld, rowmax(S))
+     *   P    = exp(S - mNew)                  （硬件 vexp）
+     *   O    = O * alpha + P · V,  l = l * alpha + ΣP,  alpha = exp(mOld - mNew)
+     *
+     * 与标量版的差别只有：求和/求最大从顺序改成树形（~1e-7 相对），
+     * exp 从手写泰勒改成硬件 vexp（|x|<=88 内相对误差 ~1e-6，远小于判据 rtol=1e-2）。
+     *
+     * ⚠️ 向量管线是异步的：凡"向量写完 -> 标量读同一块 UB"处都要 PipeBarrier<PIPE_V>，
+     *    否则会读到旧值（这里三处，每 chunk 共 3 条 barrier，成本可忽略）。
+     */
+    __aicore__ inline void SoftmaxPv(LocalTensor<float> &o, LocalTensor<DT_QUERY> &vb,
+                                     LocalTensor<float> &sc, LocalTensor<float> &ml,
+                                     uint32_t nbCur, uint32_t m)
+    {
+        LocalTensor<float> p = pBuf_.Get<float>();
+        LocalTensor<float> rd = rdBuf_.Get<float>();
+        LocalTensor<float> r0 = rd;                    // P3a: content 行和 / P2: ΣP
+        LocalTensor<float> r1 = rd[nb_];              // P3a: rope 行和    / P2: 分块临时
+        LocalTensor<float> av = rd[2 * nb_];          // alpha 向量
+        LocalTensor<float> mx = ml[2 * nb_];          // 本 chunk 的行最大 = 跨 chunk 的 mNew
+        const int32_t rowStep = static_cast<int32_t>(nBlk_ / sfa::F32_PER_BLK);  // 行间距（块）
+        const uint32_t rowC = static_cast<uint32_t>(D_);
+
+        // ---- 1) 行最大：一条 WholeReduceMax 做 nbCur 行，列数超过 RED_SLAB 时分块取 max
+        for (uint32_t k0 = 0; k0 < m; k0 += sfa::RED_SLAB) {
+            const uint32_t w = (m - k0 < sfa::RED_SLAB) ? (m - k0) : sfa::RED_SLAB;
+            if (k0 == 0) {
+                WholeReduceMax<float>(mx, sc[k0], static_cast<int32_t>(w),
+                                      static_cast<int32_t>(nbCur), 1, 1, rowStep,
+                                      ReduceOrder::ORDER_ONLY_VALUE);
+            } else {
+                WholeReduceMax<float>(r1, sc[k0], static_cast<int32_t>(w),
+                                      static_cast<int32_t>(nbCur), 1, 1, rowStep,
+                                      ReduceOrder::ORDER_ONLY_VALUE);
+                Max(mx, mx, r1, nbCur);
+            }
+        }
+        PipeBarrier<PIPE_V>();
+        for (uint32_t i = 0; i < nbCur; ++i) {        // mNew 还要和历史行最大 mOld 取 max
+            const float mOld = ml.GetValue(i);
+            const float v = mx.GetValue(i);
+            mx.SetValue(i, (v > mOld) ? v : mOld);
+        }
+
+        // ---- 2) P = exp(S - mNew)：每行一次 Adds + 一次 vexp（先夹下限，避免 vexp 下溢域外）
+        //      2201 没有标量减的 `Subs`（那个重载只在 3510/5102/3003/3113 编译），
+        //      取负后走 `Adds` —— IEEE 下两者逐位等价。
+        for (uint32_t i = 0; i < nbCur; ++i) {
+            LocalTensor<float> pi = p[i * nBlk_];
+            Adds(pi, sc[i * nBlk_], -mx.GetValue(i), m);
+            Maxs(pi, pi, sfa::EXP_FLOOR, m);
+            Exp<float>(pi, pi, static_cast<int32_t>(m));
+        }
+
+        // ---- 3) ΣP（分块累加）与 alpha
+        Duplicate(r0, 0.0f, static_cast<int32_t>(nbCur));
+        for (uint32_t k0 = 0; k0 < m; k0 += sfa::RED_SLAB) {
+            const uint32_t w = (m - k0 < sfa::RED_SLAB) ? (m - k0) : sfa::RED_SLAB;
+            WholeReduceSum<float>(r1, p[k0], static_cast<int32_t>(w),
+                                  static_cast<int32_t>(nbCur), 1, 1, rowStep);
+            Add(r0, r0, r1, nbCur);
+        }
+        PipeBarrier<PIPE_V>();
+        for (uint32_t i = 0; i < nbCur; ++i) {         // alpha 的指数 = mOld - mNew <= 0
+            av.SetValue(i, ml.GetValue(i) - mx.GetValue(i));
+            ml.SetValue(i, mx.GetValue(i));            // m 更新为 mNew
+        }
+        Maxs(av, av, sfa::EXP_FLOOR, nbCur);
+        Exp<float>(av, av, static_cast<int32_t>(nbCur));
+        PipeBarrier<PIPE_V>();
+
+        // ---- 4) O 重缩放 + l 更新
+        for (uint32_t i = 0; i < nbCur; ++i) {
+            const float a = av.GetValue(i);
+            LocalTensor<float> oi = o[i * rowC];
+            Muls(oi, oi, a, rowC);
+            ml.SetValue(nb_ + i, ml.GetValue(nb_ + i) * a + r0.GetValue(i));
+        }
+
+        // ---- 5) PV 累加：O_i += P_ij * V_j。V_j 对全部头复用，所以 j 在外层。
+        //      Axpy = dst += src*scalar，一条指令顶替原来的 Muls + Add 两条。
+        LocalTensor<float> vf = kfBuf_.Get<float>();   // ComputeScores 之后即空闲，借一行
+        for (uint32_t j = 0; j < m; ++j) {
+            Cast(vf, vb[j * rowC], RoundMode::CAST_NONE, rowC);
+            for (uint32_t i = 0; i < nbCur; ++i) {
+                Axpy<float, float>(o[i * rowC], vf, p.GetValue(i * nBlk_ + j), rowC);
+            }
+        }
+    }
+
+    TPipe pipe_;
+    TBuf<TPosition::VECCALC> qBuf_, oBuf_, kBuf_, vBuf_, krBuf_, sBuf_, pBuf_, mlBuf_, lseBuf_;
+    TBuf<TPosition::VECCALC> kfBuf_, pfBuf_, krfBuf_, prfBuf_, rdBuf_;
+    GlobalTensor<DT_QUERY> qGm_, kGm_, vGm_, qrGm_, krGm_, outGm_;
+    GlobalTensor<int32_t> idxGm_;
+    GlobalTensor<int32_t> qLenGm_, kvLenGm_;
+    GlobalTensor<float> maxGm_, sumGm_, traceGm_;
+
+    uint32_t B_ = 0, S1_ = 0, S2_ = 0, N1_ = 0;
+    int32_t D_ = 512, Dr_ = 64;   // 从 tiling 取，默认 512/64
+    uint32_t sbs_ = 1, sparseCount_ = 2048, nb_ = 1, nBlk_ = 1, nHeadBlk_ = 1;
+    float scale_ = 1.0f;
+    uint32_t mode_ = 3;
+    bool lseOn_ = false;
+    bool qLenOn_ = false, kvLenOn_ = false;
+    uint32_t qLenSize_ = 0, kvLenSize_ = 0;
+    bool traceOn_ = false;
+    uint32_t traceOff_ = 0;
+    uint32_t tokBegin_ = 0, tokEnd_ = 0;
+};
+
+// kernel 入口：与原骨架写法一致 —— 【模板 + __global__ __aicore__，不要 extern "C"】
+// ⚠️ 踩坑记录：加 extern "C" 会把它变成非模板函数，导致编译器生成的
+//    `sparse_flash_attention<TEMPLATE_PARAMS>(...)` 报
+//    "'..._tilingkey' does not name a template but is followed by template arguments"
+template <typename DT_QUERY>
+__global__ __aicore__ void sparse_flash_attention(
+    GM_ADDR query, GM_ADDR key, GM_ADDR value, GM_ADDR sparseIndices,
+    GM_ADDR actualSeqLengthsQuery, GM_ADDR actualSeqLengthsKV,
+    GM_ADDR queryRope, GM_ADDR keyRope, GM_ADDR attentionOut,
+    GM_ADDR softmaxMaxOut, GM_ADDR softmaxSumOut, GM_ADDR workspace, GM_ADDR tiling)
+{
+    REGISTER_TILING_DEFAULT(SparseFlashAttentionTilingData);
+    GET_TILING_DATA_WITH_STRUCT(SparseFlashAttentionTilingData, tiling_data, tiling);
+    KernelSparseFlashAttention<DT_QUERY> op;
+    op.Init(query, key, value, sparseIndices, actualSeqLengthsQuery, actualSeqLengthsKV,
+            queryRope, keyRope, attentionOut, softmaxMaxOut, softmaxSumOut,
+            tiling_data, nullptr);
+    op.Process();
+}
+
+template __aicore__ void sparse_flash_attention<half>(
+    GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR,
+    GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR);
+template __aicore__ void sparse_flash_attention<float>(
+    GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR,
+    GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR, GM_ADDR);

@@ -35,45 +35,206 @@ constexpr uint64_t UB_SAFE_PCT     = 95ULL;
 // 头分块候选（从大到小取第一个能装下的）
 constexpr uint32_t NB_CAND[] = {32, 16, 8, 4, 2, 1};
 constexpr uint32_t NBLK_CAND[] = {128, 64, 32, 16, 8, 4, 2, 1};
-
-static inline uint64_t CalcUbNeed(uint32_t nb, uint32_t nBlk, uint32_t qD, uint32_t dr)
+// UB 一个块 = 256 bit = 32 B；host 预算与 kernel InitBuffer 都按它向上取整。
+constexpr uint64_t UB_BLK = 32ULL;
+// ⚠️ nb 原先有 8 的下限（NB_MIN）：kernel 把 LSE 的 sum 半区放在 UB 偏移 nb 个 float 处，
+// nb<8 时半区源地址不是 256bit 对齐 -> aivec ADDR_MISALIGN（当年实测 r1~r7 全挂）。
+// P10 按当年注释里指的路把 kernel 布局改成"半区各占整块"（偏移 = nb 向上取整到一个块，
+// 见 kernel 的 halfOff_），下限随之解除 —— 头块要能摊到更多核上就必须要 nb 能小。
+constexpr uint32_t NB_MIN = 1U;
+constexpr uint64_t UB_BLK_F32 = UB_BLK / 4ULL;        // 一个 UB 块 = 8 个 fp32
+static inline uint64_t HalfElems(uint32_t nb)
 {
-    // 与 kernel Init 里的算式逐项对应
-    return static_cast<uint64_t>(nb) * (qD + dr) * 4ULL          // qBuf_ : Q + Qrope (fp32)
-         + static_cast<uint64_t>(nb) * qD * 4ULL           // oBuf_ : 输出累加器 (fp32)
-         + static_cast<uint64_t>(nBlk) * qD * 2ULL * 2ULL  // kBuf_ + vBuf_ (fp16)
-         + static_cast<uint64_t>(nBlk) * dr * 2ULL       // krBuf_ (fp16)
-         + static_cast<uint64_t>(nb) * nBlk * 4ULL * 2ULL      // sBuf_ + pBuf_ (fp32)
-         + static_cast<uint64_t>(nb) * 12ULL                   // mlBuf_ (m/l/mnew)
-         + static_cast<uint64_t>(nBlk) * 4ULL;                 // blkBuf_
+    return (static_cast<uint64_t>(nb) + UB_BLK_F32 - 1ULL) / UB_BLK_F32 * UB_BLK_F32;
+}
+// ⚠️ n_blk 的【下限】同样是"一个 UB 块里的 fp32 个数"，且必须是它的整数倍。
+// kernel 的分数矩阵按 [nb][n_blk] 排布，行间距 = n_blk 个 float；P3a 之后每行由
+// `WholeReduceSum` + `Add` 以 32B 块为单位写入，n_blk 不是 8 的倍数时行起点就落在
+// 块中间 -> 与 nb<8 同一类真机 ADDR_MISALIGN。取 SFA_SC_GRP(=16) 恰好同时满足
+// "块对齐"与"一组 token 装得下"。
+constexpr uint32_t NBLK_MIN = SFA_SC_GRP;
+
+// elemSize = DT_QUERY 的字节数（fp16=2 / fp32=4）。K/V/Krope 在 UB 里就是 DT_QUERY，
+// 写死 2 字节会让 fp32 模板实例的 InitBuffer 总量越过物理 UB（code3.md §13.14：
+// nb=32/nBlk=16 时 fp32 实际需要 213696 B > 196608 B）。
+// 每项单独向上对齐 32B —— kernel 的 InitBuffer 也是按块分配的，两边口径必须一致。
+static inline uint64_t UbAlignBuf(uint64_t len)
+{
+    return (len + 31ULL) / 32ULL * 32ULL;
+}
+
+// ⭐ kernel 里 `scGrp_` 的镜像（op_kernel/…cpp 的 Init 段）：一组多少个 token。
+// P13 把"单头单位"的组宽翻倍（SFA_SC_GRP → SFA_SC_GRP_W），代价是 pf/prf 就地省掉。
+// host 的 UB 预算式与调用数模型都从这里取，**两边必须同源**，否则真机越界。
+static inline uint64_t ScGrpOf(uint32_t nb)
+{
+    return (nb == 1U) ? static_cast<uint64_t>(SFA_SC_GRP_W) : static_cast<uint64_t>(SFA_SC_GRP);
+}
+
+static inline uint64_t CalcUbNeed(uint32_t nb, uint32_t nBlk, uint32_t qD, uint32_t dr,
+                                  uint32_t elemSize)
+{
+    const uint64_t e = elemSize;
+    const uint64_t n = nb;
+    const uint64_t k = nBlk;
+    // 与 kernel Init 的 InitBuffer 逐项对应，漏一项就会真机越界
+    return UbAlignBuf(n * (qD + dr) * 4ULL)      // qBuf_ : Q+Qrope 恒 fp32
+         + UbAlignBuf(n * qD * 4ULL)             // oBuf_ : 累加器 fp32
+         + UbAlignBuf(k * qD * e)                // kBuf_
+         + UbAlignBuf(k * qD * e)                // vBuf_
+         + UbAlignBuf(k * dr * e)                // krBuf_
+         + UbAlignBuf(n * k * 4ULL)              // sBuf_
+         + UbAlignBuf(n * k * 4ULL)              // pBuf_
+         + UbAlignBuf(3ULL * HalfElems(nb) * 4ULL)  // mlBuf_ : m/l/mnew，半区各占整块（kernel halfOff_）
+         + 2ULL * UbAlignBuf(HalfElems(nb) * 4ULL)  // lseBuf_ : max/sum 两个半区各自对齐整块
+         // ---- 向量化(P3a/P2/P13) 的 scratch：一组 scGrp 个 token 的 fp32 分块 +
+         //      三条归约工作区，宽度 = max(nb, scGrp)（kernel 的 redW_ 口径，两边必须一致）。
+         //      P13：nb==1 时部分积就地写在 kf/krf 上，pf/prf **不分配**，省下的那份
+         //      换成 2 倍组宽 ⇒ 两边字节数相同，只有 rdBuf_ 因 redW_ 变宽多 192 B。----
+         + UbAlignBuf(ScGrpOf(nb) * qD * 4ULL)                 // kfBuf_
+         + (nb == 1ULL ? 0ULL : UbAlignBuf(ScGrpOf(nb) * qD * 4ULL))   // pfBuf_
+         + UbAlignBuf(ScGrpOf(nb) * dr * 4ULL)                 // krfBuf_
+         + (nb == 1ULL ? 0ULL : UbAlignBuf(ScGrpOf(nb) * dr * 4ULL))   // prfBuf_
+         + 3ULL * UbAlignBuf((n > ScGrpOf(nb) ? n : ScGrpOf(nb)) * 4ULL);
 }
 
 // 反算分块。
-//   ⚠️ 关键修正：不能再要求 nBlk >= sparseBlockSize。
+//   ⚠️ 不能再要求 nBlk >= sparseBlockSize。
 //   sparseBlockSize 合法范围是 [1,128]，而 nBlk=128 时仅 kBuf+vBuf 就要 2*128*512*2
 //   = 262144 B > 整个 UB(196608 B) —— 即"整块读"对 SBS=128 在硬件上不可能成立。
-//   kernel 侧已改成支持"一个 sparse block 跨多个 chunk"（分段 online softmax），
-//   所以这里只需挑一个 UB 装得下的 (nb, nBlk)，不再因 nBlk < sbs 而回退。
+//   kernel 侧支持"一个 sparse block 跨多个 chunk"（分段 online softmax），
+//   所以"一次 flush 覆盖一整块"只是省 flush 的偏好，不是正确性前提：
+//   第一轮按此偏好选，装不下时第二轮放开。
+//
+//   ⭐ P10：nb 不再由"UB 能装多大就多大"决定，而是按【代价模型】选。
+//   kernel 的工作单元是 (query 行, 头块)，单元数 = rows * ceil(Q_N / nb)，
+//   墙钟时间 ∝ ceil(单元数 / coreNum) × 每单元的向量调用条数。
+//   §5.8.3 由探针反推出比赛平台 6 个点只有 4/8/4/16/4/32 行 —— 单元只到"行"这一级
+//   时最多 4~32 个 AIV 在干活，另外的核整个算子期间空转。把头块也摊出去就能填满。
+//   但切分的收益有上限：nb 变小后"每组 token 只做一次的共享搬运/展开"（K 的 Cast、
+//   V 的加宽）被 ceil(Q_N/nb) 个单元各做一遍，每单元调用数随之上升。实测（§15.14）
+//   第一版规则"仍能填满核的最大 nb，填不满就降到 1"在 rows=32 的点上反而慢了 17%
+//   （nb=1 把 32 行切成 128 单元 = 4 波，每单元贵 2.2 倍，而 32 行本来 1 波就跑完）。
+//   所以这里改成对候选 (nb, n_blk) 直接比 ceil(waves) × UnitCalls()，取最小代价；
+//   并列时取较大的 nb（单元少 = 固定开销少、也更省 UB 之外的搬运）。
 //   返回 false 表示连最小分块都装不下 -> 调用方必须安全降级，绝不返回 tiling 错误。
-static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD, uint32_t dr,
-                         uint32_t &nbOut, uint32_t &nBlkOut)
+// 一个工作单元（nb 个头 × n_blk 个 token）处理一个 KV chunk 的【代价】，单位是
+// "等效向量调用条数"。只用于在候选之间比大小，绝对值没有意义（2201 上实测一条向量
+// 指令 ≈ 28.98 + 1.123 × rep 个周期，见 §15.13），所以这里把 rep 摊成常数、只保留随
+// (nb, n_blk) 变化的项。P13 之后按"每组一次 + 每头一次 + 每 token 一次"三段重列：
+//   组数 nG = ⌈n_blk / scGrp(nb)⌉，scGrp 在 nb==1 时是 32（见上面的 ScGrpOf）
+//   K 侧：每组 2 条加宽（K、K-rope）+ 每头每组 20 条
+//                    = 8 条广播乘 + 1 条 rope 乘 + 7 条折行 + 2 条归约 + 1 加 + 1 乘 scale
+//   Q 侧：softmax 的 max/exp/alpha/重缩放 ≈ 4·nb + 2，V 的加宽 nG 条，
+//         PV 每个 (头, token) 一条 Axpy = n_blk·nb      ← 这一项**不能**再摊薄
+//   搬运：+ GATHER_DIV 见下面 GatherCalls 的注释（P13 那一版漏了它，翻车三次）
+static inline uint64_t GatherCalls(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32_t dr,
+                                   uint32_t elemSize)
 {
-    uint32_t bestNb = 1, bestNBlk = 1;
-    uint64_t bestScore = 0;
-    for (size_t i = 0; i < sizeof(NB_CAND) / sizeof(NB_CAND[0]); ++i) {
-        for (size_t j = 0; j < sizeof(NBLK_CAND) / sizeof(NBLK_CAND[0]); ++j) {
-            const uint32_t nb = NB_CAND[i];
-            const uint32_t nBlk = NBLK_CAND[j];
-            if (nb * nBlk < sparseBlockSize) { continue; }  // 保证一次至少覆盖一个块
-            if (CalcUbNeed(nb, nBlk, qD, dr) > ubSafe) { continue; }
-            // 打分：优先更大的 nb（减少 gather 重复），再优先更大 nBlk
-            const uint64_t score = static_cast<uint64_t>(nb) * 100000ULL + nBlk;
-            if (score > bestScore) { bestScore = score; bestNb = nb; bestNBlk = nBlk; }
+    // 每单元每 chunk 要把 K+V+Krope 从 GM 搬进 UB：nb 越小单元越多，同一段 KV 就被
+    // ceil(Q_N/nb) 个核各搬一遍 ⇒ 搬运代价 ∝ n_blk·(2·qD+dr)·elemSize / nb。
+    // P13 第一版没有这一项，host 于是把 p4/p6/big1 全推到 nb=1，实测
+    // 1.196× / 1.394× / 1.247× **变慢**（§15.16）。三个点各自反解系数得
+    // 1.42e-3 / 1.52e-3 / 1.68e-3（跨度 ±10%）⇒ 取 1/660 = 1.515e-3，三档偏差 <7%。
+    // ⚠️ 这是标定不是推导：换 D 或 SBS 量级要重新用实测点验一遍。
+    constexpr uint64_t GATHER_DIV = 660ULL;
+    return nBlk * (2ULL * qD + dr) * elemSize / (2ULL * nb * GATHER_DIV);   // e/2 ⇒ fp16 记 1
+}
+
+static inline uint64_t UnitCalls(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32_t dr,
+                                 uint32_t elemSize)
+{
+    const uint64_t n = nb;
+    const uint64_t k = nBlk;
+    const uint64_t nG = (k + ScGrpOf(nb) - 1ULL) / ScGrpOf(nb);
+    return nG * (2ULL + 20ULL * n) + (2ULL + 4ULL * n + nG + k * n)
+         + GatherCalls(nb, k, qD, dr, elemSize);
+}
+
+// P16：kv_shard=2（把 sparse 列表切成两半分给两个核）这一档【能不能开】。
+// 三条门与 kernel 的 Init 同一口径，任何一条不满足就只能 ks=1：
+//   ① units0*2 <= coreNum —— 切完仍在【一波】内。多出一波等于白切：U 个单元 / C 核是
+//      ceil(U/C) 波 × T，切成 k 份是 ceil(Uk/C) 波 × T/k，只有 Uk<=C 才真的降时间。
+//   ② LSE 元素数 >= 8 且是 8 的整数倍 —— 归并走「整块 8 个 float」的对齐窗口读分片 0
+//      的 (m,l)，窗口起点向下取整到 32B、尾部不越出张量，这两件事只对 8 的整数倍同时成立。
+//   ③ sparse_count >= 2*n_blk —— 每片至少摊得下一个完整 chunk。
+static inline bool Ks2Allowed(uint64_t units0, uint32_t coreNum, uint64_t lseElems,
+                              uint64_t sparseCount, uint64_t nBlk)
+{
+    return units0 >= 1ULL && units0 * 2ULL <= static_cast<uint64_t>(coreNum) &&
+           lseElems >= 8ULL && (lseElems % 8ULL) == 0ULL && sparseCount >= 2ULL * nBlk;
+}
+
+static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD, uint32_t dr,
+                         uint32_t qN, uint32_t elemSize, uint32_t coreNum, uint32_t rows,
+                         uint64_t sparseCount, uint64_t lseElems,
+                         uint32_t &nbOut, uint32_t &nBlkOut, uint32_t &ksOut)
+{
+    constexpr size_t NB_N = sizeof(NB_CAND) / sizeof(NB_CAND[0]);
+    constexpr size_t NBLK_N = sizeof(NBLK_CAND) / sizeof(NBLK_CAND[0]);
+    // nb 超过头数没有意义：kernel 的 nbCur = min(Q_N - n0, nb) 会把它夹回来，
+    // 多出来的 qBuf_/oBuf_/sBuf_ 全是死缓冲。
+    const uint64_t nbCap = (static_cast<uint64_t>(qN) < NB_MIN) ? NB_MIN : qN;
+
+    uint64_t bestCost = 0;
+    uint32_t bestNb = 0, bestBlk = 0, bestKs = 1U;
+    // NB_CAND 从大到小遍历，且只在【严格更优】时替换 -> 并列时代价模型自动保留
+    // 较大的 nb（单元少 = 每单元固定开销少，也更省 UB）。
+    for (size_t i = 0; i < NB_N; ++i) {
+        const uint32_t nb = NB_CAND[i];
+        if (static_cast<uint64_t>(nb) > nbCap) { continue; }
+        const uint64_t units = static_cast<uint64_t>(rows) * ((qN + nb - 1ULL) / nb);
+        const uint64_t waves = (coreNum == 0) ? units : (units + coreNum - 1ULL) / coreNum;
+        // 同一个 nb 下 UnitCalls 对 n_blk 单调增，所以每个 nb 只需它的最优 n_blk：
+        // 第一轮保留"一次 flush 覆盖一整块"的偏好，装不下时第二轮放开。
+        for (uint32_t pass = 0; pass < 2; ++pass) {
+            bool found = false;
+            for (size_t j = 0; j < NBLK_N; ++j) {
+                const uint32_t nBlk = NBLK_CAND[j];
+                if (nBlk < NBLK_MIN) { continue; }
+                // P21：kernel 把"扫满一个 chunk"的段登记进定长暂存（尺寸 SFA_STAGE_MAX），
+                //      一段至少 1 个 token ⇒ n_blk 不能超过它。D=512 下 64/128 这两档本来
+                //      就过不了下面的 UB 预算，这道钳对选档是空操作，只是让 kernel 不需要
+                //      越界分支（口径与 kernel 的 stageBeg_ 同源，见 tiling.h）。
+                if (nBlk > SFA_STAGE_MAX) { continue; }
+                if (pass == 0 && nb * nBlk < sparseBlockSize) { continue; }
+                if (CalcUbNeed(nb, nBlk, qD, dr, elemSize) > ubSafe) { continue; }
+                const uint64_t calls = UnitCalls(nb, nBlk, qD, dr, elemSize);
+                uint64_t cost = waves * calls;
+                uint32_t ks = 1U;
+                // P16：kv_shard=2 也是【一等候选】，不是选完档之后再判的附加开关。
+                //      切完之后每单元的 token 数减半 ⇒ 调用数按 1/2 计，波数按 2*units
+                //      重算，再乘一档归并税（真机批量口径实测 5.7 % ⇒ 取 108/100 留余量）。
+                //      ⚠️ 少了这一档，模型会挑"不切时最便宜"的那一档 nb，而那一档往往
+                //      是切分后最贵的（p4：模型选 nb=2/ks=1 = 0.4905，实测 nb=4/ks=2 =
+                //      0.4252 ⇒ 慢 15 %，见 §15.34）。
+                if (Ks2Allowed(units, coreNum, lseElems, sparseCount, nBlk)) {
+                    const uint64_t units2 = units * 2ULL;
+                    const uint64_t waves2 = (coreNum == 0)
+                        ? units2 : (units2 + coreNum - 1ULL) / coreNum;
+                    const uint64_t cost2 = ((waves2 * calls / 2ULL) * 108ULL) / 100ULL + 1ULL;
+                    if (cost2 < cost) { cost = cost2; ks = 2U; }
+                }
+                // 只在【明显更优】（< 0.85×）时才从较大的 nb 改档：波数项是 ceil 的，
+                // §15.14(d) 实测它的误差带就有 ±25%（units/coreNum=3.2 那档被多算了一整波），
+                // 差距在噪声内时保留大 nb —— 单元少 = 同一份 K 被更少的核重复加宽。
+                if (bestCost == 0 || cost * 20ULL < bestCost * 17ULL) {
+                    bestCost = cost;
+                    bestNb = nb;
+                    bestBlk = nBlk;
+                    bestKs = ks;
+                }
+                found = true;
+                break;
+            }
+            if (found) { break; }
         }
     }
+    if (bestCost == 0) { return false; }
     nbOut = bestNb;
-    nBlkOut = bestNBlk;
-    return bestScore != 0;
+    nBlkOut = bestBlk;
+    ksOut = bestKs;
+    return true;
 }
 
 // 变长长度数组的元素个数：末维大小；探测不到时按 1（= 广播语义，见 SEMANTICS §3）。
@@ -170,6 +331,9 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     (void)mode; (void)amode;
 
     // ---- UB 预算反算分块；失败也必须安全降级，绝不返回 tiling 错误 ----
+    // dtype 必须在算预算之前拿到：K/V/kr 在 UB 里按 DT_QUERY 存，宽度决定预算。
+    const ge::DataType dtype_query = t_query->GetDataType();
+    const uint32_t elemSize = (dtype_query == ge::DT_FLOAT) ? 4u : 2u;
     uint64_t ubSize = UB_DEFAULT_BYTE;
     {
         uint64_t queried = 0;
@@ -177,10 +341,15 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
         if (queried > 0 && queried < (1ULL << 30)) { ubSize = queried; }
     }
     const uint64_t ubSafe = (ubSize / 100ULL) * UB_SAFE_PCT;
-    uint32_t nb = 1, nBlk = 1;
-    if (!CalcBlocking(static_cast<uint32_t>(sbs), ubSafe, Q_D, Dr, nb, nBlk)) {
-        nb = 1;      // 降级：取全表最省 UB 的合法组合，只保证能跑通、不报错
-        nBlk = 1;
+    uint32_t nb = NB_MIN, nBlk = NBLK_MIN, kvShard = 1U;
+    if (!CalcBlocking(static_cast<uint32_t>(sbs), ubSafe, Q_D, Dr, Q_N, elemSize,
+                      static_cast<uint32_t>(num_cores_aiv), B * Q_S,
+                      static_cast<uint64_t>(sparse_count),
+                      static_cast<uint64_t>(B) * static_cast<uint64_t>(Q_S) * Q_N,
+                      nb, nBlk, kvShard)) {
+        nb = NB_MIN;   // 降级：取全表最省 UB 的合法组合，只保证能跑通、不报错
+        nBlk = NBLK_MIN;
+        kvShard = 1U;  // 降级路径不赌并行度，退回与参考实现逐位一致的那条路
     }
 
     SparseFlashAttentionTilingData *tiling = context->GetTilingData<SparseFlashAttentionTilingData>();
@@ -204,14 +373,39 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     tiling->actual_q_len_size = asq_size;
     tiling->actual_kv_len_size = ask_size;
 
-    // tiling key：按 dtype 选择 DT_QUERY
-    const ge::DataType dtype_query = t_query->GetDataType();
+    // tiling key：按 dtype 选择 DT_QUERY（dtype_query / elemSize 已在 UB 预算处取到）
     uint32_t DT_QUERY = (dtype_query == ge::DT_FLOAT) ? C_DT_FLOAT : C_DT_FLOAT16;
-    tiling->is_bf16 = (dtype_query == ge::DT_BF16) ? 1u : 0u;
 
     ASCENDC_TPL_SEL_PARAM(context, DT_QUERY);
 
-    context->SetBlockDim(static_cast<uint32_t>(num_cores_aiv));
+    // P14：块数收缩到"真正有活的块数"。空闲块的启动不是免费的：真机 p1（16 个工作
+    //      单元）从 40 块改成 16 块，批量口径 295.6 → 292.2 µs（−1.2%，同一构建内
+    //      min/max 只差 0.1 µs，不是噪声）；其余用例只降不升（code3.md §15.17）。
+    //      ⚠️ 这里的单元数必须与 kernel `Process()` 的 total 同一口径，算少了会有单元没人做。
+    //
+    // P11v2：再往下的话，"单元"这一档的并行度在 rows×Q_N 用完后就没有了，于是把
+    //      **sparse 列表**也切成两半分给两个核（kernel 的 kv_shard）。归并走本算子自己的
+    //      输出张量 + 一次 SyncAll，不需要 workspace（§15.32 实测：跨核只有批量
+    //      DataCopy 这条通道是全通的，标量 SetValue/GetValue 不行）。
+    //      开启条件那三条（一波内 / LSE 是 8 的整数倍 / 每片装得下一个 chunk）写在
+    //      Ks2Allowed 里，推导见 §15.33(a)(b)。
+    // P16：kv_shard 不再在这里"事后补一刀"，而是和 (nb, n_blk) 一起在 CalcBlocking 里
+    //      比出来的 —— 因为这两档**互相改答案**：不切时最便宜的 nb，切了之后可能最贵。
+    //      实测（真机批量口径，同一构建，code3.md §15.34）：p4 老选择 nb=2/ks=1 =
+    //      0.4905 ms，而 nb=4/ks=2 = 0.4252 ms ⇒ 模型看不见 ks 这一档时白慢 15 %。
+    //      ⚠️ 这里不检查 LSE 输出指针：比赛平台若不返回 LSE，kernel 的 lseOn_ 兜底会把
+    //         kv_shard 当 1 用（多启动的那一半块直接空转），结果与不切分逐位相同。
+    {
+        const uint32_t nHeadBlk = (Q_N + nb - 1U) / nb;
+        const uint64_t units = static_cast<uint64_t>(B) * static_cast<uint64_t>(Q_S) *
+                               nHeadBlk * kvShard;
+        const uint32_t coreNum = static_cast<uint32_t>(num_cores_aiv);
+        uint32_t blockDim = (units < static_cast<uint64_t>(coreNum)) ? static_cast<uint32_t>(units)
+                                                                     : coreNum;
+        if (blockDim == 0u) { blockDim = 1u; }   // 空张量也要能启动，0 块非法
+        context->SetBlockDim(blockDim);
+    }
+    tiling->kv_shard = kvShard;
     size_t *currentWorkspace = context->GetWorkspaceSizes(1);
     if (currentWorkspace != nullptr) { currentWorkspace[0] = 0; }
     return ge::GRAPH_SUCCESS;

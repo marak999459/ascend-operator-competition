@@ -1,0 +1,76 @@
+// Tiling结构体定义的头文件
+//
+// ⚠️ 相对题目原始骨架的扩展（原骨架只有 7 个字段）：
+//    新增 sparseBlockSize / sparseCount / nb / nBlk 四个字段。
+//    原因：原骨架没有传递 sparseBlockSize（题面必选属性！）与分块尺寸，
+//    kernel 无法工作。这四个值必须由 host 计算下发。
+//    这属于"必须做的扩展"，不是随意改动 —— 原骨架本身不足以实现本题。
+#pragma once
+
+#include <cstdint>
+
+// 分数向量化的 token 组大小。kernel 的 scratch 尺寸与 host 的 UB 预算式必须同源，
+// 所以放在两边共享的头里，不要各自写死。
+// 取 16 的依据（code3.md §15.12/§15.13）：一条向量调用的固定开销 ≈29 cycle，
+// 一组越宽，同样的 fold/reduce 调用摊到的点积越多 —— GRP 8→16 使 big1 0.967→0.829 ms。
+// ⚠️ 它是 UB 预算式里的乘数：kfBuf_/pfBuf_/krfBuf_/prfBuf_ 四项合计
+//    2*GRP*(Q_D+Dr)*4 字节（Q_D=512、Dr=64 时 = 73728 B，占整块 UB 的 37%）。
+//    再往上调之前先复核 §15.13 记的余量（选中分块下仅剩 ~6 KB）。
+// ⚠️ kernel 侧 rdBuf_ 的切片宽度是 max(nb, GRP)（一次批量 reduce 出 GRP 行行和），
+//    host 预算式用同一口径 —— 改这里两边会自动一致，只改一边会越界。
+constexpr uint32_t SFA_SC_GRP = 16;
+
+// P13：**只有一个头**的单位（nb==1）里，K 的 fp32 展开 kf 在一组内只被读一次
+// （头循环只有 1 轮）⇒ 广播乘可以**就地**写在 kf 上，pf/prf 两块 scratch 直接省掉，
+// 于是同一份 UB 预算能装下 2 倍宽的组。组宽 16→32 ⇒ 每 chunk 的 fold/mul/reduce
+// 调用条数不变、但**每组一次**的那 22 条只剩一半（code3.md §15.16）。
+// ⚠️ 仅对 nb==1 生效：nb>1 时 kf 要被 nbCur 个头各读一次，就地写会把后面的头读脏。
+constexpr uint32_t SFA_SC_GRP_W = 32;
+
+// P11：一个单元最多摊给多少个核（host 的选档上界、kernel 的越界保护、以及归并阶段
+// 借用 sBuf_ 当因子暂存时能装下的 ks×nb 上限，三方共用这一个常数）。
+constexpr uint32_t SFA_KS_MAX = 8u;
+
+struct SparseFlashAttentionTilingData {
+    // ---- 原骨架字段（保持顺序不变）----
+    uint32_t B;
+    uint32_t Q_S;
+    uint32_t KV_S;
+    uint32_t Q_N;
+    uint32_t Q_D;
+    uint32_t Dr;
+    uint32_t sparse_size;
+    float    scale_value;
+    uint32_t sparse_mode;
+    uint32_t batch_per_core;
+
+    // ---- 新增字段（本题实现必需）----
+    uint32_t sparse_block_size;   // 题面必选属性 sparseBlockSize
+    uint32_t sparse_count;        // sparse_indices 末维（官方固定 2048）
+    uint32_t nb;                  // 每次处理多少个 query 头（UB 分块）
+    uint32_t n_blk;               // 每个 KV chunk 容纳的 token 数（UB 分块）
+    uint32_t attention_mode;      // 题面必选属性（仅支持 2）
+    uint32_t total_tokens;        // B * Q_S，用于核间切分
+
+    // ---- 变长（官方 BSND 语义：per-batch arr[b]；长度为 1 时广播 arr[0]）----
+    uint32_t actual_q_len_size;   // actual_seq_lengths_query 元素个数（0=未传）
+    uint32_t actual_kv_len_size;  // actual_seq_lengths_kv  元素个数（0=未传）
+
+    // ---- P11：沿 KV 轴再切一层核 ----
+    // ksplit = 每个工作单元摊给多少个核（1 = 不切）。切了之后各核只处理"块序号 %
+    // ksplit == 自己的分片号"的那些 sparse block，把部分量 (O, m, l) 写进 workspace
+    // 槽位，SyncAll 之后由归并阶段合并 —— 依据与代价见 code3.md §15.18。
+    // ⚠️ 只有 `单元数 × ksplit ≤ AIV 核数` 时才允许切：两阶段之间那道 barrier 要求
+    //    每个核调用 SyncAll 的次数相同，多一波就会死锁（题2 的教训）。
+    uint32_t ksplit;
+};
+
+// P11 的 workspace 槽位布局。**host 出尺寸、kernel 定地址，只能有一份**，
+// 所以放在两边共享的头里（口径同上面的 SFA_SC_GRP）。
+// 每槽 = nb 行 × Q_D 个 fp32 累加器 + 一个 (m,l) 对（半区各占整块，同 kernel halfOff_）。
+constexpr inline uint64_t SfaHalfElems(uint64_t nb) { return (nb + 7ULL) / 8ULL * 8ULL; }
+constexpr inline uint64_t SfaSlotFloats(uint64_t nb, uint64_t qD)
+{
+    return nb * qD + 2ULL * SfaHalfElems(nb);
+}
+

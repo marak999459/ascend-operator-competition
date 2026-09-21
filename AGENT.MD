@@ -23,6 +23,7 @@
 | [refs/README.md](refs/README.md) | 要**跑真机回归**、或想知道 `refs/` 里有什么时 |
 | [refs/sfa/sfa_ref.py](refs/sfa/sfa_ref.py) | 需要**第三题参考实现 / 重新生成用例**时 |
 | [refs/harness_sinkhorn/](refs/harness_sinkhorn) | 需要**第二题测试脚手架**时 |
+| `ops-transformer-master/` | ⭐ 需要**官方开源对标实现 / 性能手法**时（CANN 官方算子库，三题的开源参考池）。**只读参考，不是提交源**；逐题可用性见各 `codeN.md §10`，合规条款见 `code1.md §10.0` |
 
 > 📌 **分工**：`算子开发工作流.md` 讲"**怎么做**"，`codeN.md` 讲"**这题现在到哪了、什么已被排除、下一步要什么证据**"。
 > `codeN.md` 随题目推进**持续更新**；根目录通用文档很少改动。
@@ -33,9 +34,11 @@
 ## 2. ⛔ 硬约束
 
 0. **统一术语（用户 2026-09-20 规定，全仓库文档一律照此称呼）**：
-   - **仿真机** = CPU 仿真环境；两个具体环境分别叫 **本地仿真机**（VMware VM）与 **云端仿真机**（云 devenv 容器）
+   - **仿真机** = CPU 仿真环境 = **云端仿真机**（云 devenv 容器）。⚠️ 2026-09-20 起**仿真一律在云端跑**：本地 VMware 那台不再承担仿真，改叫**通道机**（见下）
+   - **通道机** = 本地 VMware Ubuntu VM，专职两件事：**第二账号的 devspace 登录位**（homedir 隔离，见 `连接信息.md` §2.3）+ **第二工位 Qoder**
    - **真机** = NPU 环境（910B3，SSH 隧道进入）
    - **比赛平台** = 代码提交/评测网站（CANNJudge）；旧文档中的"网站 / 比赛网站 / 提交平台"均指此
+   - 🕘 **历史行文**：`code1.md` / `code3.md` / `README.md` 里出现的"本地仿真机"指的是那台 VMware VM 当年跑过的仿真，**不回改**；从现在起要跑仿真请按"云端仿真机"理解（口径：用户 2026-09-20 决定仿真全部上云）
 1. **三道题严格分家**，绝不跨界：
    - 第一题 `mhc_expand` → 提交代码在 `code1/`
    - 第二题 `mhc_sinkhorn` → `code2/`
@@ -48,6 +51,7 @@
 4. **不要自动改代码**：Agent 只负责提交与报告，改代码由用户决定。
 5. **不要连续提交**：每次提交后等用户确认；每次提交前先 `--dry-run`。
 6. **密钥与私钥路径不写死在文档里**，一律引用 `连接信息.md` 的相对路径。
+7. **git 主干在 Windows**（用户 2026-09-20 定）：提交/推送只在这台机器上做；**通道机（VM）里的那份是只读工位副本**，只 pull 不 push（VM 侧 `origin` 的 push URL 已被停用，恢复方法见 `连接信息.md` §2.3）。多路会话并行改文档时仍按"只 add 自己那摊"。
 
 ---
 
@@ -68,6 +72,9 @@
 ├─ devspace_tunnel.ps1       ← ⭐ 隧道自举 + 派活闸门：-Role cpu|npu / -Env <短名> / -List / -Diag / -Watch；环境表 = 顶部 $EnvTable
 │                                 角色表与环境状态见 连接信息.md §2
 ├─ official_problem_statement.md   ← ⭐ 三题官方题面全文（权威口径）
+├─ ops-transformer-master/   ← ⭐ CANN 官方**开源**算子库（三题的开源参考池，**只读、非提交源**）
+│                               逐题可用性见各 `codeN.md §10`；合规条款见 `code1.md §10.0`
+│                               ⚠️ **不入库**（已 gitignore）：clone 本仓库后需自行拉 `gitcode.com/cann/ops-transformer`；本地这份 = v9.2.0，文档里的行号会随版本漂移，查不到就 grep 符号名
 └─ refs/                     ← 可跑的引用材料（不是提交代码）
    ├─ README.md              ← ⭐ refs 说明 + 用法 + 重建告诫
    ├─ sfa/                   ← 第三题：参考实现 + 真机回归用例 + 诊断脚本
@@ -78,8 +85,9 @@
                                 ⭐ mhc_sinkhorn_scalar.cpp、sinkhorn_ref.py、run.sh
 ```
 
-> ⚠️ `refs/` 与 `official_problem_statement.md` 是**参考资料**，不参与构建、**不是提交源**。
+> ⚠️ `refs/`、`official_problem_statement.md` 与 `ops-transformer-master/` 是**参考资料**，不参与构建、**不是提交源**。
 > 提交源只在 `code1/`、`code2/`、`code 3/code/`。
+> `ops-transformer-master/` 受 **CANN OSL v2.0** 约束（开源、可参考可改，**不得移除版权头**）；**参考为主、不整段照抄**，只借部分细节（用户 2026-09-20 定调）。
 
 ### 3.1 ⚠️ 目录归属提醒
 
@@ -98,6 +106,8 @@
 ## 4. 构建产物噪音
 
 `build/`、`build_out/`、`__pycache__/` 等目录下有大量构建产物，会让 `glob` / 搜索很吵 —— 搜索时**主动排除**这些目录。
+
+`ops-transformer-master/` 同理：它是**上万文件的外部开源库**，搜"本题实现在哪"时**必须排除**，否则会淹掉 `code1/`、`code2/`、`code 3/` 的命中。只有**明确要查开源对标实现**时才定向进它（入口见各 `codeN.md §10`，别从头 grep）。
 
 ---
 
