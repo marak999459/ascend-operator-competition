@@ -1,0 +1,15 @@
+B1 p1     2/32/2   | kex_exchange_identification: Connection closed by remote host Connection closed by UNKNOWN port 65535 
+B1 p2     2/32/2   | SFA_PICK nb=2 nblk=32 ks=2 平均 0.2366 ms 超差 0/8192 超差 0/16 超差 0/16 平均 0.2699 ms 
+B1 q1h    2/32/2   | SFA_PICK nb=2 nblk=32 ks=2 平均 0.1236 ms 超差 0/8192 超差 0/16 超差 0/16 平均 0.1535 ms 
+B1 q2h    2/32/2   | SFA_PICK nb=2 nblk=32 ks=2 平均 0.2131 ms 超差 0/8192 超差 0/16 超差 0/16 平均 0.2414 ms 
+B1 p4     4/32/2   | SFA_PICK nb=4 nblk=32 ks=2 平均 0.4047 ms 超差 0/32768 超差 0/64 超差 0/64 平均 0.4330 ms 
+B1 p6     4/32/1   | SFA_PICK nb=4 nblk=32 ks=1 平均 0.7881 ms 超差 0/65536 超差 0/128 超差 0/128 平均 0.8161 ms 
+B1 big1   8/32/1   | SFA_PICK nb=8 nblk=32 ks=1 平均 0.7200 ms 超差 0/524288 超差 0/1024 超差 0/1024 平均 0.7453 ms 
+B2 big1   8/32/1   | SFA_PICK nb=8 nblk=32 ks=1 平均 0.7191 ms 超差 0/524288 超差 0/1024 超差 0/1024 平均 0.7440 ms 
+B2 p6     4/32/1   | SFA_PICK nb=4 nblk=32 ks=1 平均 0.7881 ms 超差 0/65536 超差 0/128 超差 0/128 平均 0.8149 ms 
+B2 p4     4/32/2   | SFA_PICK nb=4 nblk=32 ks=2 平均 0.4050 ms 超差 0/32768 超差 0/64 超差 0/64 平均 0.4337 ms 
+B2 q2h    2/32/2   | SFA_PICK nb=2 nblk=32 ks=2 平均 0.2130 ms 超差 0/8192 超差 0/16 超差 0/16 平均 0.2397 ms 
+B2 q1h    2/32/2   | SFA_PICK nb=2 nblk=32 ks=2 平均 0.1236 ms 超差 0/8192 超差 0/16 超差 0/16 平均 0.1510 ms 
+B2 p2     2/32/2   | SFA_PICK nb=2 nblk=32 ks=2 平均 0.2367 ms 超差 0/8192 超差 0/16 超差 0/16 平均 0.2662 ms 
+B2 p1     2/32/2   | SFA_PICK nb=2 nblk=32 ks=2 平均 0.2368 ms 超差 0/8192 超差 0/16 超差 0/16 平均 0.2686 ms 
+P32_BASE_DONE

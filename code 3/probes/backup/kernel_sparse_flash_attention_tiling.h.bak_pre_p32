@@ -17,17 +17,15 @@
 
 // P21：一个 chunk 的 gather **段数**上限 = kernel 里"扫描前置"那块定长暂存数组的尺寸。
 // host 的 n_blk 候选因此钳在 <= 它：一段至少贡献 1 个 token，所以 n_blk 个 token 最多
-// n_blk 段。⇒ 这一钳就是"最大 chunk"的上限，真正的-binding 项是 host 的 UB 预算式。
-//   P29 时代每多一个 token 要 512×2(K) + 512×2(V) + 64×2(kr) + 512×4(kf 组宽=整个
-//   chunk，P24 起) + 64×4 ≈ 4.4 KB，加上 q/o/s/p/ml/lse/rd 的固定项，`nb==1` 档塞到
-//   **40** 个 token（184,512 B / ubSafe 186,485 B）就到顶，`nb>=2` 档 32 就是上限。
-// P32 让 V 复用 kb 自己那块（见 kernel Init 与 §15.53）⇒ 每 token 少 512×2 = 1 KB，
-//   `nb==1/2` 到 48 都还留有余地，`nb==4` 也刚好挤进（185,568 B，余 917 B）；
-//   `nb==8` 与 k=56 仍然装不下，所以 48 就是这一钳的新上限。
-// P29 抬到 40 的实测口径见 code3.md §15.49；P32 抬到 48 的实测见 §15.53。
+// n_blk 段。⇒ 这一钳就是"最大 chunk"的上限，真正的-binding 项是 host 的 UB 预算式：
+//   D=512/fp16 下每多一个 token 要 512×2(K) + 512×2(V) + 64×2(kr) + 512×4(kf 组宽=整个
+//   chunk，P24 起) + 64×4 ≈ 4.4 KB，加上 q/o/s/p/ml/lse/rd 的固定项，`nb==1` 档能塞到
+//   **40** 个 token（184 KB / ubSafe 186 KB），`nb>=2` 档 32 就是上限。
+// P29 把这一钳从 32 抬到 40，让 `nb==1`（平台 C1/C2/C3 那一档）能吃下多 25 % 的 chunk：
+//   每 chunk 的"每头一轮"固定项按 1/n_blk 摊薄，实测口径见 code3.md §15.49。
 // ⚠️ 必须是 8（一个 UB 块的 fp32 个数）的整数倍：分数矩阵行间距 = n_blk 个 float，
 //    否则行起点落在块中间 -> 真机 ADDR_MISALIGN（与 nb<8 同一类，见 host 的 NBLK_MIN 注释）。
-constexpr uint32_t SFA_STAGE_MAX = 48;
+constexpr uint32_t SFA_STAGE_MAX = 40;
 
 struct SparseFlashAttentionTilingData {
     // ---- 原骨架字段（保持顺序不变）----

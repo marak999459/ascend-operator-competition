@@ -186,11 +186,7 @@ public:
         pipe_.InitBuffer(qBuf_,   sfa::UbAlignBuf(nb_   * (D_ + Dr_) * sizeof(float)));
         pipe_.InitBuffer(oBuf_,   sfa::UbAlignBuf(nb_   * D_  * sizeof(float)));
         pipe_.InitBuffer(kBuf_,   sfa::UbAlignBuf(nBlk_ * D_  * sizeof(DT_QUERY)));
-        // P32：**不再有独立的 vBuf_**。V 只在 SoftmaxPv 里被读，而那时 kb 已经读完
-        //   （ComputeScores 的最后一加宽就是它对 kb 的最后一次读）⇒ 让 V 落在 kb 自己
-        //   那块 n_blk×D×2 字节上（同 DT_QUERY、同 32B 对齐口径，尺寸逐字节相同），
-        //   代价是每 chunk 多一次"V 排空 + MTE2 旗标对"，换来的是 host 预算里省掉
-        //   align(n_blk×D×2) ⇒ nb≥2 的臂第一次装得下 n_blk=48。见 code3.md §15.53。
+        pipe_.InitBuffer(vBuf_,   sfa::UbAlignBuf(nBlk_ * D_  * sizeof(DT_QUERY)));
         pipe_.InitBuffer(krBuf_,  sfa::UbAlignBuf(nBlk_ * Dr_ * sizeof(DT_QUERY)));
         pipe_.InitBuffer(sBuf_,   sfa::UbAlignBuf(nb_   * nBlk_ * sizeof(float)));
         pipe_.InitBuffer(pBuf_,   sfa::UbAlignBuf(nb_   * nBlk_ * sizeof(float)));
@@ -434,6 +430,7 @@ private:
         LocalTensor<float> q  = qBuf_.Get<float>();
         LocalTensor<float> o  = oBuf_.Get<float>();
         LocalTensor<DT_QUERY> kb = kBuf_.Get<DT_QUERY>();
+        LocalTensor<DT_QUERY> vb = vBuf_.Get<DT_QUERY>();
         LocalTensor<DT_QUERY> kr = krBuf_.Get<DT_QUERY>();
         LocalTensor<float> sc = sBuf_.Get<float>();
         LocalTensor<float> ml = mlBuf_.Get<float>();
@@ -474,8 +471,6 @@ private:
         int64_t curBegin = 0, curEnd = 0;
         bool hasBlock = false;
         uint32_t pend = 0;       // UB 里"已搬好、还没发 flush"的 token 数（P21 的流水深度 = 1 chunk）
-        uint32_t pendRuns = 0;   // 那批 token 由几段连续区间拼成（P32：V 的搬运要用同一张表）
-        const int64_t rowBase = static_cast<int64_t>(b) * S2_;   // KV 在 GM 里的行基址（batch 维）
 
         // ⚠️ 必须支持"一个 sparse block 跨越多个 chunk"（sparseBlockSize 最大 128，
         //    而 UB 只能放下 n_blk 个 token；nBlk_ < sbs_ 时旧写法会越界/错算）。
@@ -496,7 +491,7 @@ private:
             //    扫描 / 搬运 / 计算三段实测完全串行（§15.38(c) 那 98~103 % 的可加性就是它），
             //    每单元 1024 次标量读 = 39.5 µs 整个摊在墙钟上（§15.39 的地板拆解）。
             if (pend > 0u) {
-                FlushChunk(q, o, kb, kr, sc, ml, nbCur, pend, rowBase, pendRuns);
+                FlushChunk(q, o, kb, vb, kr, sc, ml, nbCur, pend);
                 pend = 0u;
             }
             // 2) 扫满一个 chunk：只把 (token 起点, 长度) 登记进定长暂存，不碰 UB、不碰管道。
@@ -522,8 +517,6 @@ private:
             // 3) 整批搬运。第一条 CopyGm2Ub 的隐式全管道等待等的是 1) 那条 flush，而它
             //    已经把 2) 的扫描挡在身后 ⇒ 每 chunk 的墙钟从"扫描+计算+搬运"变成
             //    "max(扫描, 计算)+搬运"。搬运次序、chunk 边界、flush 次数与老写法逐位相同。
-            //    P32：这里只搬 K 与 K_rope，V 延后到 FlushChunk 里、ComputeScores 之后
-            //    搬进 kb 自己那块（同尺寸、同 dtype）⇒ host 预算少一项 align(n_blk×D×2)。
             uint32_t done = 0u;
             for (uint32_t j = 0u; j < nRun; ++j) {
                 const int64_t beg = static_cast<int64_t>(stageBeg_[j]);
@@ -531,13 +524,13 @@ private:
                 const int64_t kOff = (static_cast<int64_t>(b) * S2_ + beg) * D_;
                 const int64_t rOff = (static_cast<int64_t>(b) * S2_ + beg) * Dr_;
                 CopyGm2Ub(kb[done * D_],  kGm_[kOff],  run * D_);
+                CopyGm2Ub(vb[done * D_],  vGm_[kOff],  run * D_);
                 CopyGm2Ub(kr[done * Dr_], krGm_[rOff], run * Dr_);
                 done += run;
             }
             pend = cnt;
-            pendRuns = nRun;
         }
-        if (pend > 0u) { FlushChunk(q, o, kb, kr, sc, ml, nbCur, pend, rowBase, pendRuns); }
+        if (pend > 0u) { FlushChunk(q, o, kb, vb, kr, sc, ml, nbCur, pend); }
 
         // 归一化 + 写回：Muls(1/l) -> Cast 暂存 -> 整批 DataCopy（P5b）
         // ⚠️ 只有分片 0 发布：它写下的就是 MergeToken 要读回的"已发布半行"。分片 1 的
@@ -935,16 +928,15 @@ private:
         }
     }
 
-    /** 处理一个 KV chunk：score -> (V 补搬) -> 在线 softmax 更新 (m, l, O) */
+    /** 处理一个 KV chunk：score -> 在线 softmax 更新 (m, l, O) */
     __aicore__ inline void FlushChunk(LocalTensor<float> &q, LocalTensor<float> &o,
-                                      LocalTensor<DT_QUERY> &kb,
+                                      LocalTensor<DT_QUERY> &kb, LocalTensor<DT_QUERY> &vb,
                                       LocalTensor<DT_QUERY> &kr, LocalTensor<float> &sc,
-                                      LocalTensor<float> &ml, uint32_t nbCur, uint32_t m,
-                                      int64_t rowBase, uint32_t nRun)
+                                      LocalTensor<float> &ml, uint32_t nbCur, uint32_t m)
     {
         // ⚠️ 跨流水线同步（CANN 9.0.0 / arch2201 不插自动同步，实测反汇编里
         //    没有任何 set_flag/wait_flag）：
-        //   MTE2 -> V：本 chunk 的 kb/kr 是刚由 DataCopy 搬进来的，V 读之前
+        //   MTE2 -> V：本 chunk 的 kb/vb/kr 是刚由 DataCopy 搬进来的，V 读之前
         //     必须等 MTE2 队列走到这个标记点。
         //   V -> MTE2：调用方下一次 DataCopy 会覆盖同一块 UB，必须先等本函数的
         //     V 读完。
@@ -954,23 +946,7 @@ private:
         WaitFlag<HardEvent::MTE2_V>(0);
         // 1) score = (q·k + q_rope·k_rope) * scale   —— 向量化（P3a）
         ComputeScores(q, kb, kr, sc, nbCur, m);
-        // 2) V 进 kb 自己的块（P32）。id=1 那一对是给这次复用用的：
-        //    V_MTE2 保证 ComputeScores 发给 kb 的最后一次加宽已经退休，MTE2 才准写；
-        //    MTE2_V 保证 V 搬完，SoftmaxPv 才准读。两条都是"紧挨着"，与另两对同构。
-        SetFlag<HardEvent::V_MTE2>(1);
-        WaitFlag<HardEvent::V_MTE2>(1);
-        LocalTensor<DT_QUERY> vb = kBuf_.Get<DT_QUERY>();
-        {
-            uint32_t done = 0u;
-            for (uint32_t j = 0u; j < nRun; ++j) {
-                const uint32_t run = stageLen_[j];
-                CopyGm2Ub(vb[done * D_], vGm_[(rowBase + stageBeg_[j]) * D_], run * D_);
-                done += run;
-            }
-        }
-        SetFlag<HardEvent::MTE2_V>(1);
-        WaitFlag<HardEvent::MTE2_V>(1);
-        // 3) 行最大 + 在线 softmax + PV 累加 —— 向量化（P2）
+        // 2) 行最大 + 在线 softmax + PV 累加 —— 向量化（P2）
         SoftmaxPv(o, vb, sc, ml, nbCur, m);
         SetFlag<HardEvent::V_MTE2>(0);
         WaitFlag<HardEvent::V_MTE2>(0);
@@ -1076,7 +1052,7 @@ private:
     }
 
     TPipe pipe_;
-    TBuf<TPosition::VECCALC> qBuf_, oBuf_, kBuf_, krBuf_, sBuf_, pBuf_, mlBuf_, lseBuf_;
+    TBuf<TPosition::VECCALC> qBuf_, oBuf_, kBuf_, vBuf_, krBuf_, sBuf_, pBuf_, mlBuf_, lseBuf_;
     TBuf<TPosition::VECCALC> kfBuf_, krfBuf_, rdBuf_;
     GlobalTensor<DT_QUERY> qGm_, kGm_, vGm_, qrGm_, krGm_, outGm_;
     GlobalTensor<int32_t> idxGm_;

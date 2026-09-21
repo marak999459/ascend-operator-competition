@@ -34,7 +34,7 @@ constexpr uint64_t UB_SAFE_PCT     = 95ULL;
 
 // 头分块候选（从大到小取第一个能装下的）
 constexpr uint32_t NB_CAND[] = {32, 16, 8, 4, 2, 1};
-constexpr uint32_t NBLK_CAND[] = {128, 64, 48, 40, 32, 16, 8, 4, 2, 1};
+constexpr uint32_t NBLK_CAND[] = {128, 64, 40, 32, 16, 8, 4, 2, 1};
 // UB 一个块 = 256 bit = 32 B；host 预算与 kernel InitBuffer 都按它向上取整。
 constexpr uint64_t UB_BLK = 32ULL;
 // ⚠️ nb 原先有 8 的下限（NB_MIN）：kernel 把 LSE 的 sum 半区放在 UB 偏移 nb 个 float 处，
@@ -82,12 +82,10 @@ static inline uint64_t CalcUbNeed(uint32_t nb, uint64_t nBlk, uint32_t qD, uint3
     const uint64_t n = nb;
     const uint64_t k = nBlk;
     // 与 kernel Init 的 InitBuffer 逐项对应，漏一项就会真机越界
-    // P32：kernel 不再有 vBuf_ —— V 在 ComputeScores 之后才由 MTE2 搬进 kBuf_ 自己那块
-    //      （同 dtype、同 size、同对齐口径），所以这里少一项 align(n_blk*D*e)。
-    //      省下的 40,960 B(n_blk=40) 正好让 n_blk=48 在 nb=1/2/4 上第一次过门。
     return UbAlignBuf(n * (qD + dr) * 4ULL)      // qBuf_ : Q+Qrope 恒 fp32
          + UbAlignBuf(n * qD * 4ULL)             // oBuf_ : 累加器 fp32
-         + UbAlignBuf(k * qD * e)                // kBuf_（V 复用它，见上）
+         + UbAlignBuf(k * qD * e)                // kBuf_
+         + UbAlignBuf(k * qD * e)                // vBuf_
          + UbAlignBuf(k * dr * e)                // krBuf_
          + UbAlignBuf(n * k * 4ULL)              // sBuf_
          + UbAlignBuf(n * k * 4ULL)              // pBuf_
@@ -203,10 +201,9 @@ static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD,
                 const uint32_t nBlk = NBLK_CAND[j];
                 if (nBlk < NBLK_MIN) { continue; }
                 // P21：kernel 把"扫满一个 chunk"的段登记进定长暂存（尺寸 SFA_STAGE_MAX），
-                //      一段至少 1 个 token ⇒ n_blk 不能超过它。P32 之前这道钳对选档是空操作
-                //      （D=512 下 64/128 两档本来就过不了下面的 UB 预算）；P32 省下 vBuf_ 后
-                //      48 变成了"预算装得下、暂存数组装不下"的第一档，所以这道钳现在是
-                //      binding 的（口径与 kernel 的 stageBeg_ 同源，见 tiling.h）。
+                //      一段至少 1 个 token ⇒ n_blk 不能超过它。D=512 下 64/128 这两档本来
+                //      就过不了下面的 UB 预算，这道钳对选档是空操作，只是让 kernel 不需要
+                //      越界分支（口径与 kernel 的 stageBeg_ 同源，见 tiling.h）。
                 if (nBlk > SFA_STAGE_MAX) { continue; }
                 if (pass == 0 && nb * nBlk < sparseBlockSize) { continue; }
                 if (CalcUbNeed(nb, nBlk, qD, dr, elemSize) > ubSafe) { continue; }

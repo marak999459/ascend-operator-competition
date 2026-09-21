@@ -2,7 +2,13 @@
 # -*- coding: utf-8 -*-
 """代价模型的离线复验：把 host 的 CalcBlocking 在 Python 里逐行复刻，
 用 /tmp/grid_P21.txt、/tmp/grid_P24.txt 的**实测 64 格**当判据，
-比较不同 waves/迟滞口径的"选档后悔值"。只在本地跑，不上真机。"""
+比较不同 waves/迟滞口径的"选档后悔值"。只在本地跑，不上真机。
+
+⚠️ **只有 `ub_need()` 可信**（它与 host 的 `CalcUbNeed` 逐项同源，改 host 必须同步）。
+   `pick()` 的 **nb 列已判定不可信**（§15.53(5)：它没复刻 host 两轮 `pass` 与迟滞的实际
+   执行顺序，会漏掉 k=40/48 这类可行格 ⇒ 曾把 P29 的 p1 自选档误报成 `2/32/2`，
+   真机实测是 `1/40/2`）。要基准就用真机自选档，别引用这里的 `pick()`。
+"""
 import re, sys, math
 
 UB = 196352
@@ -11,9 +17,9 @@ CORES = 40
 UB_BLK = 32
 UB_BLK_F32 = UB_BLK // 4
 NB_CAND = [32, 16, 8, 4, 2, 1]
-NBLK_CAND = [128, 64, 40, 32, 16, 8, 4, 2, 1]  # P29 起与 host 同源：改 host 必须同步这里与 STAGE_MAX
+NBLK_CAND = [128, 64, 48, 40, 32, 16, 8, 4, 2, 1]  # P29 起与 host 同源：改 host 必须同步这里与 STAGE_MAX
 NBLK_MIN = 16
-STAGE_MAX = 40
+STAGE_MAX = 48   # P32：V 复用 kBuf_ 之后 48 第一次过 UB 预算（§15.53(3)）
 RED_MIN_W = 2 * UB_BLK_F32
 GATHER_DIV = 660
 WIDEN_DIV = 64 * 36000
@@ -33,8 +39,10 @@ def redw(nb, k):
 
 
 def ub_need(nb, k, qD, dr, e):
+    # P32：V 复用 kBuf_（同一份 align(k*qD*e)），所以这里只有一项 —— 与 host 的
+    #      CalcUbNeed 逐项同源，改 host 必须同步改这里。
     return (align(nb * (qD + dr) * 4) + align(nb * qD * 4)
-            + align(k * qD * e) + align(k * qD * e) + align(k * dr * e)
+            + align(k * qD * e) + align(k * dr * e)
             + align(nb * k * 4) + align(nb * k * 4)
             + align(3 * half(nb) * 4) + 2 * align(half(nb) * 4)
             + align(k * qD * 4) + align(k * dr * 4)
