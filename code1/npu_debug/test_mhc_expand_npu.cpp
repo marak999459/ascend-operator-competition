@@ -102,9 +102,10 @@ static Plan plan_tiling(uint32_t S, uint32_t D, uint32_t m, bool backward,
     }
     if (total_tasks < num_aiv) block_dim = (uint32_t)total_tasks;
     if (block_dim == 0) block_dim = 1;
-    // 镜像 host 的"小档少开核"规则（实测见 code1.md §14）
+    // 镜像 host 的"小档少开核"规则（实测见 code1.md §14，拐点分向见 §19.3）
     uint64_t io_bytes = (uint64_t)(m + 1) * S * D * elem_size;
-    uint64_t core_cap = io_bytes / 6144; if (core_cap < 1) core_cap = 1;
+    uint64_t core_cap = io_bytes / (backward ? 6144 : 8192);
+    if (core_cap < 1) core_cap = 1;
     if (core_cap < block_dim) block_dim = (uint32_t)core_cap;
     t.blockDim = block_dim;
     t.rowsPerCore = (uint32_t)((total_tasks + block_dim - 1) / block_dim);

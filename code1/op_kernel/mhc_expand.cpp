@@ -59,12 +59,20 @@ public:
             pipe_.InitBuffer(acc_buf_, tiling_.dTileLen * sizeof(float));
             pipe_.InitBuffer(tmp_buf_, tiling_.dTileLen * sizeof(float));
         } else {
-            pipe_.InitBuffer(fwd_b0_, tiling_.dTileLen * elem_size_);
-            pipe_.InitBuffer(fwd_b1_, tiling_.dTileLen * elem_size_);
-            // 后两块只有攒批路径会用到；小 tile 走 BS=1，不白占 UB
-            if (FwdBigTile()) {
-                pipe_.InitBuffer(fwd_b2_, tiling_.dTileLen * elem_size_);
-                pipe_.InitBuffer(fwd_b3_, tiling_.dTileLen * elem_size_);
+            const uint32_t tile_bytes = tiling_.dTileLen * elem_size_;
+            const uint32_t slots = FwdBatch() * 2;   // 环深 = 2*BS：本批写的格必不是上批 MTE3 读的格
+            pipe_.InitBuffer(fwd_b0_, tile_bytes);
+            pipe_.InitBuffer(fwd_b1_, tile_bytes);
+            // 只有攒批路径要多占的格子；BS=1 时不白占 UB
+            if (slots > 2) {
+                pipe_.InitBuffer(fwd_b2_, tile_bytes);
+                pipe_.InitBuffer(fwd_b3_, tile_bytes);
+            }
+            if (slots > 4) {
+                pipe_.InitBuffer(fwd_b4_, tile_bytes);
+                pipe_.InitBuffer(fwd_b5_, tile_bytes);
+                pipe_.InitBuffer(fwd_b6_, tile_bytes);
+                pipe_.InitBuffer(fwd_b7_, tile_bytes);
             }
         }
     }
@@ -120,13 +128,24 @@ private:
         }
     }
 
-    __aicore__ inline bool FwdBigTile() const {
-        return tiling_.dTileLen * elem_size_ >= FWD_THRESH;
+    // 攒批的批大小。环占用 = 2*BS 格 × 单块字节，两支各自的界不一样（§18.1 那条锁的反向使用）：
+    // BS=2 用"tile >= FWD_THRESH(12KB)"这个**下界**（R10 原样），BS=4 用"tile <= FWD_SMALL_THRESH(6KB)"
+    // 这个**上界**，于是 BS=4 的环最坏 8*6144=48KB，恰好等于 BS=2 支路最小的环 4*12288=48KB
+    // —— 新增这一支没有多占过 R10 已经占过的字节，host 的 ub_size/4 预算一个字节也没放宽。
+    // BS=4 只在整行模式(dTileNum==1)放开：多 tile 形状每核单元数多、barrier 本就被摊薄，
+    // medium 上攒批实测 0 收益（§18.3），不给未测过的形状自由度。
+    __aicore__ inline uint32_t FwdBatch() const {
+        const uint32_t tile_bytes = tiling_.dTileLen * elem_size_;
+        if (tile_bytes >= FWD_THRESH) return FWD_BATCH;
+        if (tiling_.dTileNum == 1 && tile_bytes <= FWD_SMALL_THRESH) return FWD_BATCH_SMALL;
+        return 1;
     }
 
     __aicore__ inline void ProcessForward() {
-        // 攒批只在单块够大时才有肉；小 tile 保持每块一道 barrier，两条路径各自编译期展开
-        if (FwdBigTile()) ProcessForwardN<FWD_BATCH>();
+        // 三条支路各自编译期展开（BS 换成运行时变量会丢掉内层循环展开，实测更慢）
+        const uint32_t bs = FwdBatch();
+        if (bs >= FWD_BATCH_SMALL) ProcessForwardN<FWD_BATCH_SMALL>();
+        else if (bs >= FWD_BATCH) ProcessForwardN<FWD_BATCH>();
         else ProcessForwardN<1>();
     }
 
@@ -158,10 +177,16 @@ private:
         return true;
     }
 
-    // 环槽位 -> UB 缓冲：0/1 两格恒在，2/3 两格只在攒批路径下才被 InitBuffer
+    // 环槽位 -> UB 缓冲：0/1 两格恒在，2..7 只在对应批大小成立时才被 InitBuffer
     __aicore__ inline auto FwdBuf(uint32_t slot) {
-        return slot == 0 ? fwd_b0_.Get<DT_X>() : (slot == 1 ? fwd_b1_.Get<DT_X>() :
-               (slot == 2 ? fwd_b2_.Get<DT_X>() : fwd_b3_.Get<DT_X>()));
+        if (slot == 0) return fwd_b0_.Get<DT_X>();
+        if (slot == 1) return fwd_b1_.Get<DT_X>();
+        if (slot == 2) return fwd_b2_.Get<DT_X>();
+        if (slot == 3) return fwd_b3_.Get<DT_X>();
+        if (slot == 4) return fwd_b4_.Get<DT_X>();
+        if (slot == 5) return fwd_b5_.Get<DT_X>();
+        if (slot == 6) return fwd_b6_.Get<DT_X>();
+        return fwd_b7_.Get<DT_X>();
     }
 
     __aicore__ inline void FwdIn(uint32_t r, uint32_t i, uint32_t jt, uint32_t cur_h) {
@@ -231,12 +256,18 @@ private:
     TQue<QuePosition::VECOUT, 2> out_que_;
     TBuf<TPosition::VECCALC> acc_buf_;
     TBuf<TPosition::VECCALC> tmp_buf_;
-    static constexpr uint32_t FWD_BATCH = 2;      // 大 tile 前向每次攒 2 块、共用一道 barrier
-    static constexpr uint32_t FWD_THRESH = 12288; // 单块字节数阈值：过了才攒批
+    static constexpr uint32_t FWD_BATCH = 2;              // 大 tile 前向每次攒 2 块、共用一道 barrier
+    static constexpr uint32_t FWD_BATCH_SMALL = 4;        // 整行小 tile：攒 4 块（R11，见 code1.md §19）
+    static constexpr uint32_t FWD_THRESH = 12288;         // 单块字节数：过了才走大 tile 攒批
+    static constexpr uint32_t FWD_SMALL_THRESH = 6144;    // 单块字节数：<= 此值才够开 8 格环
     TBuf<TPosition::VECCALC> fwd_b0_;
     TBuf<TPosition::VECCALC> fwd_b1_;
     TBuf<TPosition::VECCALC> fwd_b2_;
     TBuf<TPosition::VECCALC> fwd_b3_;
+    TBuf<TPosition::VECCALC> fwd_b4_;
+    TBuf<TPosition::VECCALC> fwd_b5_;
+    TBuf<TPosition::VECCALC> fwd_b6_;
+    TBuf<TPosition::VECCALC> fwd_b7_;
     GlobalTensor<DT_X> x_gm_;
     GlobalTensor<DT_X> o_gm_;
     MhcExpandTilingData tiling_;

@@ -79,8 +79,9 @@ namespace optiling {
         tiling->backward = backward ? 1u : 0u;
 
         // D 方向大 tile：32B 对齐（fp16/bf16 = 16 元素），典型 512~2048；
-        // 前向攒批路径在 UB 里同时握 2*FWD_BATCH=4 份 tile 做环（见 op_kernel 的 fwd_b0_~b3_），
-        // 所以这个 /4 是环深的上限：放宽预算等于放弃前向 barrier 批处理，两者必须一起改。
+        // 前向攒批路径在 UB 里同时握 2*BS 份 tile 做环（见 op_kernel 的 fwd_b0_~b7_），
+        // kernel 侧按"环占用字节"反推 BS：整行且 tile<=6KB 用 8 格、tile>=12KB 用 4 格（R10）。
+        // 所以这个 /4 是**环占用的字节上限**：放宽预算等于放弃前向 barrier 批处理，两者必须一起改。
         const uint64_t elem_size = static_cast<uint64_t>(dtype_size_x);
         const uint64_t ub_budget = ub_size / 4;
         uint32_t d_tile_len = 0;
@@ -131,17 +132,18 @@ namespace optiling {
         if (total_tasks < num_aiv) block_dim = static_cast<uint32_t>(total_tasks);
         if (block_dim == 0) block_dim = 1;
 
-        // ---- 小档少开核（真机实测 2026-09-20，见 code1.md §14）----
-        // 每多启动一个 block 要多付一次派发 + 每核固定序言（实测约 45ns/块），
-        // 所以"每核分到的字节"低于拐点时开核反而更慢：
-        //   fwd-fp16-small(96KB) blk=40 -> 4.1us，blk=16 -> 3.2us，blk=12 -> 3.0us，blk=2 -> 7.0us
-        //   bwd-fp16-small(96KB) blk=40 -> 4.6us，blk=16 -> 3.4us，blk=12 -> 4.0us，blk=2 -> 11.8us
-        // 前向 IO = S*D + S*m*D、反向同样 = (1+m)*S*D（谁当输入不影响总量），故一条公式覆盖两向。
-        // 6KB/核 = 96KB/16 恰好落在上面两列的实测最优；medium(42MB)/large(8.4GB) 远不到拐点，
-        // 仍按 num_aiv 满开核。
+        // ---- 小档少开核（真机实测 2026-09-20 §14 定则，2026-09-21 R11 §19 复核并分向）----
+        // 每多启动一个 block 要多付一次派发（R11-B 用空 kernel 直接量出这条地板：
+        // 固定 1.2us + 每核约 75~90ns），所以"每核分到的字节"低于拐点时开核反而更慢：
+        //   fwd-fp16-small(96KB) blk=40 -> 4.5us，blk=16 -> 3.0us，blk=12 -> 2.9us，blk=4 -> 3.9us
+        //   bwd-fp16-small(96KB) blk=40 -> 4.8us，blk=24 -> 3.7us，blk=16 -> 3.8us，blk=8 -> 4.3us
+        // 前向 IO = S*D + S*m*D、反向同样 = (1+m)*S*D（谁当输入不影响总量），故一条式子覆盖两向。
+        // 拐点**分向**取：前向在 R11 把 barrier 按块摊薄（整行小 tile 攒 4 块）之后谷底左移到
+        // 8KB/核 = 96KB/12，c0/c2 各三轮交替读到 2.6us（同形 BS=1@16 为 3.0us）；反向不经攒批
+        // 那条路，谷底仍在 6KB/核。medium(42MB)/large(8.4GB) 远不到拐点，仍按 num_aiv 满开核。
         const uint64_t io_bytes = static_cast<uint64_t>(m + 1) * static_cast<uint64_t>(S) *
                                   static_cast<uint64_t>(D) * elem_size;
-        const uint64_t min_io_per_core = 6144;   // 6KB：低于此每核工作量再开核不划算
+        const uint64_t min_io_per_core = backward ? 6144 : 8192;   // 反向 6KB/核、前向 8KB/核
         uint64_t core_cap = io_bytes / min_io_per_core;
         if (core_cap < 1) core_cap = 1;
         if (core_cap < block_dim) block_dim = static_cast<uint32_t>(core_cap);
