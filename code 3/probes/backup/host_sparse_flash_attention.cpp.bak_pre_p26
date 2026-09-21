@@ -34,7 +34,7 @@ constexpr uint64_t UB_SAFE_PCT     = 95ULL;
 
 // 头分块候选（从大到小取第一个能装下的）
 constexpr uint32_t NB_CAND[] = {32, 16, 8, 4, 2, 1};
-constexpr uint32_t NBLK_CAND[] = {128, 64, 40, 32, 16, 8, 4, 2, 1};
+constexpr uint32_t NBLK_CAND[] = {128, 64, 32, 16, 8, 4, 2, 1};
 // UB 一个块 = 256 bit = 32 B；host 预算与 kernel InitBuffer 都按它向上取整。
 constexpr uint64_t UB_BLK = 32ULL;
 // ⚠️ nb 原先有 8 的下限（NB_MIN）：kernel 把 LSE 的 sum 半区放在 UB 偏移 nb 个 float 处，

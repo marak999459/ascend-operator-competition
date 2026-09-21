@@ -17,15 +17,10 @@
 
 // P21：一个 chunk 的 gather **段数**上限 = kernel 里"扫描前置"那块定长暂存数组的尺寸。
 // host 的 n_blk 候选因此钳在 <= 它：一段至少贡献 1 个 token，所以 n_blk 个 token 最多
-// n_blk 段。⇒ 这一钳就是"最大 chunk"的上限，真正的-binding 项是 host 的 UB 预算式：
-//   D=512/fp16 下每多一个 token 要 512×2(K) + 512×2(V) + 64×2(kr) + 512×4(kf 组宽=整个
-//   chunk，P24 起) + 64×4 ≈ 4.4 KB，加上 q/o/s/p/ml/lse/rd 的固定项，`nb==1` 档能塞到
-//   **40** 个 token（184 KB / ubSafe 186 KB），`nb>=2` 档 32 就是上限。
-// P29 把这一钳从 32 抬到 40，让 `nb==1`（平台 C1/C2/C3 那一档）能吃下多 25 % 的 chunk：
-//   每 chunk 的"每头一轮"固定项按 1/n_blk 摊薄，实测口径见 code3.md §15.49。
-// ⚠️ 必须是 8（一个 UB 块的 fp32 个数）的整数倍：分数矩阵行间距 = n_blk 个 float，
-//    否则行起点落在块中间 -> 真机 ADDR_MISALIGN（与 nb<8 同一类，见 host 的 NBLK_MIN 注释）。
-constexpr uint32_t SFA_STAGE_MAX = 40;
+// n_blk 段。D=512/fp16 下 n_blk=64 仅 kBuf+vBuf 就要 131072 B，加 kfBuf_（32 组宽 ×512×4）
+// 65536 B 早已越过 UB ⇒ 这一钳对【选档】是空操作，它只是把"暂存数组不会越界"从
+// UB 预算式的事实变成结构上的事实，kernel 里因此不需要越界分支。
+constexpr uint32_t SFA_STAGE_MAX = 32;
 
 struct SparseFlashAttentionTilingData {
     // ---- 原骨架字段（保持顺序不变）----

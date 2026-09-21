@@ -9,23 +9,30 @@
 
 #include <cstdint>
 
-// P24 起【组宽不再是常数】：kernel 的 scGrp_ = n_blk（一组 = 整个 chunk），
-// 部分积就地写在 kf/krf 上，所以不需要在两边共享的头里放一个组宽常量。
-// 历史：P8 取 16、P13 对 nb==1 取 32（那两档的实测结论见 code3.md §15.12/§15.16）。
-// ⚠️ 唯一还要求两边同源的是 **rdBuf_ 的切片宽度** redW_ = max(nb, n_blk, 2 个 UB 块)
-//    （kernel Init 段 / host RedWOf 同一口径，改一边就会真机越界）。
+// 分数向量化的 token 组大小。kernel 的 scratch 尺寸与 host 的 UB 预算式必须同源，
+// 所以放在两边共享的头里，不要各自写死。
+// 取 16 的依据（code3.md §15.12/§15.13）：一条向量调用的固定开销 ≈29 cycle，
+// 一组越宽，同样的 fold/reduce 调用摊到的点积越多 —— GRP 8→16 使 big1 0.967→0.829 ms。
+// ⚠️ 它是 UB 预算式里的乘数：kfBuf_/pfBuf_/krfBuf_/prfBuf_ 四项合计
+//    2*GRP*(Q_D+Dr)*4 字节（Q_D=512、Dr=64 时 = 73728 B，占整块 UB 的 37%）。
+//    再往上调之前先复核 §15.13 记的余量（选中分块下仅剩 ~6 KB）。
+// ⚠️ kernel 侧 rdBuf_ 的切片宽度是 max(nb, GRP)（一次批量 reduce 出 GRP 行行和），
+//    host 预算式用同一口径 —— 改这里两边会自动一致，只改一边会越界。
+constexpr uint32_t SFA_SC_GRP = 16;
+
+// P13：**只有一个头**的单位（nb==1）里，K 的 fp32 展开 kf 在一组内只被读一次
+// （头循环只有 1 轮）⇒ 广播乘可以**就地**写在 kf 上，pf/prf 两块 scratch 直接省掉，
+// 于是同一份 UB 预算能装下 2 倍宽的组。组宽 16→32 ⇒ 每 chunk 的 fold/mul/reduce
+// 调用条数不变、但**每组一次**的那 22 条只剩一半（code3.md §15.16）。
+// ⚠️ 仅对 nb==1 生效：nb>1 时 kf 要被 nbCur 个头各读一次，就地写会把后面的头读脏。
+constexpr uint32_t SFA_SC_GRP_W = 32;
 
 // P21：一个 chunk 的 gather **段数**上限 = kernel 里"扫描前置"那块定长暂存数组的尺寸。
 // host 的 n_blk 候选因此钳在 <= 它：一段至少贡献 1 个 token，所以 n_blk 个 token 最多
-// n_blk 段。⇒ 这一钳就是"最大 chunk"的上限，真正的-binding 项是 host 的 UB 预算式：
-//   D=512/fp16 下每多一个 token 要 512×2(K) + 512×2(V) + 64×2(kr) + 512×4(kf 组宽=整个
-//   chunk，P24 起) + 64×4 ≈ 4.4 KB，加上 q/o/s/p/ml/lse/rd 的固定项，`nb==1` 档能塞到
-//   **40** 个 token（184 KB / ubSafe 186 KB），`nb>=2` 档 32 就是上限。
-// P29 把这一钳从 32 抬到 40，让 `nb==1`（平台 C1/C2/C3 那一档）能吃下多 25 % 的 chunk：
-//   每 chunk 的"每头一轮"固定项按 1/n_blk 摊薄，实测口径见 code3.md §15.49。
-// ⚠️ 必须是 8（一个 UB 块的 fp32 个数）的整数倍：分数矩阵行间距 = n_blk 个 float，
-//    否则行起点落在块中间 -> 真机 ADDR_MISALIGN（与 nb<8 同一类，见 host 的 NBLK_MIN 注释）。
-constexpr uint32_t SFA_STAGE_MAX = 40;
+// n_blk 段。D=512/fp16 下 n_blk=64 仅 kBuf+vBuf 就要 131072 B，加 kfBuf_（32 组宽 ×512×4）
+// 65536 B 早已越过 UB ⇒ 这一钳对【选档】是空操作，它只是把"暂存数组不会越界"从
+// UB 预算式的事实变成结构上的事实，kernel 里因此不需要越界分支。
+constexpr uint32_t SFA_STAGE_MAX = 32;
 
 struct SparseFlashAttentionTilingData {
     // ---- 原骨架字段（保持顺序不变）----

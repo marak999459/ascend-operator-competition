@@ -506,9 +506,19 @@ private:
                 uint32_t run = static_cast<uint32_t>(curEnd - curBegin);
                 const uint32_t space = nBlk_ - cnt;      // >0：循环条件保证
                 if (run > space) { run = space; }
-                stageBeg_[nRun] = static_cast<int32_t>(curBegin);
-                stageLen_[nRun] = run;
-                ++nRun;
+                // P28：相邻段在 GM 里本来就是同一段连续行（KV 布局 (B,S2,1,D)）⇒ 并进上一段，
+                // 一次 DataCopy 发出去。判跑在【段】这一层（每 chunk ≤ n_blk 段），不是【下标
+                // 表项】那一层 ⇒ 标量代价可忽略，而 CopyGm2Ub 的"每条调用固定项"才是主导
+                // （§15.39(d)：K:V:kr 字节数 8:8:1，实测成本 0.6:0.5:1）。落进 UB 的字节与
+                // 顺序逐位不变 ⇒ 数值路径不变。
+                if (nRun > 0u && static_cast<int64_t>(stageBeg_[nRun - 1u])
+                        + static_cast<int64_t>(stageLen_[nRun - 1u]) == curBegin) {
+                    stageLen_[nRun - 1u] += run;
+                } else {
+                    stageBeg_[nRun] = static_cast<int32_t>(curBegin);
+                    stageLen_[nRun] = run;
+                    ++nRun;
+                }
                 cnt += run;
                 curBegin += run;
                 if (curBegin >= curEnd) { hasBlock = false; }

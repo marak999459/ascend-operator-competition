@@ -34,7 +34,7 @@ constexpr uint64_t UB_SAFE_PCT     = 95ULL;
 
 // 头分块候选（从大到小取第一个能装下的）
 constexpr uint32_t NB_CAND[] = {32, 16, 8, 4, 2, 1};
-constexpr uint32_t NBLK_CAND[] = {128, 64, 40, 32, 16, 8, 4, 2, 1};
+constexpr uint32_t NBLK_CAND[] = {128, 64, 32, 16, 8, 4, 2, 1};
 // UB 一个块 = 256 bit = 32 B；host 预算与 kernel InitBuffer 都按它向上取整。
 constexpr uint64_t UB_BLK = 32ULL;
 // ⚠️ nb 原先有 8 的下限（NB_MIN）：kernel 把 LSE 的 sum 半区放在 UB 偏移 nb 个 float 处，
@@ -50,11 +50,9 @@ static inline uint64_t HalfElems(uint32_t nb)
 // ⚠️ n_blk 的【下限】同样是"一个 UB 块里的 fp32 个数"，且必须是它的整数倍。
 // kernel 的分数矩阵按 [nb][n_blk] 排布，行间距 = n_blk 个 float；P3a 之后每行由
 // `WholeReduceSum` + `Add` 以 32B 块为单位写入，n_blk 不是 8 的倍数时行起点就落在
-// 块中间 -> 与 nb<8 同一类真机 ADDR_MISALIGN。
-// P24 之前这里写的是 SFA_SC_GRP(=16)，因为"一组 token 要装得下"；P24 起组宽就是
-// n_blk，那条理由自动消失，但下限仍取 16（= 2 个块）：候选空间与 P21 保持一致，
-// 别让一次结构改动同时改两条寻优的腿（§15.45 的对照口径）。
-constexpr uint32_t NBLK_MIN = 16U;
+// 块中间 -> 与 nb<8 同一类真机 ADDR_MISALIGN。取 SFA_SC_GRP(=16) 恰好同时满足
+// "块对齐"与"一组 token 装得下"。
+constexpr uint32_t NBLK_MIN = SFA_SC_GRP;
 
 // elemSize = DT_QUERY 的字节数（fp16=2 / fp32=4）。K/V/Krope 在 UB 里就是 DT_QUERY，
 // 写死 2 字节会让 fp32 模板实例的 InitBuffer 总量越过物理 UB（code3.md §13.14：
@@ -65,17 +63,15 @@ static inline uint64_t UbAlignBuf(uint64_t len)
     return (len + 31ULL) / 32ULL * 32ULL;
 }
 
-// ⭐ kernel 里 `scGrp_` 的镜像（op_kernel/…cpp 的 Init 段）：P24 起组宽 = **整个 chunk**
-// ⇒ 没有独立常数了，直接用 n_blk；归约工作区宽度 = max(nb, n_blk, 2 个 UB 块)。
-constexpr uint64_t RED_MIN_W = 2ULL * UB_BLK_F32;   // kernel 的 mergeMin
-
-static inline uint64_t RedWOf(uint32_t nb, uint64_t nBlk)
+// ⭐ kernel 里 `scGrp_` 的镜像（op_kernel/…cpp 的 Init 段）：一组多少个 token。
+// P13 把"单头单位"的组宽翻倍（SFA_SC_GRP → SFA_SC_GRP_W），代价是 pf/prf 就地省掉。
+// host 的 UB 预算式与调用数模型都从这里取，**两边必须同源**，否则真机越界。
+static inline uint64_t ScGrpOf(uint32_t nb)
 {
-    const uint64_t g = (nBlk > nb) ? nBlk : nb;
-    return (g > RED_MIN_W) ? g : RED_MIN_W;
+    return (nb == 1U) ? static_cast<uint64_t>(SFA_SC_GRP_W) : static_cast<uint64_t>(SFA_SC_GRP);
 }
 
-static inline uint64_t CalcUbNeed(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32_t dr,
+static inline uint64_t CalcUbNeed(uint32_t nb, uint32_t nBlk, uint32_t qD, uint32_t dr,
                                   uint32_t elemSize)
 {
     const uint64_t e = elemSize;
@@ -91,14 +87,15 @@ static inline uint64_t CalcUbNeed(uint32_t nb, uint64_t nBlk, uint32_t qD, uint3
          + UbAlignBuf(n * k * 4ULL)              // pBuf_
          + UbAlignBuf(3ULL * HalfElems(nb) * 4ULL)  // mlBuf_ : m/l/mnew，半区各占整块（kernel halfOff_）
          + 2ULL * UbAlignBuf(HalfElems(nb) * 4ULL)  // lseBuf_ : max/sum 两个半区各自对齐整块
-         // ---- P24 的 scratch：一组 = **整个 chunk** 个 token 的 fp32 展开 + 三条归约工作区，
-         //      宽度 = RedWOf(nb, n_blk)（kernel 的 redW_ 口径，两边必须一致）。
-         //      部分积就地写在 kf/krf 上 ⇒ pfBuf_/prfBuf_ 根本不分配。nb==1 档的字节数
-         //      与 P21 相同（那时 kf 已经是 32 行）；nb>1 档回收 pf/prf 两份，多出的是
-         //      kf 从 16 行变 n_blk 行。----
-         + UbAlignBuf(k * qD * 4ULL)             // kfBuf_
-         + UbAlignBuf(k * dr * 4ULL)             // krfBuf_
-         + 3ULL * UbAlignBuf(RedWOf(nb, k) * 4ULL);
+         // ---- 向量化(P3a/P2/P13) 的 scratch：一组 scGrp 个 token 的 fp32 分块 +
+         //      三条归约工作区，宽度 = max(nb, scGrp)（kernel 的 redW_ 口径，两边必须一致）。
+         //      P13：nb==1 时部分积就地写在 kf/krf 上，pf/prf **不分配**，省下的那份
+         //      换成 2 倍组宽 ⇒ 两边字节数相同，只有 rdBuf_ 因 redW_ 变宽多 192 B。----
+         + UbAlignBuf(ScGrpOf(nb) * qD * 4ULL)                 // kfBuf_
+         + (nb == 1ULL ? 0ULL : UbAlignBuf(ScGrpOf(nb) * qD * 4ULL))   // pfBuf_
+         + UbAlignBuf(ScGrpOf(nb) * dr * 4ULL)                 // krfBuf_
+         + (nb == 1ULL ? 0ULL : UbAlignBuf(ScGrpOf(nb) * dr * 4ULL))   // prfBuf_
+         + 3ULL * UbAlignBuf((n > ScGrpOf(nb) ? n : ScGrpOf(nb)) * 4ULL);
 }
 
 // 反算分块。
@@ -124,12 +121,12 @@ static inline uint64_t CalcUbNeed(uint32_t nb, uint64_t nBlk, uint32_t qD, uint3
 // 一个工作单元（nb 个头 × n_blk 个 token）处理一个 KV chunk 的【代价】，单位是
 // "等效向量调用条数"。只用于在候选之间比大小，绝对值没有意义（2201 上实测一条向量
 // 指令 ≈ 28.98 + 1.123 × rep 个周期，见 §15.13），所以这里把 rep 摊成常数、只保留随
-// (nb, n_blk) 变化的项。P24 之后按"每头一次 + 每 token 一次"两段重列：
-//   组宽 = 整个 chunk ⇒ nG 恒为 1，P21 的"每组一次"项全部并进"每头一次"。
-//   K 侧：每头 2 条加宽（K、K-rope）+ 每头 20 条
+// (nb, n_blk) 变化的项。P13 之后按"每组一次 + 每头一次 + 每 token 一次"三段重列：
+//   组数 nG = ⌈n_blk / scGrp(nb)⌉，scGrp 在 nb==1 时是 32（见上面的 ScGrpOf）
+//   K 侧：每组 2 条加宽（K、K-rope）+ 每头每组 20 条
 //                    = 8 条广播乘 + 1 条 rope 乘 + 7 条折行 + 2 条归约 + 1 加 + 1 乘 scale
-//   Q 侧：softmax 的 max/exp/alpha/重缩放 ≈ 4·nb + 2，V 的加宽 1 条（P24 起整个
-//         chunk 一批），PV 每个 (头, token) 一条 Axpy = n_blk·nb ← 这项**不能**摊薄
+//   Q 侧：softmax 的 max/exp/alpha/重缩放 ≈ 4·nb + 2，V 的加宽 nG 条，
+//         PV 每个 (头, token) 一条 Axpy = n_blk·nb      ← 这一项**不能**再摊薄
 //   搬运：+ GATHER_DIV 见下面 GatherCalls 的注释（P13 那一版漏了它，翻车三次）
 static inline uint64_t GatherCalls(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32_t dr,
                                    uint32_t elemSize)
@@ -149,13 +146,8 @@ static inline uint64_t UnitCalls(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32
 {
     const uint64_t n = nb;
     const uint64_t k = nBlk;
-    // P24：组宽 = 整个 chunk ⇒ "每组一次"的那 20·nb 条每 chunk 只剩一轮。
-    // 但 kf/krf 的加宽从"每组 2 条"变成"每头 2 条、每条 k 行"，**数据量**第一次
-    // 随 nb 增长 ⇒ 这一项不能再把 rep 摊成常数（P21 那时加宽量与 nb 无关，摊掉无损）。
-    // 一条 content 加宽 = k·qD 个 fp32 = k·qD/64 个 repeat ⇒ 1.123·k·qD/64 周期；一条
-    // 调用按 ≈36 周期（固定 28.98 + 平均 6 rep）换算成"等效调用条数"。
-    const uint64_t widenVol = n * k * (qD + dr) * 1123ULL / (64ULL * 36000ULL);
-    return n * 22ULL + widenVol + (3ULL + 4ULL * n + k * n)
+    const uint64_t nG = (k + ScGrpOf(nb) - 1ULL) / ScGrpOf(nb);
+    return nG * (2ULL + 20ULL * n) + (2ULL + 4ULL * n + nG + k * n)
          + GatherCalls(nb, k, qD, dr, elemSize);
 }
 
@@ -223,16 +215,10 @@ static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD,
                     const uint64_t cost2 = ((waves2 * calls / 2ULL) * 108ULL) / 100ULL + 1ULL;
                     if (cost2 < cost) { cost = cost2; ks = 2U; }
                 }
-                // 迟滞：只有【明显更优】（< 0.95×）才从较大的 nb 改档，留一点余量给
-                // 未建模的每单元方差（并列时保留大 nb = 单元少 = 同一份 K 被更少的核重复加宽）。
-                // ⚠️ 这一档从 0.85 抬到 0.95：0.85 是 §15.14 时代加的，那时模型还**缺**搬运项，
-                // 波数 ceil 的误差靠迟滞兜底。P24 把模型重列成"每头 + 每 token"两段后，
-                // 用真机 5 用例 × 4 档 nb 的实测网格复验（probes/p25_model_check.py）：
-                // **20 组相邻档比较 0 次顺序反转** ⇒ 模型自己已经够准，迟滞不再是误差兜底，
-                // 而 0.85 会实打实吃掉 big1 的 5 %（模型判 nb=4 比 nb=8 便宜 9 %，
-                // 但 0.91 > 0.85 被压回 nb=8，实测 0.7194 vs 0.6846 ms）。取 0.95 后
-                // 五个本地点的选档全部落在实测最优点上（后悔和 1.0001 vs 0.85 的 1.0103）。
-                if (bestCost == 0 || cost * 20ULL < bestCost * 19ULL) {
+                // 只在【明显更优】（< 0.85×）时才从较大的 nb 改档：波数项是 ceil 的，
+                // §15.14(d) 实测它的误差带就有 ±25%（units/coreNum=3.2 那档被多算了一整波），
+                // 差距在噪声内时保留大 nb —— 单元少 = 同一份 K 被更少的核重复加宽。
+                if (bestCost == 0 || cost * 20ULL < bestCost * 17ULL) {
                     bestCost = cost;
                     bestNb = nb;
                     bestBlk = nBlk;

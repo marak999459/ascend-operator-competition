@@ -99,10 +99,12 @@ public:
         // P10 要把头块摊到更多核上、nb_ 会掉到 1/2/4，所以半区偏移改成"向上取整到
         // 一个 UB 块的元素数"，两半区各占整块，DataCopyPad 的 UB 源地址仍然对齐。
         halfOff_ = static_cast<uint32_t>(sfa::UbAlignBuf(nb_ * sizeof(float)) / sizeof(float));
-        // 一次"整批装载/写回"能暂存的行数（每行 D_ 个元素）。写回 scratch 借的是 kfBuf_
-        //（P24 起容量 = **整个 chunk** 行 fp32），装载 scratch 借 kBuf_/krBuf_（n_blk 行
-        // 原生 dtype），三者取最小才不会越界，且 host 的 UB 预算式不需要为 P5b 新增任何一项。
+        // 一次"整批装载/写回"能暂存的行数（每行 D_ 个元素）。上限取 SFA_SC_GRP：
+        // P5b 的写回 scratch 借用 kfBuf_（容量 = SFA_SC_GRP 行 fp32），装载 scratch
+        // 借用 kBuf_/krBuf_（容量 = n_blk 行），三者取最小才不会越界，且 host 的 UB
+        // 预算式不需要为 P5b 新增任何一项。
         stageMax_ = (nb_ < nBlk_) ? nb_ : nBlk_;
+        if (stageMax_ > SFA_SC_GRP) { stageMax_ = SFA_SC_GRP; }
         lseOn_ = (softmax_max_out != nullptr) && (softmax_sum_out != nullptr);
         // ⚠️ 官方 BSND 变长语义：actual_seq_lengths 是【per-batch 值】arr[b]；
         //    数组长度为 1 时广播 arr[0]；未传时用满 padded 的 Q_S / KV_S
@@ -195,31 +197,27 @@ public:
         // DataCopyPad 才不会报 ADDR_MISALIGN。
         pipe_.InitBuffer(lseBuf_, 2u * sfa::UbAlignBuf(halfOff_ * sizeof(float)));
         // ---- 向量化 scratch ----
-        // P24：**组宽 = 整个 chunk**（scGrp_ = n_blk），且不再要单独的"部分积"缓冲 ——
-        // 把 P13 的"单头单位就地广播乘"推广到所有 nb：kf/krf 每来一个头就从 fp16 的
-        // kBuf_/krBuf_ **重加宽一次**，然后部分积就地压在 kf/krf 上折叠。
-        // 省的是"每组一次"的那批 mul/fold/reduce/add/muls 调用：每 chunk 从
-        // nbCur×⌈n_blk/16⌉ 组降到 nbCur×1 组；代价是 kf 的加宽量随 nbCur 翻倍
-        // （每头都要重铺一遍 32 行）。谁赢取决于 nb —— 本地实测见 code3.md §15.45。
-        // ⚠️ 乘积**必须留在 fp32 域**：两个 fp16 相乘在 fp32 里逐位精确，而 P23 那种
-        //    "点积全程走 fp16 原生域"把 LSE 的绝对误差从 1.8e-4 抬到 1.7e-1（**约 1000×**），
-        //    比赛平台 Case1~3 当场判成 precision_ratio 0.03~0.18 —— 判据比本地的
-        //    rtol=1e-2 严得多，标定见 code3.md §15.44。
+        // kfBuf_/krfBuf_：一组 scGrp_ 个 token 的 K/K-rope fp32 展开（每组只 Cast 一次，
+        //   供全部头复用）；P2 之后 PV 只借用 kfBuf_ 的一行放 V 的 fp32 展开；
+        //   P5b 之后 kfBuf_ 还在 chunk 循环之外兼作 attention_out 的写回暂存区。
+        // pfBuf_/prfBuf_：点积的部分积，就地折叠后归约。P13 起 nb_==1 时**不再分配**
+        //   （部分积就地写在 kfBuf_/krfBuf_ 上），省下的那份变成 2 倍组宽。
         // rdBuf_：三个宽度为 redW_ 的归约工作区，P3a 用 [0]=content 行和、[redW_]=rope 行和，
         //   P2 复用同两块（[0]=Σp、[redW_]=分块临时）并另用 [2*redW_]=alpha 向量。
-        //   ⚠️ 宽度是 redW_ = max(nb_, scGrp_, 2 块)，不是 nb_：score 的一条 WholeReduceSum
-        //   一次出 **g 行**行和（g 最大 = 整个 chunk），P2 的归约一次出 **nbCur 行** ⇒
-        //   两边都得放得下；只按 nb_ 定宽时组宽超过 nb_ 会压到下一切片（§15.13：GRP=16 时
-        //   r5/big1 全错）。下限"2 块"是 MergeToken 要的 2×8 个 exp 自变量（合并窗口一个
-        //   UB 块 = 8 个头）。
-        scGrp_ = nBlk_;
+        //   ⚠️ 宽度是 redW_ = max(nb_, scGrp_)，不是 nb_：score 的一条 WholeReduceSum 一次出
+        //   **g 行**行和（g 最大 = scGrp_），P2 的归约一次出 **nbCur 行** ⇒ 两边都得放得下。
+        //   只按 nb_ 定宽时，SFA_SC_GRP > nb_ 会压到下一切片（§15.13：GRP=16 时 r5/big1 全错）。
+        // ---- P13：单头单位走"就地广播乘 + 双倍宽组"（口径见 tiling.h 的 SFA_SC_GRP_W）----
+        // kfBuf_/krfBuf_ 扩到 scGrp_ 行，pfBuf_/prfBuf_ 在 nb_==1 时**不分配**：
+        // 一份 UB 预算换 2 倍组宽，fold/mul/reduce 这些"每组一次"的调用条数直接减半。
+        scGrp_ = (nb_ == 1u) ? SFA_SC_GRP_W : SFA_SC_GRP;
         pipe_.InitBuffer(kfBuf_,  sfa::UbAlignBuf(scGrp_ * D_ * sizeof(float)));
         pipe_.InitBuffer(krfBuf_, sfa::UbAlignBuf(scGrp_ * Dr_ * sizeof(float)));
-        redW_ = (nb_ > scGrp_) ? nb_ : scGrp_;
-        {
-            const uint32_t mergeMin = 2u * sfa::F32_PER_BLK;
-            if (redW_ < mergeMin) { redW_ = mergeMin; }
+        if (nb_ != 1u) {
+            pipe_.InitBuffer(pfBuf_,  sfa::UbAlignBuf(scGrp_ * D_ * sizeof(float)));
+            pipe_.InitBuffer(prfBuf_, sfa::UbAlignBuf(scGrp_ * Dr_ * sizeof(float)));
         }
+        redW_ = (nb_ > scGrp_) ? nb_ : scGrp_;   // 归约工作区宽度，见下面 rdBuf_ 的注释
         pipe_.InitBuffer(rdBuf_,  3u * sfa::UbAlignBuf(redW_ * sizeof(float)));
         // ---- P7：批量 fold / 广播乘的成立条件（见 ComputeScores 与 code3.md §15.12）。----
         // 一条向量调用的固定开销 ≈29 cycle，而 reduce 的每个 repeat 要 ≈8 cycle ⇒
@@ -862,8 +860,8 @@ private:
      * score[i][j] = ( q_i[0:D] · k_j[0:D] + q_i[D:D+Dr] · k_rope_j[0:Dr] ) * scale
      *
      * 向量化口径（取代原先每对 (i,j) 576 次标量乘加）：
-     *   1) 本组 g 个 token 的 K / K-rope 整行 Cast 成 fp32 —— **每个头做一次**（因为
-     *      部分积就地压回 kf/krf，见下面第 3 点）。fp16 -> fp32 是精确扩展，不引入误差。
+     *   1) 本组 SFA_SC_GRP 个 token 的 K / K-rope 各整行 Cast 成 fp32 —— 只做一次，
+     *      供该组内全部头复用；fp16 -> fp32 是精确扩展，不引入误差。
      *   2) 每条 512/64 维点积 = 一次整条 `Mul` + 折半块加 + 一次 `WholeReduceSum`，
      *      且 `WholeReduceSum` 的 repeatTime=组内 token 数 ⇒ **一条指令出 G 个行和**，
      *      结果紧凑落在 sc 的行切片上（dst 步长单位=元素，已实测）。
@@ -871,9 +869,6 @@ private:
      *      repeat 模式（MulRowsBroadcast / FoldRowsBatch）：一条调用同时做完组内 g 行的同一块，
      *      调用数从 g×log2 降到 len/64 - 1。行宽不是 64 的整数倍时 scBatch_=false，退回 1)+2) 的
      *      逐行写法（FoldRow）。
-     *   4) P24：组宽 = 整个 chunk（scGrp_ = nBlk_），部分积**就地**写在 kf/krf 上（P13 那个
-     *      "nb==1 才就地"的条件到此作废）。就地写下每个 lane 的两个源操作数地址相同、
-     *      无跨 lane 依赖 ⇒ 与写到别的缓冲逐位等价。
      * 与标量版的差别只有 fp32 求和顺序（树形 vs 顺序），量级 ~1e-7 相对。
      */
     __aicore__ inline void ComputeScores(LocalTensor<float> &q, LocalTensor<DT_QUERY> &kb,
@@ -882,9 +877,12 @@ private:
     {
         LocalTensor<float> kf = kfBuf_.Get<float>();
         LocalTensor<float> krf = krfBuf_.Get<float>();
-        // P24：部分积就地下在 kf/krf 上（pfBuf_/prfBuf_ 已经根本不分配了）。
-        LocalTensor<float> pf = kf;
-        LocalTensor<float> prf = krf;
+        // P13：nb_==1 ⇒ kf/krf 在一组里只被读一次（头循环只有 1 轮），部分积就地下在
+        //      kf/krf 上，pfBuf_/prfBuf_ 此时根本没分配。就地写下每个 lane 的两个源操作数
+        //      地址相同、无跨 lane 依赖 ⇒ 与写到别的缓冲**逐位等价**。
+        const bool inplace = (nb_ == 1u);
+        LocalTensor<float> pf = inplace ? kf : pfBuf_.Get<float>();
+        LocalTensor<float> prf = inplace ? krf : prfBuf_.Get<float>();
         LocalTensor<float> rd = rdBuf_.Get<float>();
         LocalTensor<float> rd2 = rd[redW_];
 
@@ -895,12 +893,12 @@ private:
 
         for (uint32_t g0 = 0; g0 < m; g0 += scGrp_) {
             const uint32_t g = (m - g0 < scGrp_) ? (m - g0) : scGrp_;
+            // P12：本组 g 行在 kb/kr 与在 kf/krf 里都是**连续**排布的 ⇒ g 条加宽可以并成
+            //      1 条 count=g*rowC 的加宽。写入地址、取值顺序逐位不变，省的是每条调用
+            //      固定的 ≈29 cycle（§15.11），与 rep 数无关。
+            WidenToF32(kf, kb[g0 * rowC], static_cast<int32_t>(g * rowC));
+            WidenToF32(krf, kr[g0 * rowR], static_cast<int32_t>(g * rowR));
             for (uint32_t i = 0; i < nbCur; ++i) {
-                // 就地把 kf/krf 用掉了，所以每个头都要从 fp16 的 kb/kr 重加宽一次。
-                // P12 的同一条理由：本组 g 行在 kb 与在 kf 里都是**连续**排布的 ⇒
-                // g 条加宽并成 1 条 count=g*rowC 的加宽，写入地址与取值顺序逐位不变。
-                WidenToF32(kf, kb[g0 * rowC], static_cast<int32_t>(g * rowC));
-                WidenToF32(krf, kr[g0 * rowR], static_cast<int32_t>(g * rowR));
                 const uint32_t qb = i * (rowC + rowR);
                 LocalTensor<float> qc = q[qb];
                 LocalTensor<float> qr = q[qb + rowC];
@@ -1053,7 +1051,7 @@ private:
 
     TPipe pipe_;
     TBuf<TPosition::VECCALC> qBuf_, oBuf_, kBuf_, vBuf_, krBuf_, sBuf_, pBuf_, mlBuf_, lseBuf_;
-    TBuf<TPosition::VECCALC> kfBuf_, krfBuf_, rdBuf_;
+    TBuf<TPosition::VECCALC> kfBuf_, pfBuf_, krfBuf_, prfBuf_, rdBuf_;
     GlobalTensor<DT_QUERY> qGm_, kGm_, vGm_, qrGm_, krGm_, outGm_;
     GlobalTensor<int32_t> idxGm_;
     GlobalTensor<int32_t> qLenGm_, kvLenGm_;
@@ -1067,8 +1065,8 @@ private:
     uint32_t stageMax_ = 1;      // P5b：一次整批装载/写回的行数上限（见 Init 的钳制）
     // P7：score 的 fold/rope 乘走"一次调用折 g 行"的批量形态（见 FoldRowsBatch/ComputeScores）。
     bool scBatch_ = false;
-    uint32_t redW_ = 1;      // rdBuf_ 每条切片的宽度 = max(nb_, scGrp_, 2 块)，见 Init
-    uint32_t scGrp_ = 1;     // 一组多少个 token = **整个 chunk**（n_blk），见 Init 的 P24 段
+    uint32_t redW_ = 1;      // rdBuf_ 每条切片的宽度 = max(nb_, scGrp_)，见 Init
+    uint32_t scGrp_ = SFA_SC_GRP;   // 一组多少个 token（nb_==1 时翻倍，见 Init 的 P13 段）
     float scale_ = 1.0f;
     uint32_t mode_ = 3;
     bool lseOn_ = false;
