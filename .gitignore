@@ -20,8 +20,18 @@ __pycache__/
 *.o
 *.obj
 *.log
+*.err
 *.tmp
 
 # ===== 备份文件 =====
 *.bak
 *.orig
+
+# ===== 工具原始输出（可再生，不入库；结论已在 codeN.md 表格里）=====
+# msprof 一次运行会生成 .db / .done / .complete / .csv / .json 等上百个中间件，
+# 数值已被手工摘录进 code1.md §14/§18/§19 的表；真要复现直接在真机重跑 prof_npu.sh。
+code1/npu_debug/prof/
+
+# ===== 外部开源参考库（只读参考，源码不入库）=====
+# CANN 官方开源算子库，赛题的参考池；口径与逐题可用性见各 codeN.md §10
+ops-transformer-master/
