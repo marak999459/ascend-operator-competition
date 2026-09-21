@@ -13,7 +13,8 @@ import os, sys, shutil, hashlib
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 HJ = os.path.join(ROOT, "op_host", "mhc_expand.cpp")
-BASE_MD5 = "3c2dadc8f2cdfebc1d11062f674407eb"    # 提交 4 的 host（§18.4）
+BASE_MD5 = "61543c1b17f94cc7c99c4bf4178fc197"    # 提交 5 + §19.6 注释修订后的 host（R13 探针轮使用）
+                                                # 历史：R11/R12 用的是提交 4 的 3c2dadc8f2cdfebc1d11062f674407eb
 PATCHED = None  # 运行时算，见下
 
 A1 = """#include <algorithm>

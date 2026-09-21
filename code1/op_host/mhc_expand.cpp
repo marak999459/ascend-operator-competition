@@ -174,8 +174,6 @@ namespace optiling {
         // 量出来的，合批把发起数与每核行数解耦之后谷底左移、且在 4~8 之间是平的：
         // io=96/150/192/192/216KB 五条取 blk=8 时对原线性律(12/18/24/24/27)是
         // -16%/-27%/-31%/-28%/-35%（code1.md §23.4、§23.8b 两张表；blk=4 只再快 <=0.1us，不出噪声带）。
-        uint64_t core_cap = merge_ok ? merge_cap
-                                     : io_bytes / (backward ? 6144 : 8192);
         // ---- R13（真机实测 2026-09-21，code1.md §20）：小 IO 段上面这条要反向，用核数下界封住 ----
         // 固定派发成本在 blk<=8 内几乎不涨（空 kernel 直测 1.2~2.1us），而每核串行 DMA 条数
         // 与核数成反比 ⇒ IO 掉到几十 KB 以下时把核数压到 1~6 是净亏。同机同码 msprof 剔首 mean：
@@ -187,6 +185,28 @@ namespace optiling {
         // 合批段也吃这条下界：merge_cap 的初值就是 8（上面的 R15 注释给了理由），于是提交 7 的
         // 那句 `if (core_cap < 8)` 在这里**一字未动** ⇒ 本轮与提交 7 的全部差异只剩
         // "合批资格成立时 core_cap 取 merge_cap 而不是 io/8192"与那一行路由，别的一条没有。
+        // R16：上面那句"反向谷底仍在 6KB/核"作废，反向改走下面的核数律（§23.11~§23.13）。
+        // 前向 io/8192 一支与合批 merge_cap 一支一字未动，且 `if (core_cap < 8)` 那句仍在
+        // 链尾原样保留（对 merge_cap≥8 与反向下界 8 都是恒等变换）⇒ 前向全部用例的 block_dim
+        // 与提交 9 逐决策相同，可直接当 A/B 的对照组读。
+        uint64_t core_cap;
+        if (merge_ok) {
+            core_cap = merge_cap;
+        } else if (backward) {
+            // 反向谷底跟**核数**，既不跟每核字节（io/6144）也不跟每核发起数 tpc。
+            // 4 次独立扫描（p6/p6b/p7/p8）、12 条形状 ×8 个 blk 臂的真机阶梯：
+            //   io ≤ 190KiB ∧ S ≥ 32 ⇒ 谷底恒在 blk=16：c24(48KiB) 4.45→3.55 −20.2%、
+            //     c22(160KiB) 4.45→4.4、c25/c26/c27 3.1~3.3→3.0~3.2（tpc=2/4/6/8 都拿 16 核）；
+            //   S < 32 ⇒ 16 核会开出空核（反向 total_tasks=S*dTileNum，blk>S 的核没有任务），
+            //     c30(S=8/12KiB) blk=16 比 blk=8 慢 19% ⇒ 中段下界走 max(8, S/2)；
+            //   io ≥ 196KiB ⇒ "每核 16KiB"这条线才重新占优（c23 io=288KiB 两次扫描分别给
+            //     24 和 32，单点分不开 ⇒ 取两律交点 12288，不追那个分辨率之外的读数）。
+            // 换律后的 12 条：5 条快 3.0%~20.2%、7 条恒等、0 条已知变慢。
+            const uint64_t blk_guard = std::max<uint64_t>(8, std::min<uint64_t>(16, S / 2));
+            core_cap = std::max(io_bytes / 12288, blk_guard);
+        } else {
+            core_cap = io_bytes / 8192;
+        }
         if (core_cap < 8) core_cap = 8;
         if (core_cap < block_dim) block_dim = static_cast<uint32_t>(core_cap);
 

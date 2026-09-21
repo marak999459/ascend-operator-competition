@@ -111,8 +111,16 @@ static Plan plan_tiling(uint32_t S, uint32_t D, uint32_t m, bool backward,
     if (total_tasks < num_aiv) block_dim = (uint32_t)total_tasks;
     if (block_dim == 0) block_dim = 1;
     // 镜像 host 的"小档少开核"规则（实测见 code1.md §14，拐点分向见 §19.3，核数下界见 §20.4，
-    // 合批段的 sqrt 谷底见 §23.5）
-    uint64_t core_cap = merge_ok ? merge_cap : io_bytes / (backward ? 6144 : 8192);
+    // 合批段的 sqrt 谷底见 §23.5，反向核数律见 §23.13）
+    uint64_t core_cap;
+    if (merge_ok) {
+        core_cap = merge_cap;
+    } else if (backward) {
+        const uint64_t blk_guard = std::max<uint64_t>(8, std::min<uint64_t>(16, (uint64_t)S / 2));
+        core_cap = std::max(io_bytes / 12288, blk_guard);
+    } else {
+        core_cap = io_bytes / 8192;
+    }
     if (core_cap < 8) core_cap = 8;   // 合批段的 merge_cap 已 >=8 ⇒ 与 host 一样不必再分向
     if (core_cap < block_dim) block_dim = (uint32_t)core_cap;
     t.blockDim = block_dim;
