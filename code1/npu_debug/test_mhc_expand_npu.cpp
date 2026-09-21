@@ -84,7 +84,15 @@ static Plan plan_tiling(uint32_t S, uint32_t D, uint32_t m, bool backward,
 
     uint64_t total_tasks = 0;
     uint32_t block_dim = num_aiv;
-    if (S >= num_aiv) {
+    // 镜像 host 的 R15 合批资格 + sqrt 开核律（实测见 code1.md §23.4~§23.8b）
+    uint64_t io_bytes = (uint64_t)(m + 1) * S * D * elem_size;
+    uint64_t tile_bytes = (uint64_t)t.dTileLen * elem_size;
+    uint64_t merge_cap = 8;   // 下界 8：§23.8b（提交 8 取 4 时平台唯一出带的一条 +38.8%）
+    while ((merge_cap + 1) * (merge_cap + 1) <= io_bytes / 4096) ++merge_cap;
+    if (io_bytes / 131072 > merge_cap) merge_cap = io_bytes / 131072;   // §23.6c 饱和线
+    bool merge_ok = !backward && t.dTileNum == 1 && tile_bytes <= 6144 &&
+                    (tile_bytes % 32) == 0 && merge_cap * 2 <= S;
+    if (S >= num_aiv || merge_ok) {
         t.splitMode = SPLIT_ROW;
         total_tasks = S;
     } else if (!backward) {
@@ -102,10 +110,10 @@ static Plan plan_tiling(uint32_t S, uint32_t D, uint32_t m, bool backward,
     }
     if (total_tasks < num_aiv) block_dim = (uint32_t)total_tasks;
     if (block_dim == 0) block_dim = 1;
-    // 镜像 host 的"小档少开核"规则（实测见 code1.md §14，拐点分向见 §19.3）
-    uint64_t io_bytes = (uint64_t)(m + 1) * S * D * elem_size;
-    uint64_t core_cap = io_bytes / (backward ? 6144 : 8192);
-    if (core_cap < 1) core_cap = 1;
+    // 镜像 host 的"小档少开核"规则（实测见 code1.md §14，拐点分向见 §19.3，核数下界见 §20.4，
+    // 合批段的 sqrt 谷底见 §23.5）
+    uint64_t core_cap = merge_ok ? merge_cap : io_bytes / (backward ? 6144 : 8192);
+    if (core_cap < 8) core_cap = 8;   // 合批段的 merge_cap 已 >=8 ⇒ 与 host 一样不必再分向
     if (core_cap < block_dim) block_dim = (uint32_t)core_cap;
     t.blockDim = block_dim;
     t.rowsPerCore = (uint32_t)((total_tasks + block_dim - 1) / block_dim);

@@ -60,19 +60,27 @@ public:
             pipe_.InitBuffer(tmp_buf_, tiling_.dTileLen * sizeof(float));
         } else {
             const uint32_t tile_bytes = tiling_.dTileLen * elem_size_;
-            const uint32_t slots = FwdBatch() * 2;   // 环深 = 2*BS：本批写的格必不是上批 MTE3 读的格
-            pipe_.InitBuffer(fwd_b0_, tile_bytes);
-            pipe_.InitBuffer(fwd_b1_, tile_bytes);
-            // 只有攒批路径要多占的格子；BS=1 时不白占 UB
-            if (slots > 2) {
-                pipe_.InitBuffer(fwd_b2_, tile_bytes);
-                pipe_.InitBuffer(fwd_b3_, tile_bytes);
-            }
-            if (slots > 4) {
-                pipe_.InitBuffer(fwd_b4_, tile_bytes);
-                pipe_.InitBuffer(fwd_b5_, tile_bytes);
-                pipe_.InitBuffer(fwd_b6_, tile_bytes);
-                pipe_.InitBuffer(fwd_b7_, tile_bytes);
+            merge_rows_ = MergeRows(tile_bytes);
+            if (merge_rows_ >= 2) {
+                // 合批只用两格轮换，占字节 (2*merge_rows_*tile_bytes) <= 2*FWD_MERGE_BYTES
+                merge_bytes_ = merge_rows_ * tile_bytes;
+                pipe_.InitBuffer(fwd_b0_, merge_bytes_);
+                pipe_.InitBuffer(fwd_b1_, merge_bytes_);
+            } else {
+                const uint32_t slots = FwdBatch() * 2;   // 环深 = 2*BS：本批写的格必不是上批 MTE3 读的格
+                pipe_.InitBuffer(fwd_b0_, tile_bytes);
+                pipe_.InitBuffer(fwd_b1_, tile_bytes);
+                // 只有攒批路径要多占的格子；BS=1 时不白占 UB
+                if (slots > 2) {
+                    pipe_.InitBuffer(fwd_b2_, tile_bytes);
+                    pipe_.InitBuffer(fwd_b3_, tile_bytes);
+                }
+                if (slots > 4) {
+                    pipe_.InitBuffer(fwd_b4_, tile_bytes);
+                    pipe_.InitBuffer(fwd_b5_, tile_bytes);
+                    pipe_.InitBuffer(fwd_b6_, tile_bytes);
+                    pipe_.InitBuffer(fwd_b7_, tile_bytes);
+                }
             }
         }
     }
@@ -104,6 +112,50 @@ public:
     }
 
 private:
+    // 合批资格：整行(dTileNum==1) + 按行 32B 对齐 + 小 tile + 本核拿到 >=2 行。
+    // 字节门沿用 FWD_SMALL_THRESH(6144)，于是 medium(8192B)/large(14336B) 两档**逐字节不变**，
+    // 可以直接当 A/B 的恒等对照组；D 方向多 tile 的形状走原路径，不在这次改动范围内。
+    __aicore__ inline uint32_t MergeRows(uint32_t tile_bytes) const {
+        if (tiling_.splitMode != 0 || tiling_.dTileNum != 1) return 0;
+        if (tile_bytes > FWD_SMALL_THRESH || (tile_bytes & 31u) != 0) return 0;
+        const uint32_t n = task_end_ - task_begin_;
+        if (n < 2) return 0;
+        const uint32_t cap = FWD_MERGE_BYTES / tile_bytes;
+        return (n < cap) ? n : cap;
+    }
+
+    // 合批前向：一批 = 本核连续 L 行。读侧一条 blockCount=1 的 DMA（这 L 行在 x 里本来就连续，
+    // 与逐行读只差长度）；写侧每个副本一条 DMA，用 blockCount=L + GM 侧 gap 表达"落点跨 m 行跳"。
+    // 字段口径两条都由 §14.9 的单核探针钉死：DataCopyPad 下 blockLen/gap 单位=字节，
+    // 且 stride=0 的含义是"该侧按 blockLen 前进"（不是冻结）——这里要的正是源侧前进。
+    __aicore__ inline void ProcessForwardMerged() {
+        const uint32_t rb = tiling_.dTileLen * elem_size_;
+        const uint32_t d = tiling_.D;
+        const uint32_t m = tiling_.m;
+        DataCopyPadExtParams<DT_X> pp{false, 0, 0, static_cast<DT_X>(0)};
+        uint32_t t = task_begin_;
+        uint32_t slot = 0;
+        bool first = true;
+        while (t < task_end_) {
+            uint32_t L = task_end_ - t;
+            if (L > merge_rows_) L = merge_rows_;
+            auto buf = (slot == 0) ? fwd_b0_.Get<DT_X>() : fwd_b1_.Get<DT_X>();
+            if (!first) PipeBarrier<PIPE_ALL>();   // 两格轮换：读回本格之前先等上一批 MTE3 腾空
+            first = false;
+            DataCopyExtParams rd{1, L * rb, 0, 0, 0};
+            DataCopyPad(buf, x_gm_[static_cast<int64_t>(t) * d], rd, pp);
+            PipeBarrier<PIPE_ALL>();               // 本批落地之后才允许 MTE3 读它
+            // {count, len, srcStride, dstStride, rsv}：源连续前进，目的每块跳 m 行（gap=(m-1)*rb 字节）
+            DataCopyExtParams wr{static_cast<uint16_t>(L), rb, 0, (m - 1) * rb, 0};
+            for (uint32_t k = 0; k < m; ++k) {
+                const int64_t dst = (static_cast<int64_t>(t) * m + k) * d;
+                DataCopyPad(o_gm_[dst], buf, wr);
+            }
+            t += L;
+            slot ^= 1u;
+        }
+    }
+
     // 前向批处理驱动：攒 BS 个"块"一起灌 -> 一道 PIPE_ALL -> 一起吐。
     // 环深取 2*BS：本批写入的格必然不是上一批 MTE3 正在读的格，于是"上一批的吐出"和
     // "本批的灌入"第一次真正并行，而序的强度与逐块 barrier 完全一样（这条纯搬运路径上
@@ -142,6 +194,7 @@ private:
     }
 
     __aicore__ inline void ProcessForward() {
+        if (merge_rows_ >= 2) { ProcessForwardMerged(); return; }
         // 三条支路各自编译期展开（BS 换成运行时变量会丢掉内层循环展开，实测更慢）
         const uint32_t bs = FwdBatch();
         if (bs >= FWD_BATCH_SMALL) ProcessForwardN<FWD_BATCH_SMALL>();
@@ -260,6 +313,7 @@ private:
     static constexpr uint32_t FWD_BATCH_SMALL = 4;        // 整行小 tile：攒 4 块（R11，见 code1.md §19）
     static constexpr uint32_t FWD_THRESH = 12288;         // 单块字节数：过了才走大 tile 攒批
     static constexpr uint32_t FWD_SMALL_THRESH = 6144;    // 单块字节数：<= 此值才够开 8 格环
+    static constexpr uint32_t FWD_MERGE_BYTES = 16384;    // 合批单格 UB 上限；两格轮换 = 32KB <= 48KB 预算
     TBuf<TPosition::VECCALC> fwd_b0_;
     TBuf<TPosition::VECCALC> fwd_b1_;
     TBuf<TPosition::VECCALC> fwd_b2_;
@@ -274,6 +328,8 @@ private:
     uint32_t elem_size_;
     uint32_t task_begin_;
     uint32_t task_end_;
+    uint32_t merge_rows_ = 0;
+    uint32_t merge_bytes_ = 0;
 };
 
 template <typename DT_X, bool BACKWARD>

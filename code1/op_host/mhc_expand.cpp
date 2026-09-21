@@ -101,6 +101,30 @@ namespace optiling {
         tiling->dTileNum = (D + d_tile_len - 1) / d_tile_len;
         tiling->dTailLen = D - (tiling->dTileNum - 1) * d_tile_len;
 
+        // ---- 合批量与合批资格（R15 真机实测 2026-09-22，code1.md §23.4~§23.8b）----
+        // 四条硬条件与 kernel 侧 MergeRows() 逐字对齐：前向 + 整行(dTileNum==1) +
+        // tile<=6144B(FWD_SMALL_THRESH) + 32B 对齐。第五条件"每核 >=2 行"要由核数决定，
+        // 这里用 merge_cap*2<=S 一起判掉 ⇒ merge_ok 为真时按 merge_cap 开核，合批**必然**发生，
+        // 不需要到了设备侧再退回来。（下界 8 因此把资格门槛抬到 S>=16；S<16 退回原 ELEMENT 面。）
+        const uint64_t io_bytes = static_cast<uint64_t>(m + 1) * static_cast<uint64_t>(S) *
+                                  static_cast<uint64_t>(D) * elem_size;
+        const uint64_t tile_bytes = static_cast<uint64_t>(d_tile_len) * elem_size;
+        // 下界取 8 而不是 4（真机读数，§23.8b）：io=12/24/48KB 合批态 blk=4 与 blk=8 的差
+        // <=0.3us、在单点噪声带内（2.1/2.3、2.0/2.0、1.8/2.1），而 S=200/tile=256B 那条
+        // （每核行数最大的一段）谷底正落在 blk=8：2.2us，比 io/8192 给的 18 核快 27%。
+        // 取 4 的那一版在平台上把唯一出带的一条用例打慢了 38.8% —— 本地既然分辨不出收益，
+        // 就退回到两侧都有读数的那个值。blk=2 仍然明确变差（每核两批 => 两道 barrier）。
+        uint64_t merge_cap = 8;
+        while ((merge_cap + 1) * (merge_cap + 1) <= io_bytes / 4096) ++merge_cap;
+        // io ≥ 4.2MB 之后进入带宽饱和段，√ 律会让位给"每核最多 128KiB"这条满开核线：
+        // 实测 io=5.24MB 的谷底回到 blk=40（5.05us），按 √ 给的 35 反而贵 3.8%（§23.6c）。
+        // 交点 sqrt(io/4096)=io/131072 恰在 4.19MB，与数据一致；io>6.55MB 时两者都 ≥num_aiv
+        // ⇒ 被后面的 `core_cap < block_dim` 夹成满开核，中大档天然恒等。
+        const uint64_t sat_cap = io_bytes / 131072;
+        if (sat_cap > merge_cap) merge_cap = sat_cap;
+        const bool merge_ok = !backward && tiling->dTileNum == 1 && tile_bytes <= 6144 &&
+                              (tile_bytes % 32) == 0 && merge_cap * 2 <= S;
+
         // ---- 切分决策（"切分最优"得分点，DESIGN.md §3.5） ----
         uint32_t num_aiv = static_cast<uint32_t>(num_cores_aiv);
         if (num_aiv == 0) num_aiv = 1;
@@ -108,7 +132,10 @@ namespace optiling {
         uint32_t split_mode = SPLIT_ROW;
         uint32_t block_dim = num_aiv;
 
-        if (S >= num_aiv) {
+        // R15/H4：S<num_aiv 的前向原来一律被推到 STREAM/ELEMENT，于是永远过不了合批的门。
+        // merge_ok 已经保证了"改走 ROW 之后每核至少 2 行"，所以这里放它进来是合批生效的
+        // 前置条件，不是额外的自由度（实测 S=32/S=8 两条 −24%~−31%，§23.6b）。
+        if (S >= num_aiv || merge_ok) {
             // 行数足够 → 按 token 行切核（首选，每核负责连续若干整行）
             split_mode = SPLIT_ROW;
             total_tasks = S;
@@ -141,13 +168,27 @@ namespace optiling {
         // 拐点**分向**取：前向在 R11 把 barrier 按块摊薄（整行小 tile 攒 4 块）之后谷底左移到
         // 8KB/核 = 96KB/12，c0/c2 各三轮交替读到 2.6us（同形 BS=1@16 为 3.0us）；反向不经攒批
         // 那条路，谷底仍在 6KB/核。medium(42MB)/large(8.4GB) 远不到拐点，仍按 num_aiv 满开核。
-        const uint64_t io_bytes = static_cast<uint64_t>(m + 1) * static_cast<uint64_t>(S) *
-                                  static_cast<uint64_t>(D) * elem_size;
-        const uint64_t min_io_per_core = backward ? 6144 : 8192;   // 反向 6KB/核、前向 8KB/核
-        uint64_t core_cap = io_bytes / min_io_per_core;
-        if (core_cap < 1) core_cap = 1;
+        // 注意：这条只在 IO 不小于 core_floor*min_io_per_core 的那一段成立，再往小走方向相反（R13）。
+        // R15：合批段用上面算好的 sqrt 谷底（下界 8，理由见上面的 §23.8b 注释）；其余形状一律
+        // 沿用原来的线性律。上面那条 8KB/核 的拐点是在**不合批**（每核发起数 = tpc*(1+m)）下
+        // 量出来的，合批把发起数与每核行数解耦之后谷底左移、且在 4~8 之间是平的：
+        // io=96/150/192/192/216KB 五条取 blk=8 时对原线性律(12/18/24/24/27)是
+        // -16%/-27%/-31%/-28%/-35%（code1.md §23.4、§23.8b 两张表；blk=4 只再快 <=0.1us，不出噪声带）。
+        uint64_t core_cap = merge_ok ? merge_cap
+                                     : io_bytes / (backward ? 6144 : 8192);
+        // ---- R13（真机实测 2026-09-21，code1.md §20）：小 IO 段上面这条要反向，用核数下界封住 ----
+        // 固定派发成本在 blk<=8 内几乎不涨（空 kernel 直测 1.2~2.1us），而每核串行 DMA 条数
+        // 与核数成反比 ⇒ IO 掉到几十 KB 以下时把核数压到 1~6 是净亏。同机同码 msprof 剔首 mean：
+        //   前向 3KB blk1->8 为 3.3->2.2us，12KB 5.0->2.3us，24KB(原 blk=3) 3.7->2.7us
+        //   反向 3KB 4.0->2.1us，24KB(原 blk=4) 4.1->3.0us；反向 96KB 要到 blk16 才降到 3.5us
+        // 8 是这条阶梯在 3KB~96KB 全段的谷底（一律抬到 16 会回弹 0.3~0.5us）。
+        // io_bytes >= 8*每核拐点（前向 8KB*8=64KB、反向 6KB*8=48KB）时 core_cap 本就不小于 8，
+        // 这个 max 是恒等变换 ⇒ 中大形状拿到的核数不变。
+        // 合批段也吃这条下界：merge_cap 的初值就是 8（上面的 R15 注释给了理由），于是提交 7 的
+        // 那句 `if (core_cap < 8)` 在这里**一字未动** ⇒ 本轮与提交 7 的全部差异只剩
+        // "合批资格成立时 core_cap 取 merge_cap 而不是 io/8192"与那一行路由，别的一条没有。
+        if (core_cap < 8) core_cap = 8;
         if (core_cap < block_dim) block_dim = static_cast<uint32_t>(core_cap);
-
 
         tiling->splitMode = split_mode;
         tiling->blockDim = block_dim;
