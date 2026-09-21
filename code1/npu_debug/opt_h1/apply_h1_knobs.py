@@ -27,6 +27,12 @@
 #   MHC_MERGE_FLOOR=<n>   把 sqrt 合批律的**初值** 8 换掉（之后仍会被 while 长上去，只在 io 小段有效）
 #   MHC_FORCE_ROW         允许 S<num_aiv 且不合批也走 ROW 切分（H4 原型）
 #   MHC_NO_MERGE          kernel 的 MergeRows() 直接 return 0（同构建的 base 臂）
+#   MHC_SHAPE=<fwd|bwd>,<fp16|bf16>,<S>,<D>,<m>
+#                         R17：prof2 分支里换掉整条形状 ⇒ 新形状只改环境变量、不再重编译。
+#                         配套仍需 MHC_PCASE=<合法下标>(只用来取默认 reps) + MHC_REPS=<n>。
+#                         为什么必须有它：R17 之前每加一档形状就要动 pcs[] 表 + 重建（一次 6~8 分钟），
+#                         而反向 µs 档（case5 是分数最贵的一条）的 blk<8 从来没进过扫描 ——
+#                         要扫 4~5 条形状 × 8 档核数，重编译的时间比扫描本身还长。
 import os, sys, shutil, hashlib
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -119,6 +125,27 @@ EDITS = [
   "        const int v = std::atoi(fb);\n"
   "        if (v > 0) block_dim = (uint32_t)v;\n"
   "    }\n"),
+
+ # ---- harness prof2 分支：环境变量换形状（R17，加一档形状不必重编译） ----
+ (F_HARN,
+  "        RUNP(c.nm, c.bwd, c.dt, c.S, c.D, c.m, reps);\n",
+  "        if (const char *shp = getenv(\"MHC_SHAPE\")) {   // [PROBE ONLY] 形如 bwd,fp16,64,256,2\n"
+  "            const int b = (std::strncmp(shp, \"bwd\", 3) == 0);\n"
+  "            int dtype = DT_FP16; unsigned Sh = 0, Dh = 0, mh = 0;\n"
+  "            const char *q = std::strchr(shp, ',');\n"
+  "            if (q) {\n"
+  "                if (std::strncmp(q + 1, \"bf16\", 4) == 0) dtype = DT_BF16;\n"
+  "                q = std::strchr(q + 1, ',');\n"
+  "            }\n"
+  "            if (q && sscanf(q + 1, \"%u,%u,%u\", &Sh, &Dh, &mh) == 3 && Sh && Dh && mh) {\n"
+  "                RUNP(b ? \"probe-bwd\" : \"probe-fwd\", b != 0, dtype, Sh, Dh, mh, reps);\n"
+  "            } else {\n"
+  "                printf(\"MHC_SHAPE must be fwd|bwd,fp16|bf16,S,D,m\\n\");\n"
+  "                return 2;\n"
+  "            }\n"
+  "        } else {\n"
+  "            RUNP(c.nm, c.bwd, c.dt, c.S, c.D, c.m, reps);\n"
+  "        }\n"),
 ]
 
 def md5(p):
