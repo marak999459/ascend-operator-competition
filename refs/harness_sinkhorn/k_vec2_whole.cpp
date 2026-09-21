@@ -1,15 +1,20 @@
 // Kernel: mHC-Sinkhorn (Sinkhorn-Knopp double stochastic), vectorized step-1
+//   + whole-tile row reduction (one vcadd instead of n per-row ReduceSum/ReduceMax)
 //
 // 910B3 + CANN 9.0.0. Layout invariant: every UB row occupies RS=8 floats (=32B),
 // so all vector operands stay 32B aligned for n in {4,6,8}.
 //
-// Row reductions are packed into red_[0..n-1] (one float per row) and turned into
-// full-row divisors by a single Brcb, which replicates each of 8 source scalars
-// across one whole 32B block -- including that row's padding lanes. Because
-// 0/(s+eps) == 0, padding held at 0 is a fixed point of both normalizations, so a
-// whole-region Div replaces one Div per row. Padding is seeded with a large
-// negative sentinel at load time so exp() flushes it to 0 and row-max is never
-// taken over the sentinel.
+// Per-row max/sum are produced by a single WholeReduceMax/WholeReduceSum with
+// count=n, repeatTime=n and srcRepStride=1 (one 32B block per row), which packs the
+// n results at red_[0..n-1]. dstRepStride counts elements, srcRepStride counts
+// 32B blocks. Because count masks the padding lanes, the per-row reductions never
+// see the NEG_PAD tail of a row.
+//
+// Those n results feed one Brcb, which replicates each of 8 source scalars across a
+// whole 32B block -- including that row's padding lanes. 0/(s+eps) == 0, so padding
+// held at 0 is a fixed point of both normalizations and a whole-region Div replaces
+// one Div per row. Padding is seeded with a large negative sentinel at load time so
+// exp() flushes it to 0 and row-max is never taken over the sentinel.
 //
 // Column sums need no replication at all: they live in one block that every row's
 // Div reuses as its shared third operand.
@@ -59,7 +64,6 @@ public:
         pipe_.InitBuffer(red_buf_, nf);
         pipe_.InitBuffer(bcast_buf_, nf);
         pipe_.InitBuffer(cs_buf_, nf);
-        pipe_.InitBuffer(tmp_buf_, nf);
         pipe_.InitBuffer(hin_buf_, N_MAX * RH * sizeof(DT_LOGITS));
         pipe_.InitBuffer(hout_buf_, N_MAX * RH * sizeof(DT_LOGITS));
     }
@@ -116,10 +120,8 @@ private:
 
     // red_[0..n-1] = per-row max, replicated by one Brcb, then subtracted wholesale.
     __aicore__ inline void SubtractRowMax(int32_t n, LocalTensor<float> mat, LocalTensor<float> red,
-                                          LocalTensor<float> bcast, LocalTensor<float> tmp) {
-        for (int32_t i = 0; i < n; ++i) {
-            ReduceMax<float>(red[i], mat[i * RS], tmp, n);
-        }
+                                          LocalTensor<float> bcast) {
+        WholeReduceMax<float>(red, mat, n, n, 1, 1, 1, ReduceOrder::ORDER_ONLY_VALUE);
         PipeBarrier<PIPE_V>();
         Brcb<float>(bcast, red, 1, BrcbRepeatParams());
         PipeBarrier<PIPE_V>();
@@ -127,10 +129,8 @@ private:
     }
 
     __aicore__ inline void RowNormalize(int32_t n, LocalTensor<float> mat, LocalTensor<float> red,
-                                        LocalTensor<float> bcast, LocalTensor<float> tmp) {
-        for (int32_t i = 0; i < n; ++i) {
-            ReduceSum<float>(red[i], mat[i * RS], tmp, n);
-        }
+                                        LocalTensor<float> bcast) {
+        WholeReduceSum<float>(red, mat, n, n, 1, 1, 1);
         PipeBarrier<PIPE_V>();
         Adds(red, red, eps_, n);
         Brcb<float>(bcast, red, 1, BrcbRepeatParams());
@@ -161,16 +161,15 @@ private:
         LocalTensor<float> red = red_buf_.Get<float>();
         LocalTensor<float> bcast = bcast_buf_.Get<float>();
         LocalTensor<float> cs = cs_buf_.Get<float>();
-        LocalTensor<float> tmp = tmp_buf_.Get<float>();
 
         LoadRows(n, base, mat);
-        SubtractRowMax(n, mat, red, bcast, tmp);
+        SubtractRowMax(n, mat, red, bcast);
         Exp(mat, mat, n * RS);
-        RowNormalize(n, mat, red, bcast, tmp);
+        RowNormalize(n, mat, red, bcast);
         ColNormalize(n, mat, cs);
 
         for (uint32_t it = 1; it < num_iters_; ++it) {
-            RowNormalize(n, mat, red, bcast, tmp);
+            RowNormalize(n, mat, red, bcast);
             ColNormalize(n, mat, cs);
         }
 
@@ -182,7 +181,6 @@ private:
     TBuf<TPosition::VECCALC> red_buf_;
     TBuf<TPosition::VECCALC> bcast_buf_;
     TBuf<TPosition::VECCALC> cs_buf_;
-    TBuf<TPosition::VECCALC> tmp_buf_;
     TBuf<TPosition::VECCALC> hin_buf_;
     TBuf<TPosition::VECCALC> hout_buf_;
     GlobalTensor<DT_LOGITS> x_gm_;

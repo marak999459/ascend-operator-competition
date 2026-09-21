@@ -1,18 +1,26 @@
-// Kernel: mHC-Sinkhorn (Sinkhorn-Knopp double stochastic), vectorized step-1
+// Kernel: mHC-Sinkhorn step-3 = step-2 (WholeReduce) + one broadcast Div for the
+// whole column path.
 //
 // 910B3 + CANN 9.0.0. Layout invariant: every UB row occupies RS=8 floats (=32B),
 // so all vector operands stay 32B aligned for n in {4,6,8}.
 //
-// Row reductions are packed into red_[0..n-1] (one float per row) and turned into
-// full-row divisors by a single Brcb, which replicates each of 8 source scalars
-// across one whole 32B block -- including that row's padding lanes. Because
-// 0/(s+eps) == 0, padding held at 0 is a fixed point of both normalizations, so a
-// whole-region Div replaces one Div per row. Padding is seeded with a large
-// negative sentinel at load time so exp() flushes it to 0 and row-max is never
-// taken over the sentinel.
+// Per-row max/sum are produced by a single WholeReduceMax/WholeReduceSum with
+// count=n, repeatTime=n and srcRepStride=1 (one 32B block per row), which packs the
+// n results at red_[0..n-1]. dstRepStride counts elements, srcRepStride counts
+// 32B blocks. Because count masks the padding lanes, the per-row reductions never
+// see the NEG_PAD tail of a row.
 //
-// Column sums need no replication at all: they live in one block that every row's
-// Div reuses as its shared third operand.
+// Those n results feed one Brcb, which replicates each of 8 source scalars across a
+// whole 32B block -- including that row's padding lanes. 0/(s+eps) == 0, so padding
+// held at 0 is a fixed point of both normalizations and a whole-region Div replaces
+// one Div per row. Padding is seeded with a large negative sentinel at load time so
+// exp() flushes it to 0 and row-max is never taken over the sentinel.
+//
+// Column sums live in one block and every row divides by that same block, so the
+// column path is a single Div in broadcast-repeat form: the 4th argument is an
+// ELEMENT COUNT on this arch (SetMask<T>(len) -> set_vector_mask), count = n*RS <= 64
+// fits one repeat, and src1BlkStride=0 holds the divisor still while dst/src0 step
+// block by block. That is one vdiv where step-2 issued n.
 //
 // Only in-core PipeBarrier is used (never SyncAll: it is a cross-core barrier and
 // deadlocks whenever batch is not a multiple of coreNum).
@@ -59,7 +67,6 @@ public:
         pipe_.InitBuffer(red_buf_, nf);
         pipe_.InitBuffer(bcast_buf_, nf);
         pipe_.InitBuffer(cs_buf_, nf);
-        pipe_.InitBuffer(tmp_buf_, nf);
         pipe_.InitBuffer(hin_buf_, N_MAX * RH * sizeof(DT_LOGITS));
         pipe_.InitBuffer(hout_buf_, N_MAX * RH * sizeof(DT_LOGITS));
     }
@@ -116,10 +123,8 @@ private:
 
     // red_[0..n-1] = per-row max, replicated by one Brcb, then subtracted wholesale.
     __aicore__ inline void SubtractRowMax(int32_t n, LocalTensor<float> mat, LocalTensor<float> red,
-                                          LocalTensor<float> bcast, LocalTensor<float> tmp) {
-        for (int32_t i = 0; i < n; ++i) {
-            ReduceMax<float>(red[i], mat[i * RS], tmp, n);
-        }
+                                          LocalTensor<float> bcast) {
+        WholeReduceMax<float>(red, mat, n, n, 1, 1, 1, ReduceOrder::ORDER_ONLY_VALUE);
         PipeBarrier<PIPE_V>();
         Brcb<float>(bcast, red, 1, BrcbRepeatParams());
         PipeBarrier<PIPE_V>();
@@ -127,10 +132,8 @@ private:
     }
 
     __aicore__ inline void RowNormalize(int32_t n, LocalTensor<float> mat, LocalTensor<float> red,
-                                        LocalTensor<float> bcast, LocalTensor<float> tmp) {
-        for (int32_t i = 0; i < n; ++i) {
-            ReduceSum<float>(red[i], mat[i * RS], tmp, n);
-        }
+                                        LocalTensor<float> bcast) {
+        WholeReduceSum<float>(red, mat, n, n, 1, 1, 1);
         PipeBarrier<PIPE_V>();
         Adds(red, red, eps_, n);
         Brcb<float>(bcast, red, 1, BrcbRepeatParams());
@@ -138,9 +141,10 @@ private:
         Div(mat, mat, bcast, n * RS);
     }
 
-    // One row-wide block holds every column sum, so each row's Div can reuse it as
-    // the shared third operand and the column axis needs no broadcast. Lanes >= n
-    // of cs end up as plain eps, which keeps the padding lanes of mat pinned at 0.
+    // One row-wide block holds every column sum, so the whole column path is a single
+    // broadcast Div: src1BlkStride=0 pins cs while dst/src0 step one block per row.
+    // Lanes >= n of cs end up as plain eps, which keeps the padding lanes of mat
+    // pinned at 0.
     __aicore__ inline void ColNormalize(int32_t n, LocalTensor<float> mat, LocalTensor<float> cs) {
         Duplicate(cs, 0.0f, RS);
         for (int32_t i = 0; i < n; ++i) {
@@ -148,9 +152,14 @@ private:
         }
         PipeBarrier<PIPE_V>();
         Adds(cs, cs, eps_, RS);
-        for (int32_t i = 0; i < n; ++i) {
-            Div(mat[i * RS], mat[i * RS], cs, RS);
-        }
+        BinaryRepeatParams rp;
+        rp.dstBlkStride = 1;
+        rp.src0BlkStride = 1;
+        rp.src1BlkStride = 0;
+        rp.dstRepStride = RS;
+        rp.src0RepStride = RS;
+        rp.src1RepStride = 0;
+        Div<float>(mat, mat, cs, static_cast<uint64_t>(n * RS), 1, rp);
     }
 
     __aicore__ inline void ProcessOneMatrix(uint32_t m) {
@@ -161,16 +170,15 @@ private:
         LocalTensor<float> red = red_buf_.Get<float>();
         LocalTensor<float> bcast = bcast_buf_.Get<float>();
         LocalTensor<float> cs = cs_buf_.Get<float>();
-        LocalTensor<float> tmp = tmp_buf_.Get<float>();
 
         LoadRows(n, base, mat);
-        SubtractRowMax(n, mat, red, bcast, tmp);
+        SubtractRowMax(n, mat, red, bcast);
         Exp(mat, mat, n * RS);
-        RowNormalize(n, mat, red, bcast, tmp);
+        RowNormalize(n, mat, red, bcast);
         ColNormalize(n, mat, cs);
 
         for (uint32_t it = 1; it < num_iters_; ++it) {
-            RowNormalize(n, mat, red, bcast, tmp);
+            RowNormalize(n, mat, red, bcast);
             ColNormalize(n, mat, cs);
         }
 
@@ -182,7 +190,6 @@ private:
     TBuf<TPosition::VECCALC> red_buf_;
     TBuf<TPosition::VECCALC> bcast_buf_;
     TBuf<TPosition::VECCALC> cs_buf_;
-    TBuf<TPosition::VECCALC> tmp_buf_;
     TBuf<TPosition::VECCALC> hin_buf_;
     TBuf<TPosition::VECCALC> hout_buf_;
     GlobalTensor<DT_LOGITS> x_gm_;

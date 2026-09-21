@@ -40,15 +40,40 @@ g++ -std=c++17 -O2 test_mhc_sinkhorn.cpp -o test_sink \
 export ASCEND_CUSTOM_OPP_PATH=$V
 export LD_LIBRARY_PATH=$V/op_api/lib:$CANN/aarch64-linux/lib64:$LD_LIBRARY_PATH
 
+mkdir -p $T/log
 for cfg in "8 8 20" "1024 8 20" "64 4 20" "100 6 20" "1 8 20" "8192 8 20"; do
   set -- $cfg
   printf "  batch=%-6s n=%-2s iters=%-3s -> " "$1" "$2" "$3"
-  timeout 70 ./test_sink $1 $2 $3 1e-6 > /tmp/r_$1_$2.txt 2>&1
+  timeout 70 ./test_sink $1 $2 $3 1e-6 > $T/log/r_$1_$2.txt 2>&1
   rc=$?
   case $rc in
-    0)   echo "成功   | $(grep -a '输出前' /tmp/r_$1_$2.txt | head -1 | cut -c1-70)";;
+    0)   echo "成功   | $(grep -a '\[check\]' $T/log/r_$1_$2.txt | tr '\n' ' ' | cut -c1-110)";;
     2)   echo "设备崩溃";;
     124) echo "死锁超时";;
     *)   echo "退出码 $rc";;
   esac
 done
+
+# ---- 计时阶段（BENCH=1 时执行）----
+# 口径：single_* = 每次 launch 后同步；burst_avg = 连发 reps 次再同步（含启动开销下界）
+# 要看纯 kernel 时长用 PROF=1 再跑一遍（msprof 产物在 $T/prof）
+if [ "${BENCH:-0}" = "1" ]; then
+  g++ -std=c++17 -O2 $T/bench_sinkhorn.cpp -o bench_sink \
+    -I$CANN/aarch64-linux/include -I$V/op_api/include \
+    -L$CANN/aarch64-linux/lib64 -L$V/op_api/lib \
+    -lascendcl -lnnopbase -lcust_opapi 2>&1 | grep -a "error:" | head -6
+  [ -f bench_sink ] || { echo "BENCH HARNESS FAIL"; exit 1; }
+  echo "=== 计时 (reps=${REPS:-50} dtype=${DT:-fp16}) ==="
+  for cfg in "20 6 20" "1 4 20" "1 8 20" "64 8 20" "100 6 20" "1024 8 20" "8192 8 20" "20 6 100"; do
+    set -- $cfg
+    if [ "${PROF:-0}" = "1" ]; then
+      timeout 300 msprof --output=$T/prof --application="./bench_sink $1 $2 $3 ${REPS:-20} ${DT:-fp16}" \
+        > $T/log/prof_$1_$2_$3.log 2>&1
+      printf "  batch=%-6s n=%-2s iters=%-3s | " "$1" "$2" "$3"
+      grep -ah mhc_sinkhorn $T/prof/*/msprof*.csv 2>/dev/null | grep -a "aicore\|AiCore\|op_time" | head -2
+      [ -s "$T/log/prof_$1_$2_$3.log" ] && grep -a "batch=" $T/log/prof_$1_$2_$3.log | head -1
+    else
+      timeout 300 ./bench_sink $1 $2 $3 ${REPS:-50} ${DT:-fp16} 2>&1 | grep -a "batch=\|FAIL"
+    fi
+  done
+fi

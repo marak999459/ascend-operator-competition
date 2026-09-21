@@ -1,0 +1,131 @@
+### CANN=/home/developer/Ascend/cann-9.0.0 ARCH=aarch64
+
+=== 1) ReduceSum / ReduceMax 重载签名（关注是否有 workBuffer / keepDims / isAutoSync） ===
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:47:__aicore__ inline void BlockReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:63:__aicore__ inline void BlockReduceMax(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:95:__aicore__ inline void PairReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:100:__aicore__ inline void BlockReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:105:__aicore__ inline void BlockReduceMax(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:115:__aicore__ inline void PairReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:121:__aicore__ inline void RepeatReduceSum(const LocalTensor<U>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:126:__aicore__ inline void RepeatReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:145:__aicore__ inline void WholeReduceSum(const LocalTensor<U>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:150:__aicore__ inline void WholeReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:167:__aicore__ inline void WholeReduceMax(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:189:__aicore__ inline void WholeReduceSum(const LocalTensor<U>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:194:__aicore__ inline void WholeReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:200:__aicore__ inline void WholeReduceMax(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:221:__aicore__ inline void ReduceMax(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:252:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:256:__aicore__ inline void ReduceMax(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:264:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:290:__aicore__ inline void ReduceMax(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:302:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:313:__aicore__ inline __inout_pipe__(S) void GetReduceMaxMinCount(T &maxMinValue, T &maxMinIndex);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:317:__aicore__ inline __inout_pipe__(S) void GetReduceMaxMinCount(T &maxMinValue);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/activation/softmaxflashv2.h:250:__aicore__ inline void SoftmaxFlashV2(const LocalTensor<T>& dstTensor, const LocalTensor<T>& outReduceMax,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/activation/softmaxflashv2.h:293:__aicore__ inline void SoftmaxFlashV2(const LocalTensor<T>& dstTensor, const LocalTensor<T>& outReduceMax,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h:113:__aicore__ inline void ReduceMax(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h:137:__aicore__ inline void ReduceMax(
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h:216:__aicore__ inline void ReduceSum(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h:240:__aicore__ inline void ReduceSum(
+
+--- ReduceSum 声明原文（含模板参数，取前 3 处上下文） ---
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/reg_compute/kernel_reg_compute_vec_reduce_intf_impl.h:31:__simd_callee__ inline void ReduceSum(S& dstReg, V srcReg, MaskReg mask)
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/reg_compute/kernel_reg_compute_vec_reduce_intf_impl.h-32-{
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/reg_compute/kernel_reg_compute_vec_reduce_intf_impl.h-33-    ReduceSumImpl<T, U, mode, S, V>(dstReg, srcReg, mask);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/reg_compute/kernel_reg_compute_vec_reduce_intf_impl.h-34-}
+--
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h:688:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-689-    const LocalTensor<T>& sharedTmpBuffer, const int32_t mask, const int32_t repeatTime, const int32_t srcRepStride)
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-690-{
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-691-#ifdef __MSTX_DFX_REPORT__
+--
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h:777:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-778-    const LocalTensor<T>& sharedTmpBuffer, const uint64_t mask[], const int32_t repeatTime, const int32_t srcRepStride)
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-779-{
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-780-#ifdef __MSTX_DFX_REPORT__
+--
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h:935:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-936-    const LocalTensor<T>& sharedTmpBuffer, const int32_t count)
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-937-{
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_reduce_intf_impl.h-938-#ifdef __MSTX_DFX_REPORT__
+--
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:252:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-253-    const LocalTensor<T>& sharedTmpBuffer, const int32_t mask, const int32_t repeatTime, const int32_t srcRepStride);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-254-
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-255-template <typename T>
+--
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:264:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-265-    const LocalTensor<T>& sharedTmpBuffer, const uint64_t mask[], const int32_t repeatTime, const int32_t srcRepStride);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-266-
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-267-/*
+--
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h:302:__aicore__ inline void ReduceSum(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-303-    const LocalTensor<T>& sharedTmpBuffer, const int32_t count);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-304-#pragma end_pipe
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/kernel_operator_vec_reduce_intf.h-305-template <typename T>
+--
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h:216:__aicore__ inline void ReduceSum(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h-217-    const LocalTensor<uint8_t>& sharedTmpBuffer, const uint32_t srcShape[], bool srcInnerPad)
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h-218-{
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/adv_api/reduce/reduce.h-219-    // Only for AI Vector Core.
+--
+
+=== 2) MoveMask / SetVectorBuf / Queue 广播三件套 ===
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/reg_compute/dav_c310/kernel_reg_compute_maskreg_impl.h:202:__simd_callee__ inline MaskReg MoveMaskImpl()
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/reg_compute/kernel_reg_compute_maskreg_intf_impl.h:155:__simd_callee__ inline MaskReg MoveMask()
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/dav_c310/kernel_operator_vec_template_impl.h:97:        Reg::MaskReg sprLoadMaskReg = Reg::MoveMask<uint16_t>();
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/dav_c310/kernel_operator_vec_template_impl.h:125:            maskReg = Reg::MoveMask<T>();
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/dav_c310/kernel_operator_vec_template_impl.h:133:            maskReg = Reg::MoveMask<T>();
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_maskreg_intf.h:66:__simd_callee__ inline MaskReg MoveMask();
+
+=== 3) 是否存在现成的 softmax / 归一化高阶 API ===
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/softmax_flashv2_base_impl.h
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/softmax_flashv3_base_impl.h
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/softmax_flash_base_impl
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/softmax_flash_base_impl/softmax_flash_nd_process_impl.h
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/softmax_flash_base_impl/softmax_flash_basic_block_impl.h
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/simple_softmax_base_impl.h
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/softmax_common.h
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/softmax_flash_base_impl.h
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/adv_api/detail/activation/softmax/logsoftmax_base_impl.h
+
+=== 4) 逐元素 Add/Div 的非 32B 偏移是否放行（找对齐约束注释） ===
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_common_intf.h:31:using UnalignRegForLoad = vector_align;
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_common_intf.h:32:using UnalignRegForStore = vector_align;
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_common_intf.h:34:using UnalignReg = vector_align;
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:85:__simd_callee__ inline void LoadUnAlignPre(UnalignRegForLoad& ureg, __ubuf__ T* srcAddr);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:88:__simd_callee__ inline void LoadUnAlign(U& dstReg, UnalignRegForLoad& ureg, __ubuf__ T*& srcAddr,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h-89-                                        uint32_t postUpdateStride);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:92:__simd_callee__ inline void LoadUnAlign(U& dstReg, UnalignRegForLoad& ureg, __ubuf__ T* srcAddr);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:99:__simd_callee__ inline void LoadUnAlignPre(UnalignRegForLoad& ureg, __ubuf__ T* srcAddr, AddrReg& areg);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:102:__simd_callee__ inline void LoadUnAlign(U& dstReg, UnalignRegForLoad& ureg, __ubuf__ T*& srcAddr, AddrReg& areg,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h-103-                                        uint32_t inc);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:107:__simd_callee__ inline void StoreUnAlign(__ubuf__ T*& dstAddr, U& srcReg, UnalignRegForStore& ureg,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h-108-                                         uint32_t postUpdateStride);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:111:__simd_callee__ inline void StoreUnAlignPost(__ubuf__ T*& dstAddr, UnalignRegForStore& ureg, int32_t postUpdateStride);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h-117-__simd_callee__ inline void Store(__ubuf__ T* dstAddr, U& srcReg, uint32_t count);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:121:__simd_callee__ inline void StoreUnAlign(__ubuf__ T*& dstAddr, U& srcReg, UnalignRegForStore& ureg, AddrReg& areg);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:124:__simd_callee__ inline void StoreUnAlignPost(__ubuf__ T*& dstAddr, UnalignRegForStore& ureg, AddrReg& areg);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:128:__simd_callee__ inline void StoreUnAlign(__ubuf__ T* dstAddr, U& srcReg, UnalignRegForStore& ureg);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:131:__simd_callee__ inline void StoreUnAlignPost(__ubuf__ T* dstAddr, UnalignRegForStore& ureg);
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h-132-
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/include/basic_api/reg_compute/kernel_reg_compute_datacopy_intf.h:170:__simd_callee__ inline void StoreUnAlign(__ubuf__ T*& dstAddr, MaskReg& mask, UnalignRegForStore& ureg);
+
+=== 5) Exp / Reciprocal / Cast 可用性 ===
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:134:__aicore__ inline void Exp(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask[],
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:152:__aicore__ inline void Exp(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:171:__aicore__ inline void Exp(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask[],
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:189:__aicore__ inline void Exp(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:217:__aicore__ inline void Exp(const LocalTensor<T>& dst, const LocalTensor<T>& src, const int32_t& count)
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:232:__aicore__ inline void Exp(const LocalTensor<T>& dst, const LocalTensor<T>& src, const int32_t& count)
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:481:__aicore__ inline void Reciprocal(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask[],
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:499:__aicore__ inline void Reciprocal(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:518:__aicore__ inline void Reciprocal(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask[],
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:536:__aicore__ inline void Reciprocal(const LocalTensor<T>& dst, const LocalTensor<T>& src, uint64_t mask,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:564:__aicore__ inline void Reciprocal(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+/home/developer/Ascend/cann-9.0.0/aarch64-linux/asc/impl/basic_api/kernel_operator_vec_unary_intf_impl.h:580:__aicore__ inline void Reciprocal(const LocalTensor<T>& dst, const LocalTensor<T>& src,
+
+=== 6) 仿真机是否已实现 MoveMask（CPU debug 路径） ===
