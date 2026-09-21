@@ -35,7 +35,7 @@
 | 唯一未定档项 | §9 两项优化**各自的加速比**未回退重测（§4.3）；平台 8 条用例的**真实形状**未拿到（§18.5 已判定不再追） |
 
 **时间线（2026-09-20 一天内走完）**：真机首跑 ⇒ 反向全绿 / 前向 14 条全红（§11.9）→ 机理 = 前向纯搬运缺 MTE2→MTE1 序 → V1 事件配对**实测不足**、V2 窄 barrier **运行期 trap**、V3 `PipeBarrier<PIPE_ALL>` 全绿（§11.10）→ msprof 定 barrier 代价 **+5.5%**（§11.11）→ **首次提交 8/8 Pass**（§13）→ 小档差距定位 + blockDim 扫描 + "少开核"定则 → **第二次提交 case1 −24% / case5 −11%**（§14）。
-**时间线（2026-09-21 凌晨）**：P1 探针定 arch22 DMA 口径（§14.9）→ A1/A2 采纳 + **第三次提交 case1 再 −7.9%**（§16）→ 修两个判据级缺陷（计时档不比数值、pkg 会跑旧核）→ **R5~R9 事件对路线以负结果结案**（§17）→ **R10 barrier 按块摊薄采纳（前向大档净 −2.5%）+ 第四次提交 8/8**（§18）→ 前向路线以"95% 带宽规格"结案。
+**时间线（2026-09-21 凌晨）**：P1 探针定 arch22 DMA 口径（§14.9）→ A1/A2 采纳 + **第三次提交 case1 再 −7.9%**（§16）→ 修两个判据级缺陷（计时档不比数值、pkg 会跑旧核）→ **R5~R9 事件对路线以负结果结案**（§17）→ **R10 barrier 按块摊薄采纳（前向大档净 −2.5%）+ 第四次提交 8/8**（§18）→ 前向路线以"95% 带宽规格"结案 → 现场清理归档：`code1/` 散落 `.bak_*` 收敛为 1 个回滚点 + 1 个 `npu_debug/archive/`，真机 `probe1`/`sub3`/`/tmp` scratch 归档后回收（§18.7）。
 
 **一句话**：题 1 的**正确性**（真机 89+90+45 条 + 平台 8/8×4）与**性能**（中大档双向都到 910B 规格的 94.6%/94.9%，小档累计压掉 30%）双双收口；前向流水的"最后一口"已经**判死在 API 语义上**（§17），能不吃新序原语的"barrier 摊薄"也已经在 §18 吃干（−2.5%，再往下按 1/B 收敛），**题 1 目前没有已知的、可量化的、不需要新硬件语义的待动项**。
 
@@ -225,7 +225,7 @@ code1/
 ├─ op_kernel/mhc_expand_tiling.h                ← 提交文件
 ├─ op_kernel/tiling_key_mhc_expand.h            ← 提交文件
 ├─ op_kernel/mhc_expand.cpp.bak_pre_fwd_event   ← V0（修复前原始版，**长期回滚点**，§11.10.7）
-├─ op_kernel/mhc_expand.cpp.events_v1           ← V1（`SetFlag/WaitFlag` 实测版，已弃，§11.10.1）
+├─ npu_debug/mhc_expand.cpp.events_v1           ← V1（`SetFlag/WaitFlag` 实测版，已弃，§11.10.1）
 ├─ cpu_debug/                                   ← 仿真机对拍（非提交）
 │   ├─ test_mhc_expand_cpu.cpp                  ← 同源 harness：#include 内核 + 镜像 TilingFunc
 │   ├─ build_cpu.sh / run_cpu.sh                ← CANN 路径探测 + `$(uname -m)-linux` 自适应（两侧仿真机通用）
@@ -237,7 +237,7 @@ code1/
 │   ├─ build_npu.sh / run_npu.sh                ← 编译（含源陈旧判定）+ 运行期组 custom OPP 包
 │   ├─ preflight_npu.sh                         ← 到手第一条只读命令（§11.8）
 │   ├─ prof_npu.sh / prof_sum.js / prof_matrix.sh  ← msprof 采集器 + `op_summary.csv` 摘要器 + blockDim 扫描驱动
-│   ├─ *.bak_*                                  ← 内核/启动器历史备份（**都在 npu_debug/ 下，不在 op_kernel/**）
+│   ├─ archive/                                 ← 唯一的散落 `.bak_*` 归集处（4 份 git 里没有的历史工装 + 2 份远端 scratch 的 tar.xz，§18.7）
 │   ├─ prof/<tag>_<ts>/PROF_*/                  ← msprof 原始产物（8 份 csv/轮，md5 双侧核对）
 │   └─ logs/                                    ← 真机 + 平台日志（本地 74 份），结论的唯一原始出处
 ├─ tools/reference.py                           ← 参考实现 + 用例导出 + 对拍自检（**权威判据来源**）
@@ -559,7 +559,7 @@ in_que_.FreeTensor(x_local);                   // :121  只保证 VEC 已消费�
 #### 11.10.7 偏离声明与回滚
 
 用户批准 (a) 事件配对；实测 (a) 不足、最终落地当时列为 (c) 的 `PipeBarrier<PIPE_ALL>` ⇒ **偏离已明写在此，供追溯**。
-**回滚只需** `cp op_kernel/mhc_expand.cpp.bak_pre_fwd_event op_kernel/mhc_expand.cpp`（回到 V0，前向会重新全红）。中间版本留档：`.bak_pre_fwd_event` = V0、`.events_v1` = V1。
+**回滚只需** `cp op_kernel/mhc_expand.cpp.bak_pre_fwd_event op_kernel/mhc_expand.cpp`（回到 V0，前向会重新全红）。中间版本留档：`op_kernel/mhc_expand.cpp.bak_pre_fwd_event` = V0、`npu_debug/mhc_expand.cpp.events_v1` = V1。
 
 ### 11.11 `msprof` 性能基线与 barrier A/B（21:26–21:30）
 
@@ -782,7 +782,7 @@ block_dim   = min(block_dim, max(1, io_bytes / 6144))
 - `code1/npu_debug/probe_dma/`：`mk_probe.py`（6 条锚点**先全部验唯一**再落笔，输出 `all 6 anchors unique`，每文件留 `.bak_pre_probe`）、`fwd_probe.cpp`（探针本体）、`run_probe.sh`（一次构建 + 每变体独立进程 + 控制在前，`VAR="2 3 2 3"` 可只复测）。
 - 探针版三文件 md5：kernel `53ee60e5→770b564a`、host `c76d30be→16e1da6f`、harness `d23a1647→65e33fcc`（4 个变体共用同一份构建）。
 - **提交面完好（本地 + 构建树 `~/ops_comp/code1` 双向核对）**：kernel `53ee60e5…` / host `c76d30be…` / tiling.h `f759a052…` / tiling_key `267e0125…` 与 §14.7 定档值一致，合规 grep（`printf|fflush|fprintf|std::cout|TODO|FIXME|#if 0|getenv|PROBE`）**零命中**。
-- 证据：`code1/npu_debug/logs/probe_dma_20260921_012037.log`（md5 `534ee28c395fde5cba778b897feef27c`，远端=本地，4 变体各 1 次）与复测 `probe_dma_20260921_013132.log`（md5 `b54856065ef374407cafcdcce2cfe935`，`m=2/3` 各 2 次；日志里 `op package up-to-date, ts=01:20:58` + `libcust_opapi.so ts` 未变 ⇒ 与首轮**同一份构建**，差异只可能是运行期）。隔离树 `~/ops_comp/probe1` **保留未删**（等用户处置；`rm -rf ~/ops_comp/probe1` 即可回收 118 MB）。
+- 证据：`code1/npu_debug/logs/probe_dma_20260921_012037.log`（md5 `534ee28c395fde5cba778b897feef27c`，远端=本地，4 变体各 1 次）与复测 `probe_dma_20260921_013132.log`（md5 `b54856065ef374407cafcdcce2cfe935`，`m=2/3` 各 2 次；日志里 `op package up-to-date, ts=01:20:58` + `libcust_opapi.so ts` 未变 ⇒ 与首轮**同一份构建**，差异只可能是运行期）。隔离树 `~/ops_comp/probe1` 当时保留未删（探针可复现的前提），§18.7 已归档为 `npu_debug/archive/probe1_sub3_20260921.tar.xz`（含探针三文件与 118 份运行日志）后回收。
 
 > **交接状态（2026-09-20 23:45 → 2026-09-21 文档整理）**：本轮 = "查小档固定开销"那条零成本第一步的完整执行（定位 → 扫描 → 定则 → 回归 → 提交），提交源只有 `op_host/mhc_expand.cpp` 一个文件变化（`c76d30be…`）。
 > 2026-09-21：本文按"删无用 + 合并同类"重构（A 类），通用坑移入 `算子开发工作流.md §6`（B 类）；**结论、数字、md5 一字未改**，§10.0 与 §14 等被外部引用的锚点全部保留。
@@ -952,6 +952,34 @@ __aicore__ inline void ProcessForward() {    // ≥12KB/tile 才攒批，否则�
 - B=4 不做：收益按 1/B 收敛（B=2 拿到 −2.5%，B=4 上界再 −1.2%），而环 8 块需要把 host 的 `ub_size/4` 放宽到 `/8` ⇒ `dTileLen` 会被腰斩、A/B 不再干净。**在 94.7% 带宽贴上用一次"会破坏形状可比性"的改动换 ≤1.2%**，判不值。
 
 ⇒ **题 1 前向路线结案**（连同 §17 的事件对负结果、§14.9 的源冻结否定）：中大档两条路径都到 95% 规格，唯一残余缺口在 §14.8 判过 ROI 极低的小档固定开销。本轮之后**题 1 没有已知的、可量化的、不需要新硬件语义的待动项**。
+
+### 18.7 现场清理与归档（2026-09-21 08:20–08:28，本地 + 真机 `02aeb`）
+
+路线已收口，把历轮实验留下的散落文件清了一遍。**判据：删之前先证明"内容在别处存在"**（git 里、archive 目录里、或归档 tar 里做过逐文件 md5 往返比对）。
+
+**本地（`code1/`）**
+
+| 处置 | 文件（md5 前 8 位） | 依据 |
+|---|---|---|
+| 删除 | `cpu_debug/test_mhc_expand_cpu.cpp.bak_pre_ieee` 46681732、`npu_debug/mhc_expand.cpp.bak_pre_chunk` 53ee60e5、`npu_debug/mhc_expand_tiling.h.bak_pre_chunk` f759a052 | git 里逐字节存在（`git show e330077:code1/op_kernel/mhc_expand.cpp` = 53ee60e5；f759a052 更简单——它和**当前提交的 `op_kernel/mhc_expand_tiling.h` 是同一份**） |
+| 删除（未跟踪的散落副本） | `op_kernel/mhc_expand.cpp.bak_pre_a` 53ee60e5、`op_kernel/mhc_expand.cpp.bak_pre_r10` daf2b8ed、`npu_debug/code1.md.bak_pre_reorg` c63cc337、5 个 `nul` | 三份都有正本：前两者 = git 里的 `e330077`/`bc2057b` 两版内核，`code1.md.bak_pre_reorg` = `40a383b^:code1.md`（重构前那份 1122 行版，实测同 md5）；`nul` 是 Windows 下 `>nul` 写错的产物 |
+| 移入 `npu_debug/archive/`（加 `cpu_debug__`/`npu_debug__` 前缀保原路径） | `npu_debug__mhc_expand.cpp.bak_pre_abl` a16c371d、`cpu_debug__test_mhc_expand_cpu.cpp.bak_pre_mtile` 93ecb1e0、`npu_debug__test_mhc_expand_npu.cpp.bak_pre_ieee` c7a3e698、`npu_debug__test_mhc_expand_npu.cpp.bak_pre_prof2` 9491224d | git 里**没有**这四份（HEAD 的 code1 只跟踪 8 个 `.bak_*`，这四份的内容分别是被回滚的事件对内核、mtile 分支 harness、IEEE 溢出对拍、prof2 启动器）⇒ 唯一副本，只能搬不能删 |
+| 移位（改名保留原语义） | `npu_debug/mhc_expand.cpp.bak_pre_fwd_event` 0fb9e6ec → **`op_kernel/mhc_expand.cpp.bak_pre_fwd_event`** | §562 的回滚命令写的就是 `op_kernel/` 路径，原来放在 `npu_debug/` 是历史错位；现在命令与磁盘一致 |
+
+**真机 `02aeb`**（`~/ops_comp/`，清理前 196M+284M+127M+44K+56K，清理后 **code1 196M / optA 284M / logs 56K / archive 820K**）
+
+- 新建 `~/ops_comp/archive/`，两份 tar.xz **并已拉回本地 `code1/npu_debug/archive/`（md5 双侧平：`62f059b7…` 139,548B、`0765f073…` 690,444B）**：
+  - `probe1_sub3_20260921.tar.xz` = §14.9 的隔离探针树 `probe1`（源码 + `probe_dma` 注入器 + 118 份运行日志）与提交 3 的暂存树 `sub3_020552`；184 条目。**删前先做往返校验**：解出 `/tmp/arkchk` 后 `probe1/op_kernel/mhc_expand.cpp` `770b564a…`、`probe_dma/mk_probe.py` `a5c31d3d…`、`sub3_020552/op_kernel/mhc_expand.cpp` `daf2b8ed…` 三份与在树文件逐一相同。
+  - `tmp_scratch_20260921.tar.xz` = `/tmp` 上 57 个本轮实验散落件（`*.log`、`fin/sub/sub2_kernel.cpp`、`host_base.cpp`），**删除清单直接由 tar 条目生成**（`tar tJf … | sed 's#^tmp/##' | xargs -r rm -f`），避免 glob 误伤别的会话同期写的 `/tmp/*.log`。
+- 删除：`probe1`、`sub3_020552`；`code1/op_kernel/mhc_expand.cpp.bak_pass{53ee60e5,daf2b8ed}`；`optA/op_kernel/mhc_expand.cpp.bak_pre_{a1,r5,r7,r8,r9,r10}`（6 份，md5 只取到 53ee60e5 与 daf2b8ed 两个值，都在本地 git）。
+- **保留（勿删）**：`optA/op_kernel/mhc_expand.cpp.bak_pre_r6`（`run_r10.sh`/`run_r7.sh`/`run_sweep.sh` 的 `BASE`，4 处引用）与自动生成的 `.bak_pre_r*` 名册（各 `apply_r*.py` 每次运行自写，删了不影响，留着不影响）；`/tmp/r10cache/`（A/B 构建缓存，按 `apply_r10.py` 的 md5 分目录，重跑四轮交替计时全靠它）；`/tmp/{cannbot,fpsync,node-compile-cache,opencode,vscode-typescript1000}`——**不是本会话的**（`fpsync` root 所有、9 月就在；`cannbot/locks` 08:18 还在被写），不动。
+- 顺手做的唯一一件"抢救"：把 `probe1/npu_debug/prof/` 里**本地没有**的 7 个 `swF*_c0_22*` 前向 blockDim 扫描目录（546 文件）拉回 `npu_debug/prof/blockdim_20260920/`；核对后确认远端 114MB prof 的其余部分（`b2..b40`、`rule_*`、`sm_*`、`v0/v3`）与本地同名同尺寸 ⇒ 归档 tar **不含 prof**，省掉 114MB 重复品。
+- **清理后的提交树健康复验**：`~/ops_comp/code1` 四文件 md5 `038d65a0 / 3c2dadc8 / f759a052 / 267e0125` 未变，kernel `.o` 集合仍是 §18.4 那一对 `363663f846bc + 9423e52876c3`，且 `build_out/` 与运行期 `npu_debug/pkg/` 两处取值一致。
+
+**恢复口径**：本地被删项一律 `git show <commit>:<path> > <path>`（`e330077`→53ee60e5、`bc2057b`→daf2b8ed、`24356fc`→038d65a0）；远端 `probe1`/`sub3`/scratch 用 `tar xJf code1/npu_debug/archive/<name>.tar.xz -C <dir>`；本地 archive 里那 4 份 `__` 前缀文件按前缀还原回 `cpu_debug/` 或 `npu_debug/` 即可。
+
+**本地两处"删了就没了"（按既有约定留在盘上、不入库）**：`npu_debug/prof/`（§14.2 blockDim 扫描的 msprof 原始产物，实测 26MB，现含从 `probe1` 抢救回的 7 个 `swF*` 共 546 文件）与 `op_kernel/mhc_expand.cpp.bak_pre_fwd_event`（V0 长期回滚点）。要重做性能 A/B 靠的是远端 `/tmp/r10cache`（构建缓存）+ `prof/`（重新解析读数的唯一原始出处），两者都别清。
+
 
 ---
 
