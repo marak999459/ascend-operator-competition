@@ -10,6 +10,8 @@
 #             ROWS="0"  AUTO=1  ROUNDS=2
 #   ROWS=1 -> MHC_FORCE_ROW（H4 原型：S<num_aiv 的前向也走 ROW）
 #   AUTO=1 -> 先跑一组"不加任何探针"的今日面，用来复现 R14 的读数当同构建锚点
+#   COREFLOOR=<n> / MFLOOR=<n> -> 把 R13 那条无条件 blk 下界 / sqrt 合批律的初值从 8 换掉
+#       （两者默认 8 = 与提交面恒等；H1″ 的"走原式的下界检验"臂用它，硬阶梯仍用 BLKS）
 # 每行 12 列定长，本地聚合取中位数。核数一律读 msprof 设备上报的 blk=（判决行的 blk= 是
 # harness 预测值，§19.7.3）。
 set +u
@@ -26,8 +28,10 @@ if ! strings "$MHC_OPAPI_SO" | grep -q MHC_FORCE_BLK; then
     echo "### ABORT: 运行期 .so 里没有 MHC_FORCE_BLK —— 探针没生效，读数会全是默认核数"
     exit 8
 fi
-if ! strings "$MHC_OPAPI_SO" | grep -q MHC_MIN_IO; then
-    echo "### ABORT: 没有 MHC_MIN_IO —— host 补丁只吃进了部分编辑"
+if ! strings "$MHC_OPAPI_SO" | grep -q MHC_CORE_FLOOR; then
+    # R17：这道闸原来查的是 MHC_MIN_IO —— 那个旋钮随 R15 的 merge_cap 改写一起消失了（§23.14-8），
+    # 继续查它等于每次必 exit 8。现在查 MHC_CORE_FLOOR（与 MHC_FORCE_BLK 同一次编辑注入）。
+    echo "### ABORT: 没有 MHC_CORE_FLOOR —— host 补丁只吃进了部分编辑"
     exit 8
 fi
 TAG=${1:-untagged}
@@ -43,7 +47,7 @@ run_one() {   # $1=case $2=blk(auto=NA) $3=merge $4=row $5=round $6=sub-tag
     [ "$2" != "NA" ] && envs="MHC_FORCE_BLK=$2"
     [ "$3" = "off" ] && envs="$envs MHC_NO_MERGE=1"
     [ "$4" = "1" ] && envs="$envs MHC_FORCE_ROW=1"
-    line=$(env $envs MHC_MIN_IO=${MINIO:-0} bash npu_debug/prof_matrix.sh "r15_${6}" "$1" 2>&1 |
+    line=$(env $envs MHC_CORE_FLOOR=${COREFLOOR:-8} MHC_MERGE_FLOOR=${MFLOOR:-8} bash npu_debug/prof_matrix.sh "r15_${6}" "$1" 2>&1 |
            grep -E "剔首 mean=" | head -1)
     mean=$(echo "$line" | sed -n 's/.*剔首 mean=\([0-9.]*\).*/\1/p')
     p50=$(echo "$line" | sed -n 's/.*p50=\([0-9.]*\).*/\1/p')
