@@ -1,6 +1,10 @@
 // mHC-Sinkhorn 崩溃复现 harness
 // 用法: ./test_mhc_sinkhorn <batch> <n> <iters> <eps> [输入文件]
 //       DT=fp32 环境变量切到 float32 通路（比赛契约是 fp32 进 fp32 出）
+//
+// 线上字节口径：host 侧一律用 uint8 缓冲按 esz 字节/元素拼包（fp32=4B、fp16=2B），
+// 不能用 vector<uint32_t> 当元素容器 —— 那样 fp16 的 H2D 只送出前半字、D2H 又把两个
+// 半字挤进一个字，设备看到的是 1.0/0.0 交替，解码还会错位读成 0。
 #include <acl/acl.h>
 #include <aclnn/acl_meta.h>
 #include "aclnn_mhc_sinkhorn.h"
@@ -26,6 +30,32 @@ static int64_t env_int(const char *k, int64_t d) {
     return v ? atoll(v) : d;
 }
 
+// float -> fp16 位模式（截尾，够用：输入只是自造的测试数据）
+static uint16_t f32_to_f16(float v) {
+    uint32_t b;
+    memcpy(&b, &v, 4);
+    const uint32_t s = (b >> 31) & 1u;
+    int32_t e = (int32_t)((b >> 23) & 0xFFu) - 127;
+    const uint32_t m = b & 0x7FFFFFu;
+    if (e < -14) return (uint16_t)(s << 15);                        // 下溢 -> 0
+    if (e > 15)  return (uint16_t)((s << 15) | (0x1Fu << 10));      // 上溢 -> inf
+    return (uint16_t)((s << 15) | ((uint32_t)(e + 15) << 10) | (m >> 13));
+}
+
+// fp16 -> float：次正规必须走 ldexp，(1u << (exp-15)) 在 exp<15 时是负移位 = UB
+static float f16_to_f32(uint16_t hv) {
+    const uint32_t sign = (hv >> 15) & 1u, exp = (hv >> 10) & 0x1Fu, man = hv & 0x3FFu;
+    float f;
+    if (exp == 0) {
+        f = (man ? ((float)man / 1024.0f) : 0.0f) * (1.0f / 16384.0f);
+    } else if (exp == 31) {
+        f = 0.0f;                                                   // Inf/NaN 当作 0
+    } else {
+        f = (1.0f + (float)man / 1024.0f) * std::ldexp(1.0f, (int)exp - 15);
+    }
+    return sign ? -f : f;
+}
+
 int main(int argc, char **argv) {
     const int64_t batch = (argc > 1) ? atoll(argv[1]) : 8;
     const int64_t n     = (argc > 2) ? atoll(argv[2]) : 8;
@@ -36,7 +66,6 @@ int main(int argc, char **argv) {
     // DT=fp32 走比赛契约的 float32 通道（默认仍是历史 fp16 口径）
     const bool    f32   = getenv("DT") && !strcmp(getenv("DT"), "fp32");
     const size_t  esz   = f32 ? 4 : 2;
-    const uint32_t ONE  = f32 ? 0x3F800000u : 0x3C00u;   // 常量输入 = 1.0
 
     printf("=== mHC-Sinkhorn 测试: batch=%ld n=%ld iters=%ld eps=%g dtype=%s (total=%ld) ===\n",
            (long)batch, (long)n, (long)iters, eps, f32 ? "fp32" : "fp16", (long)total);
@@ -48,9 +77,26 @@ int main(int argc, char **argv) {
     CHK(aclrtCreateStream(&stream), "aclrtCreateStream");
 
     // ---- host 数据 ----
-    // 支持从文件读入随机数据（第 5 个参数）：每行一个 float，共 batch*n*n 行
+    // 支持从文件读入随机数据（第 5 个参数）：每元素一个 float，共 batch*n*n 个
     // 不指定则用常量 1.0（Sinkhorn 收敛到全 1/n，便于自检）
-    std::vector<uint32_t> hx(total, ONE);
+    std::vector<uint8_t> hxb((size_t)total * esz, 0);   // 常量输入 = 1.0
+    std::vector<uint8_t> hob((size_t)total * esz, 0);
+    const auto enc = [&](int64_t i, float v) {
+        uint8_t *p = &hxb[(size_t)i * esz];
+        if (f32) { memcpy(p, &v, 4); return; }
+        const uint16_t h = f32_to_f16(v);
+        memcpy(p, &h, 2);
+    };
+    const auto dec_in = [&](int64_t i) -> float {
+        const uint8_t *p = &hxb[(size_t)i * esz];
+        if (f32) { float f; memcpy(&f, p, 4); return f; }
+        uint16_t h; memcpy(&h, p, 2); return f16_to_f32(h);
+    };
+    const auto dec_out = [&](int64_t i) -> float {
+        const uint8_t *p = &hob[(size_t)i * esz];
+        if (f32) { float f; memcpy(&f, p, 4); return f; }
+        uint16_t h; memcpy(&h, p, 2); return f16_to_f32(h);
+    };
     if (argc > 5) {
         FILE *fi = fopen(argv[5], "rb");
         if (!fi) { printf("[FAIL] 打不开输入文件 %s\n", argv[5]); return 1; }
@@ -61,36 +107,14 @@ int main(int argc, char **argv) {
             printf("[FAIL] 输入文件元素数 %zu != %ld\n", got, (long)total);
             return 1;
         }
-        for (int64_t i = 0; i < total; ++i) {
-            const float v = fin[i];
-            if (f32) {                                   // float32 原样落位模式
-                memcpy(&hx[i], &v, 4);
-                continue;
-            }
-            // float -> fp16 位模式
-            uint32_t b;
-            memcpy(&b, &v, 4);
-            const uint32_t s = (b >> 31) & 1u;
-            int32_t e = (int32_t)((b >> 23) & 0xFFu) - 127;
-            uint32_t m = b & 0x7FFFFFu;
-            uint16_t h;
-            if (e < -14) {                       // 下溢 -> 0
-                h = (uint16_t)(s << 15);
-            } else if (e > 15) {                 // 上溢 -> inf
-                h = (uint16_t)((s << 15) | (0x1Fu << 10));
-            } else {
-                h = (uint16_t)((s << 15) | ((uint32_t)(e + 15) << 10) | (m >> 13));
-            }
-            hx[i] = h;
-        }
+        for (int64_t i = 0; i < total; ++i) enc(i, fin[i]);
         printf("[info] 已从 %s 读入 %ld 个元素\n", argv[5], (long)total);
     }
-    std::vector<uint32_t> ho(total, 0);
 
     void *dx = nullptr, *dy = nullptr;
     CHK(aclrtMalloc(&dx, total * esz, ACL_MEM_MALLOC_HUGE_FIRST), "aclrtMalloc x");
     CHK(aclrtMalloc(&dy, total * esz, ACL_MEM_MALLOC_HUGE_FIRST), "aclrtMalloc y");
-    CHK(aclrtMemcpy(dx, total * esz, hx.data(), total * esz, ACL_MEMCPY_HOST_TO_DEVICE), "H2D x");
+    CHK(aclrtMemcpy(dx, total * esz, hxb.data(), total * esz, ACL_MEMCPY_HOST_TO_DEVICE), "H2D x");
 
     // ---- 描述符 ----
     int64_t viewDims[3] = {batch, n, n};
@@ -133,35 +157,14 @@ int main(int argc, char **argv) {
     }
     printf("[OK] 同步成功，kernel 执行完成\n");
 
-    CHK(aclrtMemcpy(ho.data(), total * esz, dy, total * esz, ACL_MEMCPY_DEVICE_TO_HOST), "D2H y");
+    CHK(aclrtMemcpy(hob.data(), total * esz, dy, total * esz, ACL_MEMCPY_DEVICE_TO_HOST), "D2H y");
 
     // ---- 打印输出 + 自检 ----
-    // fp16 -> fp32：必须用 powf，不能用 (1u << (exp-15))（exp<15 时移位为负 = UB）
-    auto f16 = [](uint16_t hv) -> float {
-        const uint32_t sign = (hv >> 15) & 1u, exp = (hv >> 10) & 0x1Fu, man = hv & 0x3FFu;
-        float f;
-        if (exp == 0) {
-            f = (man ? ((float)man / 1024.0f) : 0.0f) * (1.0f / 16384.0f);   // 次正规
-        } else if (exp == 31) {
-            f = 0.0f;                                                        // Inf/NaN 当作 0
-        } else {
-            f = (1.0f + (float)man / 1024.0f) * std::ldexp(1.0f, (int)exp - 15);
-        }
-        return sign ? -f : f;
-    };
-    // 线格式 -> 浮点：fp32 直接还原作者，fp16 走上面的解码
-    auto dec_h = [&](uint32_t w) -> float {
-        if (!f32) return f16((uint16_t)w);
-        float f;
-        memcpy(&f, &w, 4);
-        return f;
-    };
-
     printf("[info] 第 0 个矩阵的 n*n 输出:\n");
     for (int64_t i = 0; i < n; ++i) {
         printf("   ");
         for (int64_t k = 0; k < n; ++k) {
-            printf("%9.5f", dec_h(ho[i * n + k]));
+            printf("%9.5f", dec_out(i * n + k));
         }
         printf("\n");
     }
@@ -172,9 +175,9 @@ int main(int argc, char **argv) {
     for (int64_t mm = 0; mm < 3 && mm < batch; ++mm) {
         for (int64_t i = 0; i < 6 && i < n * n; ++i) {
             const int64_t idx = mm * n * n + i;
-            printf("  %-6ld %-6ld %-14.6f %-14.6f %s\n", (long)mm, (long)i,
-                   dec_h(hx[idx]), dec_h(ho[idx]),
-                   (fabs(dec_h(hx[idx]) - dec_h(ho[idx])) < 1e-6) ? "<-- 相同!" : "");
+            const float a = dec_in(idx), b = dec_out(idx);
+            printf("  %-6ld %-6ld %-14.6f %-14.6f %s\n", (long)mm, (long)i, a, b,
+                   (fabs(a - b) < 1e-6) ? "<-- 相同!" : "");
         }
     }
 
@@ -184,8 +187,8 @@ int main(int argc, char **argv) {
         for (int64_t i = 0; i < n; ++i) {
             double rs = 0.0, cs = 0.0;
             for (int64_t k = 0; k < n; ++k) {
-                rs += dec_h(ho[mm * n * n + i * n + k]);
-                cs += dec_h(ho[mm * n * n + k * n + i]);
+                rs += dec_out(mm * n * n + i * n + k);
+                cs += dec_out(mm * n * n + k * n + i);
             }
             double e1 = (rs - 1.0) < 0 ? (1.0 - rs) : (rs - 1.0);
             double e2 = (cs - 1.0) < 0 ? (1.0 - cs) : (cs - 1.0);
@@ -204,7 +207,7 @@ int main(int argc, char **argv) {
             for (int64_t i = 0; i < n; ++i) {
                 double rs = 0.0;
                 for (int64_t k = 0; k < n; ++k) {
-                    rs += dec_h(ho[mm * n * n + i * n + k]);
+                    rs += dec_out(mm * n * n + i * n + k);
                 }
                 const double e = fabs(rs - 1.0);
                 if (e > worst) worst = e;
@@ -214,7 +217,7 @@ int main(int argc, char **argv) {
                 for (int64_t i = 0; i < n; ++i) {
                     double rs = 0.0;
                     for (int64_t k = 0; k < n; ++k) {
-                        rs += dec_h(ho[mm * n * n + i * n + k]);
+                        rs += dec_out(mm * n * n + i * n + k);
                     }
                     printf(" %.4f", rs);
                 }
@@ -228,24 +231,24 @@ int main(int argc, char **argv) {
     // 每个元素与 1/n 的偏差（常数输入时 Sinkhorn 收敛到全 1/n）
     double max_dev = 0.0;
     for (int64_t i = 0; i < batch * n * n; ++i) {
-        double d = dec_h(ho[i]) - 1.0 / (double)n;
+        double d = dec_out(i) - 1.0 / (double)n;
         if (d < 0) d = -d;
         if (d > max_dev) max_dev = d;
     }
     printf("[check] 与 1/n=%.5f 的最大偏差 = %.3e  %s\n", 1.0 / (double)n, max_dev,
            (max_dev < 5e-3) ? "<<< PASS" : "<<< FAIL");
 
-    // ---- 导出原始结果，供外部（Python）独立校验；fp16 文件名与字节格式保持历史口径 ----
+    // ---- 导出原始结果，供外部（Python）独立校验；文件名按 dtype 分开，字节流即线上格式 ----
     {
-        FILE *fp = fopen(f32 ? "/tmp/mhc_out_f32.bin" : "/tmp/mhc_out.bin", "wb");
+        const char *out = f32 ? "/tmp/mhc_out_f32.bin" : "/tmp/mhc_out.bin";
+        FILE *fp = fopen(out, "wb");
         if (fp) {
-            fwrite(ho.data(), esz, (size_t)total, fp);
+            fwrite(hob.data(), 1, (size_t)total * esz, fp);
             fclose(fp);
             printf("[dump] 原始 %s 已写入 %s (%ld 个)\n", f32 ? "fp32" : "fp16",
-                   f32 ? "/tmp/mhc_out_f32.bin" : "/tmp/mhc_out.bin", (long)total);
+                   out, (long)total);
         }
     }
-
 
     aclDestroyTensor(x);
     aclDestroyTensor(y);

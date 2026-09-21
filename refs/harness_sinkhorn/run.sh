@@ -47,11 +47,14 @@ for cfg in "8 8 20" "1024 8 20" "64 4 20" "100 6 20" "1 8 20" "8192 8 20"; do
   printf "  batch=%-6s n=%-2s iters=%-3s -> " "$1" "$2" "$3"
   timeout 70 ./test_sink $1 $2 $3 1e-6 > $T/log/r_$1_$2.txt 2>&1
   rc=$?
+  # CASE= 是给上层门用的机器可读判据：rc=0 只代表"没崩"，数值 PASS 必须看 harness 的
+  # <<< PASS 标记（历史上门只看"成功"二字，把一条数值全错的 kernel 放过去过）。
   case $rc in
-    0)   echo "成功   | $(grep -a '\[check\]' $T/log/r_$1_$2.txt | tr '\n' ' ' | cut -c1-110)";;
-    2)   echo "设备崩溃";;
-    124) echo "死锁超时";;
-    *)   echo "退出码 $rc";;
+    0)   if grep -aq '<<< PASS' $T/log/r_$1_$2.txt; then v=CASE=PASS; else v=CASE=FAIL; fi
+         echo "$v 成功   | $(grep -a '最大偏差' $T/log/r_$1_$2.txt | tail -1 | cut -c1-110)";;
+    2)   echo "CASE=FAIL 设备崩溃";;
+    124) echo "CASE=FAIL 死锁超时";;
+    *)   echo "CASE=FAIL 退出码 $rc";;
   esac
 done
 

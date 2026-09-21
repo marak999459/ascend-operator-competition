@@ -13,16 +13,27 @@ LABEL="${2:?missing label}"
 REPS="${3:-20}"
 BUILD="${4:-1}"
 HOST="${5:-$T/host_cur.cpp}"
+# 计时口径 = 比赛契约 dtype。§11.3~§11.12 的历史读数全是 fp16（prof_bench 旧版写死），
+# 而题面 float32 进/出（official_problem_statement.md:190,198）⇒ 默认 fp32，判决行带 dtype= 以免混口径。
+DTY="${DTY:-fp32}"
 V=$B/myopp/vendors/custom
 export ASCEND_CUSTOM_OPP_PATH=$V
 export LD_LIBRARY_PATH=$V/op_api/lib:$HOME/Ascend/cann-9.0.0/aarch64-linux/lib64:$LD_LIBRARY_PATH
 
 if [ "$BUILD" = "1" ]; then
-  bash $T/run.sh "$KERNEL" "$HOST" $T/tiling_cur.h > $T/log/profbuild_$LABEL.log 2>&1
+  # 让 run.sh 的 6 配置正确性矩阵跑在计时口径同一个 dtype 上（以前恒为 fp16，
+  # 与 prof 的 dtype 无关 ⇒ "门过了"和"计时的这条路对了"是两件不相干的事）
+  DT=$DTY bash $T/run.sh "$KERNEL" "$HOST" $T/tiling_cur.h > $T/log/profbuild_$LABEL.log 2>&1
   rc=$?
-  ok=$(grep -ac "成功" $T/log/profbuild_$LABEL.log)
-  echo "@@@@ label=$LABEL build_rc=$rc cases_ok=$ok kernel_md5=$(md5sum "$KERNEL" | cut -c1-8) host_md5=$(md5sum "$HOST" | cut -c1-8)"
+  ok=$(grep -ac 'CASE=PASS' $T/log/profbuild_$LABEL.log)
+  echo "@@@@ label=$LABEL dtype=$DTY build_rc=$rc cases_ok=$ok kernel_md5=$(md5sum "$KERNEL" | cut -c1-8) host_md5=$(md5sum "$HOST" | cut -c1-8)"
   [ "$ok" = "6" ] || { echo "### abort: correctness matrix not 6/6 (见 $T/log/profbuild_$LABEL.log)"; exit 1; }
+  # 计时前必须过 fp32 契约闸门（常量 6 配置 + 随机 3 配置对拍），build=0 复用已编好的包
+  bash $T/f32_gate.sh "$KERNEL" "$HOST" 0 > $T/log/f32prof_$LABEL.log 2>&1
+  f32ok=$(grep -ac 'cases_ok=6/6' $T/log/f32prof_$LABEL.log)
+  f32rand=$(grep -ac 'PASS: 全部矩阵与参考一致' $T/log/f32prof_$LABEL.log)
+  echo "@@@@ label=$LABEL f32_cases=$f32ok f32_rand=$f32rand/3"
+  { [ "$f32ok" = "1" ] && [ "$f32rand" = "3" ]; } || { echo "### abort: fp32 闸门未过 (见 $T/log/f32prof_$LABEL.log)"; exit 1; }
 fi
 
 cd $T/harness || exit 1
@@ -34,15 +45,15 @@ for cfg in "1 4 20" "1 8 20" "20 6 20" "64 8 20" "100 6 20" "1024 8 20"; do
   set -- $cfg
   d="$OUT/b$1_n$2_i$3"; mkdir -p "$d"
   timeout 300 msprof --task-time=on --ai-core=on --output="$d" \
-    --application="./bench_sink $1 $2 $3 $REPS fp16" > "$d/msprof.stdout" 2>&1
+    --application="./bench_sink $1 $2 $3 $REPS $DTY" > "$d/msprof.stdout" 2>&1
   mrc=$?
   CSV=$(find "$d" -name "op_summary_*.csv" 2>/dev/null | head -1)
   if [ "$mrc" != "0" ] || [ -z "$CSV" ]; then
-    echo "prof batch=$1 n=$2 iters=$3 | timed=0 MSProf_MISSING rc=$mrc"; FAIL=1; continue
+    echo "prof batch=$1 n=$2 iters=$3 | timed=0 dtype=$DTY MSProf_MISSING rc=$mrc"; FAIL=1; continue
   fi
-  python3 - "$CSV" "$1" "$2" "$3" "$LABEL" <<'PY'
+  python3 - "$CSV" "$1" "$2" "$3" "$LABEL" "$DTY" <<'PY'
 import csv, sys
-path, b, n, it, lab = sys.argv[1:6]
+path, b, n, it, lab, dty = sys.argv[1:7]
 def num(r, key):
     try:
         return float(r[key])
@@ -59,7 +70,7 @@ with open(path, newline='', encoding='utf-8', errors='replace') as fh:
         except Exception:
             pass
 if len(pairs) < 2:
-    print(f"prof batch={b} n={n} iters={it} | timed=0 tasks={len(pairs)} label={lab}")
+    print(f"prof batch={b} n={n} iters={it} | timed=0 dtype={dty} tasks={len(pairs)} label={lab}")
     sys.exit(0)
 body = pairs[1:]
 durs = [d for d, _ in body]
@@ -68,7 +79,7 @@ mean = sum(durs) / len(durs)
 cols = {k: num(r, k) for k in ('aiv_time', 'aiv_vec_time', 'aiv_scalar_time', 'aiv_mte2_time', 'aiv_mte3_time')}
 blk = r.get('Block Num', '?')
 extra = ' '.join(f"{k}={v:.3f}" for k, v in cols.items() if v is not None)
-print(f"prof batch={b} n={n} iters={it} | timed=1 label={lab} tasks={len(body)} mean={mean:.3f}us min={min(durs):.3f} max={max(durs):.3f} blk={blk} {extra}")
+print(f"prof batch={b} n={n} iters={it} | timed=1 dtype={dty} label={lab} tasks={len(body)} mean={mean:.3f}us min={min(durs):.3f} max={max(durs):.3f} blk={blk} {extra}")
 PY
   [ $? -eq 0 ] || FAIL=1
 done

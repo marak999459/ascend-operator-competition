@@ -17,7 +17,7 @@ LBL=$(basename "$KERNEL" .cpp)
 if [ "$BUILD" = "1" ]; then
   bash $T/run.sh "$KERNEL" "$HOST" $T/tiling_cur.h > $T/log/f32build_$LBL.log 2>&1
   brc=$?
-  ok=$(grep -ac "成功" $T/log/f32build_$LBL.log)
+  ok=$(grep -ac 'CASE=PASS' $T/log/f32build_$LBL.log)
   echo "@@@@ f32_gate build_rc=$brc fp16_cases_ok=$ok kernel_md5=$(md5sum "$KERNEL" | cut -c1-8) host_md5=$(md5sum "$HOST" | cut -c1-8)"
   [ "$ok" = "6" ] || { echo "### abort: fp16 矩阵不是 6/6（见 log/f32build_$LBL.log）"; exit 1; }
 fi
