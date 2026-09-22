@@ -40,10 +40,10 @@ F_HOST = os.path.join(ROOT, "op_host", "mhc_expand.cpp")
 F_KERN = os.path.join(ROOT, "op_kernel", "mhc_expand.cpp")
 F_HDR  = os.path.join(ROOT, "op_kernel", "mhc_expand_tiling.h")
 F_HARN = os.path.join(ROOT, "npu_debug", "test_mhc_expand_npu.cpp")
-BASE = {F_HOST: "f5b0c733aba4d57b5af627663911fa6d",   # 提交 10 的 host 面（R16 反向核数律）
-        F_KERN: "442c12f4448f65dfdaa1f90010f91056",   # 提交 7~10 的 kernel 面（R14 合批），四版逐字节相同
+BASE = {F_HOST: "f5b0c733aba4d57b5af627663911fa6d",   # 在榜面 = 提交 10/12 的 host（反向 io/12288 律，无发起数上界；提交 11 那一面已撤回，见 code1.md §23.20/§23.23）
+        F_KERN: "442c12f4448f65dfdaa1f90010f91056",   # 提交 7~12 的 kernel 面（R14 合批），六版逐字节相同
         F_HDR:  "f759a052a865facbb889149ea1aa37e3",   # tiling.h
-        F_HARN: "c45bec9f9a70ad1dfac31b9fad8f3546"}   # 真机 harness（镜像式所在）
+        F_HARN: "c45bec9f9a70ad1dfac31b9fad8f3546"}   # 真机 harness（镜像式所在；提交 11 的 dTileNum==1 域限制随之撤回）
 MARK = "PROBE ONLY"
 
 # (file, old, new)

@@ -1,0 +1,101 @@
+diff --git a/code1/npu_debug/test_mhc_expand_npu.cpp b/code1/npu_debug/test_mhc_expand_npu.cpp
+index ac57648..07f2f13 100644
+--- a/code1/npu_debug/test_mhc_expand_npu.cpp
++++ b/code1/npu_debug/test_mhc_expand_npu.cpp
+@@ -111,13 +111,24 @@ static Plan plan_tiling(uint32_t S, uint32_t D, uint32_t m, bool backward,
+     if (total_tasks < num_aiv) block_dim = (uint32_t)total_tasks;
+     if (block_dim == 0) block_dim = 1;
+     // 镜像 host 的"小档少开核"规则（实测见 code1.md §14，拐点分向见 §19.3，核数下界见 §20.4，
+-    // 合批段的 sqrt 谷底见 §23.5，反向核数律见 §23.13）
++    // 合批段的 sqrt 谷底见 §23.5，反向"每核 12 次发起"上界见 §23.19）
+     uint64_t core_cap;
+     if (merge_ok) {
+         core_cap = merge_cap;
+     } else if (backward) {
+         const uint64_t blk_guard = std::max<uint64_t>(8, std::min<uint64_t>(16, (uint64_t)S / 2));
+         core_cap = std::max(io_bytes / 12288, blk_guard);
++        if (t.dTileNum == 1) {   // 与 host 同域：上界只在整行模式生效（多 tile 档没标定过，§23.19-4）
++            const uint64_t issue_ceil =
++                std::max<uint64_t>(16, (total_tasks * ((uint64_t)m + 1) + 11) / 12);
++            if (core_cap > issue_ceil) {
++                // snap 到"零空核"的可行切分（机制与实测见 host 那段注释 / code1.md §23.21）
++                const uint64_t rpc =
++                    std::max<uint64_t>(1, (total_tasks + issue_ceil - 1) / issue_ceil);
++                const uint64_t feasible = (total_tasks + rpc - 1) / rpc;
++                if (core_cap > feasible) core_cap = feasible;
++            }
++        }
+     } else {
+         core_cap = io_bytes / 8192;
+     }
+diff --git a/code1/op_host/mhc_expand.cpp b/code1/op_host/mhc_expand.cpp
+index ec9eaa1..8baeb36 100644
+--- a/code1/op_host/mhc_expand.cpp
++++ b/code1/op_host/mhc_expand.cpp
+@@ -189,21 +189,57 @@ namespace optiling {
+         // 前向 io/8192 一支与合批 merge_cap 一支一字未动，且 `if (core_cap < 8)` 那句仍在
+         // 链尾原样保留（对 merge_cap≥8 与反向下界 8 都是恒等变换）⇒ 前向全部用例的 block_dim
+         // 与提交 9 逐决策相同，可直接当 A/B 的对照组读。
++        // R17：只在下面 backward 那一支尾部加了一道 blk 上界 ⇒ 上面两句对**提交 11** 同样成立
++        // （前向/合批两支一字未动，前向用例仍是对照组）。
+         uint64_t core_cap;
+         if (merge_ok) {
+             core_cap = merge_cap;
+         } else if (backward) {
+-            // 反向谷底跟**核数**，既不跟每核字节（io/6144）也不跟每核发起数 tpc。
+-            // 4 次独立扫描（p6/p6b/p7/p8）、12 条形状 ×8 个 blk 臂的真机阶梯：
+-            //   io ≤ 190KiB ∧ S ≥ 32 ⇒ 谷底恒在 blk=16：c24(48KiB) 4.45→3.55 −20.2%、
+-            //     c22(160KiB) 4.45→4.4、c25/c26/c27 3.1~3.3→3.0~3.2（tpc=2/4/6/8 都拿 16 核）；
+-            //   S < 32 ⇒ 16 核会开出空核（反向 total_tasks=S*dTileNum，blk>S 的核没有任务），
+-            //     c30(S=8/12KiB) blk=16 比 blk=8 慢 19% ⇒ 中段下界走 max(8, S/2)；
+-            //   io ≥ 196KiB ⇒ "每核 16KiB"这条线才重新占优（c23 io=288KiB 两次扫描分别给
+-            //     24 和 32，单点分不开 ⇒ 取两律交点 12288，不追那个分辨率之外的读数）。
+-            // 换律后的 12 条：5 条快 3.0%~20.2%、7 条恒等、0 条已知变慢。
++            // 反向谷底跟**每核串行 DMA 发起数**：每核 ≈ ceil(total_tasks/blk) 个任务、每个任务
++            // (m+1) 次发起（m 条 gather + 1 条写），谷底在那个数 ≈12 的那一档，再被 num_aiv 夹住。
++            // 依据：R16 的 p6/p6b/p7/p8 + R17 的 p10/p11/p12/p13，16 条形状 ×4~8 档核数的真机阶梯
++            // （code1.md §23.11~§23.19）。两条判别读数：
++            //   p12 只换 S、io 与每核字节都不动，16 核从"快 15.6%"翻成"慢 24.2%" ⇒ ⛔ 提交 10 那句
++            //     "io ≥ 196KiB 就按每核 16KiB 往上抬"在抬升段是错的，抬升项必须被这道上界夹住；
++            //   p13 固定 S=64 只换 m（2/4/8/16），谷底 16→24→32→32~40 随 m 右移 ⇒ ⛔ 常数 tpc 律
++            //     （"每核 4 行"，R17 第一版候选）被判负，m=16 上它给 blk=16、实测比谷底慢 33.6%。
++            //   两律只在 m≤3 ∧ S≤64 那一格重合（tpc=4 恰是 12 次发起），所以 p6~p12 分不出来。
++            //   S < 32 那侧仍由 blk_guard 兜：blk 超过任务数会开空核（c30 S=8/12KiB，blk=16 比 8 慢 19%）。
++            // io/12288 因此降级成"天花板以下的爬坡项"：整行模式下 `io/12288 ≤ 上界 ⟺ D ≤ 512`
++            // （把式子展开就是 (m+1)*S*D/6144 ≤ (m+1)*S/12），而 p10~p13 里所有 D ≤ 512 的实测谷底
++            // 本来就是 io 律那个值 ⇒ 恒等域 = **非整行(dTileNum>1) 或 D ≤ 512 或 io ≤ 196KiB 或
++            // S*(m+1) ≥ 480**（我方 45 条本地矩阵 45/45 落在恒等域内），会少开核的只剩
++            // `整行 ∧ D > 512 ∧ io > 196KiB ∧ S*(m+1) < 480` 一类，而 p10/p12 在该类四条的位移是
++            // −11.3%~−15.6%（全是变快）。判分那 8 条的形状仍未拿到 ⇒ 这一发既是优化也是形状探针。
++            // v5（p16 之后）只在**上界确实绑住**时再多做一步 snap ⇒ 改动域是上面那个域的子集，
++            // 上面关于恒等/对照组的两句对 v5 逐字成立（45 条本地矩阵 45/45 仍与提交 10 恒等）。
+             const uint64_t blk_guard = std::max<uint64_t>(8, std::min<uint64_t>(16, S / 2));
+             core_cap = std::max(io_bytes / 12288, blk_guard);
++            // ⛔ 只在**整行模式**用这道上界：p14 的两条多 tile 形状（`S=2,D=70000,m=2` dTileNum=35 /
++            //    `S=1,D=33000,m=8` dTileNum=17）给不出单臂定稿读数——同一臂 blk=18 的 mean 是 +15.3%、
++            //    p50 是 −16.3%（双峰，mean 被 ~30% 的慢尾拉高 1.5µs）⇒ 两个统计量都不作证据。
++            //    发起律的 18 条标定形状全部 dTileNum==1，这一域没标定过 ⇒ **不外推**（不是"有反证"），
++            //    把它排除出恒等域就够了（§23.19-4）。
++            if (tiling->dTileNum == 1) {
++                const uint64_t issue_ceil =
++                    std::max<uint64_t>(16, (total_tasks * (static_cast<uint64_t>(m) + 1) + 11) / 12);
++                if (core_cap > issue_ceil) {
++                    // p16：上界给的核数**不一定是可行切分**。kernel 按 `task_begin = blockIdx *
++                    // rowsPerCore` 分活（op_kernel/mhc_expand.cpp:41-42），而 rowsPerCore =
++                    // ceil(total/blk)，所以真正有活的核只有 ceil(total/rowsPerCore) 个 ⇒ blk 比它
++                    // 多出来的那些核一个任务都拿不到，纯付派发。实测：`S=32,D=2048,m=8`
++                    // （total_tasks=32）拿上界的 24 ⇒ 16 核有活 + 8 核空转 = **+16.0%**，而同一条
++                    // 形状 snap 到 16（零空核）是 −1.0%；把 blk 从 16 抬到 24、有活核数不变，
++                    // 只多 8 个空核 ⇒ 那 0.75us 就是 8 次派发 ≈ 94ns/核，与 R11-B 空 kernel 标定同量级。
++                    // snap = 先取上界要求的最小每核任务数 rpc，再取刚好装下 total_tasks 的核数：
++                    // 此时 (blk-1)*rpc < total ⇒ 每个核都有活，尾核任务数也必然 >=1（顺带修掉
++                    // tailRows 在那一档的下溢）。对未绑住上界的形状一条都不动 ⇒ 仍是单变量。
++                    const uint64_t rpc =
++                        std::max<uint64_t>(1, (total_tasks + issue_ceil - 1) / issue_ceil);
++                    const uint64_t feasible = (total_tasks + rpc - 1) / rpc;
++                    if (core_cap > feasible) core_cap = feasible;
++                }
++            }
+         } else {
+             core_cap = io_bytes / 8192;
+         }
