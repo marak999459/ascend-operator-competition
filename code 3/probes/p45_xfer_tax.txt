@@ -1,0 +1,68 @@
+# P45：`cubexfer` 五档读数（send / credit 为本轮新增，§15.60）
+# 原始日志 *.log 被 .gitignore 挡住 ⇒ 这里留可读提取件（时间戳、ssh warning、构建进度行略）
+# 驱动: code 3/probes/p45_xfer_tax.sh（BD=8、cases/big1、只看批量口径；对拍 rc=1 是预期）
+构建 OK
+459:        context->SetBlockDim(8);  // CUBEPROBE BD
+########## cubexfer XFKIND=prod XR=32 BD=8 ##########
+1
+构建 OK
+rc=1
+平均 0.0930 ms
+时间: 平均 0.1162 ms
+==> FAIL
+########## cubexfer XFKIND=lock XR=32 BD=8 ##########
+1
+构建 OK
+rc=1
+平均 0.1361 ms
+时间: 平均 0.1596 ms
+==> FAIL
+########## cubexfer XFKIND=send XR=32 BD=8 ##########
+1
+构建 OK
+rc=1
+平均 0.1063 ms
+时间: 平均 0.1288 ms
+==> FAIL
+########## cubexfer XFKIND=credit XR=32 BD=8 ##########
+1
+构建 OK
+rc=1
+平均 0.1064 ms
+时间: 平均 0.1293 ms
+==> FAIL
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.6575 ms  最小 0.6574  最大 0.6576   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)
+  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05
+0
+0d5c5e28b4d6154a9190533fd78deabf  code/op_kernel/sparse_flash_attention.cpp
+构建 OK
+459:        context->SetBlockDim(8);  // CUBEPROBE BD
+########## cubexfer XFKIND=prod XR=128 BD=8 ##########
+1
+构建 OK
+rc=1
+平均 0.3458 ms
+时间: 平均 0.3707 ms
+==> FAIL
+########## cubexfer XFKIND=credit XR=128 BD=8 ##########
+1
+构建 OK
+rc=1
+平均 0.3958 ms
+时间: 平均 0.4204 ms
+==> FAIL
+########## cubexfer XFKIND=credit XR=256 BD=8 ##########
+1
+构建 OK
+rc=1
+平均 0.7814 ms
+时间: 平均 0.8077 ms
+==> FAIL
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.6575 ms  最小 0.6574  最大 0.6577   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)
+  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05
+0
+0d5c5e28b4d6154a9190533fd78deabf  code/op_kernel/sparse_flash_attention.cpp

@@ -1342,14 +1342,25 @@ elif MODE == 'cubexfer':
     #   吞吐那档一个跨核旗标都不发。M1 要的是**每轮既产一个真 tile、又交一次棒**，
     #   而 §15.30(h) 已把死因钉在"同一块 L0C 没有新 Mmad 翻转搬出标志时被第 2 次 Fixpipe 读走"
     #   ⇒ 旗标与 Fixpipe 共存能不能拉到真实轮数（32~256），是从没测过的。
-    # 三档只差 AIV 那半边，AIC 侧的 cube 链**逐字节同形**（含同一套寻址与同步）：
-    #   XFKIND=prod  AIV 报到即退 ⇒ 纯"Cube 产数"基线（≈ cubethr6 的 R 版）
-    #   XFKIND=read  AIV 每轮 DataCopy 同一块 GM，但**不发旗标** ⇒ 只量"AIV 搬回 tile"的 MTE2 侧
-    #   XFKIND=lock  再加 xcoremm3 那套配平双向握手（set(5) 广播 → 扇入 wait(6)）
+    # 五档只差 AIV/旗标那半边，AIC 侧的 cube 链**逐字节同形**（含同一套寻址与同步）：
+    #   XFKIND=prod    AIV 报到即退 ⇒ 纯"Cube 产数"基线（≈ cubethr6 的 R 版）
+    #   XFKIND=read    AIV 每轮 DataCopy 同一块 GM，但**不发旗标** ⇒ 只量"AIV 搬回 tile"的 MTE2 侧
+    #   XFKIND=lock    再加 xcoremm3 那套配平双向握手（set(5) 广播 → 扇入 wait(6)）= **锁步**
     #   ⇒ 每轮交接税 = (lock - prod) / XR，其中 (read - prod) 是"MTE2 读带宽"那部分，
     #     剩下 (lock - read) 才是旗标 + 串行化。这个数决定 M1 的 tile 粒度：
     #     ≤ 2 µs/轮 ⇒ 128 行 × 64 列的 tile 直接开做；
     #     ≳ 20 µs/轮 ⇒ 必须把 R 压到个位数（一个 tile 覆盖整条 KV 轴），或者按 (b,s) 分批。
+    # ---- 4s') P45 新增的两档（§15.59(4)：先问"能不能不等回执"，再定暂存方案）----
+    #   XFKIND=send    AIC 每轮 PipeBarrier + set(5)、**一个 wait 都不发**；AIV 每轮 wait(5) → 读 → **不回执**
+    #                  ⇒ 税的下界（AIC 自由跑，深度不受限）。⚠️ 它**不是**可实现的形态：没有流控时
+    #                    AIC 会冲到 AIV 前面把槽覆写掉 ⇒ 本档只给"旗标广播 + 唤醒"这一笔定价。
+    #   XFKIND=credit  **可实现的那个**：两槽交替（`r & 1`）+ AIC 在第 r 轮开头只等"第 r-2 轮"的回执
+    #                  ⇒ AIC 至多领先 2 轮，覆写槽 r&1 之前必然已被 AIV 读完 ⇒ 协议正确、又是流水。
+    #                  配平：AIC set(5)=R / AIV wait(5)=R；AIV set(6) 只在 r+2<R 时发 = R-2，
+    #                  AIC wait(6) 只在 r>=2 时等 = R-2 ⇒ **跨 launch 零残留**（§15.30(j) 那条纪律）。
+    #   ⇒ 读法：(send - prod)/R = 旗标广播的下界；(credit - prod)/R = 双缓冲流水的真实税；
+    #     若 credit ≈ lock ⇒ "双缓冲省不下来"，M1 必须走大 tile（R 压到个位数）；
+    #     若 credit ≪ lock ⇒ M1 按两槽乒乓写，§15.58(c) 的独占 GM 只留 2 个 tile 的量。
     # 出口：只 [0]=7（AIC 走完）/ [64+bi]=6（AIV 报到）两格，其余留给计时 ⇒ PROBEENV 走 SFA_QUIET_XC3=1。
     # ⚠️ 读数只看 `时间: 平均`，对拍必 FAIL（探针不算算子），这是预期的 rc=1，不是挂。
     try:
@@ -1358,30 +1369,45 @@ elif MODE == 'cubexfer':
         XR = 32
     assert 1 <= XR <= 256, XR
     KIND = os.environ.get('XFKIND', 'lock')
-    assert KIND in ('prod', 'read', 'lock'), KIND
+    assert KIND in ('prod', 'read', 'lock', 'send', 'credit'), KIND
     # AIV 每轮搬回的 32 B 块数：512 = 16 KB（fp16 tile），1024 = 32 KB（fp32 tile）
     try:
         XFBLK = int(os.environ.get('XFBLK', '1024'))
     except ValueError:
         XFBLK = 1024
+    XFCROSS = KIND in ('lock', 'send', 'credit')     # AIV 每轮等 AIC 的广播旗标
+    # tile 落点：prod/read/lock 沿用 32 槽（与 §15.43 那七档逐字同形，读数才可比）；
+    # send/credit 走**两槽乒乓** = M1 的真实形态 ⇒ §15.58(c) 的独占 GM 只需要 2 个 tile 的量
+    TILE = '(r & 1u) * 16384u' if KIND in ('send', 'credit') else '(r & 31u) * 16384u'
+    AIC_PRE = ('                if (r >= 2u) {   // [credit] 先收"两轮前"的回执 ⇒ 本槽可以安全覆写\n'
+               '                    CrossCoreWaitFlag<2, PIPE_FIX>(6);\n'
+               '                }\n') if KIND == 'credit' else ''
     AIC_HAND = ('                PipeBarrier<PIPE_ALL>();\n'
                 '                CrossCoreSetFlag<2, PIPE_FIX>(5);   // 广播"本轮 tile 已落地"\n'
-                '                CrossCoreWaitFlag<2, PIPE_FIX>(6);  // 扇入：等本组两个 AIV 都读完\n'
-                ) if KIND == 'lock' else ''
-    AIV_LOOP = ('        for (uint32_t r = 0; r < @R@u; ++r) {\n' +
-                ('            CrossCoreWaitFlag<2, PIPE_V>(5);\n' if KIND == 'lock' else '') +
-                '            DataCopy(ub, vGm_[(r & 31u) * 16384u], DataCopyParams{1, @BLK@u, 0, 0});\n'
-                '            SetFlag<HardEvent::MTE2_V>(0);\n'
-                '            WaitFlag<HardEvent::MTE2_V>(0);\n' +
-                ('            PipeBarrier<PIPE_ALL>();\n'
-                 '            CrossCoreSetFlag<2, PIPE_MTE3>(6);   // 回执（两个 AIV 都 set ⇒ 凑齐扇入）\n'
-                 if KIND == 'lock' else '') +
-                '        }\n') if KIND != 'prod' else \
-               '        /* [prod] AIV 不参与：立刻报到退出 */\n'
+                ) if XFCROSS else ''
+    if KIND == 'lock':      # 锁步：当场等本组两个 AIV 的扇入回执
+        AIC_HAND += ('                CrossCoreWaitFlag<2, PIPE_FIX>(6);  // 扇入：等本组两个 AIV 都读完\n')
+    if KIND == 'prod':
+        AIV_LOOP = '        /* [prod] AIV 不参与：立刻报到退出 */\n'
+    else:
+        AIV_LOOP = ('        for (uint32_t r = 0; r < @R@u; ++r) {\n' +
+                    ('            CrossCoreWaitFlag<2, PIPE_V>(5);\n' if XFCROSS else ''))
+        AIV_LOOP += '            DataCopy(ub, vGm_[%s], DataCopyParams{1, @BLK@u, 0, 0});\n' % TILE
+        AIV_LOOP += ('            SetFlag<HardEvent::MTE2_V>(0);\n'
+                     '            WaitFlag<HardEvent::MTE2_V>(0);\n')
+        if KIND == 'lock':
+            AIV_LOOP += ('            PipeBarrier<PIPE_ALL>();\n'
+                         '            CrossCoreSetFlag<2, PIPE_MTE3>(6);   // 回执（两个 AIV 都 set ⇒ 凑齐扇入）\n')
+        elif KIND == 'credit':
+            AIV_LOOP += ('            PipeBarrier<PIPE_ALL>();\n'
+                         '            if (r + 2u < @R@u) {   // [credit] 只在 AIC 真会等的轮次回执 ⇒ set/wait 配平\n'
+                         '                CrossCoreSetFlag<2, PIPE_MTE3>(6);\n'
+                         '            }\n')
+        AIV_LOOP += '        }\n'
     PROBE_XFER = r'''
     // ==================== [CUBEPROBE] 远端探针专用（绝不进提交源） ====================
     // M1 交接税档：AIC 每轮一个真 tile（4 刀 Mmad(128×64×128) + 1 次 Fixpipe(128×64)），
-    // AIV 每轮 DataCopy 搬回 @BLK@×32 B。三档只差旗标那半边，见 py 侧注释。
+    // AIV 每轮 DataCopy 搬回 @BLK@×32 B。五档只差旗标/落点那半边，见 py 侧注释。
     __aicore__ inline void XcoreAic()
     {
         sumGm_.SetValue(0, 7.0f);
@@ -1452,7 +1478,7 @@ elif MODE == 'cubexfer':
             SetFlag<HardEvent::MTE2_MTE1>(0);
             WaitFlag<HardEvent::MTE2_MTE1>(0);
             for (uint32_t r = 0; r < @R@u; ++r) {
-                DataCopy(l1b, kGm_[2048u * rowD + (r & 3u) * 512u * rowD], nzB);
+@PRE@                DataCopy(l1b, kGm_[2048u * rowD + (r & 3u) * 512u * rowD], nzB);
                 SetFlag<HardEvent::MTE2_MTE1>(0);
                 WaitFlag<HardEvent::MTE2_MTE1>(0);
                 for (uint32_t j = 0; j < 4u; ++j) {
@@ -1467,7 +1493,7 @@ elif MODE == 'cubexfer':
                 }
                 SetFlag<HardEvent::M_FIX>(2);
                 WaitFlag<HardEvent::M_FIX>(2);
-                Fixpipe(vGm_[(r & 31u) * 16384u], l0c, fx);   // 每轮**同址**：量的是稳态交接，不是首刀
+                Fixpipe(vGm_[@TILE@], l0c, fx);   // prod/read/lock = 32 槽轮转；send/credit = 两槽乒乓
 @HAND@            }
         }
         PipeBarrier<PIPE_ALL>();
@@ -1487,8 +1513,10 @@ elif MODE == 'cubexfer':
 
 '''
     body = (PROBE_XFER.replace('@HAND@', AIC_HAND)
+            .replace('@PRE@', AIC_PRE)
             .replace('@AIVLOOP@', AIV_LOOP)
             .replace('@R@', str(XR)).replace('@BLK@', str(XFBLK))
+            .replace('@TILE@', TILE)
             .replace('@UBYTES@', str(max(32768, XFBLK * 32))))
     s = s.replace(A_MEMBER, body + A_MEMBER, 1)
     s = s.replace('    TBuf<TPosition::VECCALC> qBuf_',

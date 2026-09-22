@@ -7,7 +7,10 @@
 M1 的真实结构是**每 flush 一轮**（AIC 产 16×64 score → Fixpipe → AIV 读回做 softmax），
 所以判据不是"score 值多少钱"，而是"**1.35 µs 的税 vs AIV 每花在 score 上的钱**"。
 纯算术，不碰真机。税与 AIC 生产成本取自 §15.43(b)(c)(d)（`cubexfer` 锁步档）。
+P45 之后税成了一个**可选协议参数**（锁步 1.35 / 双缓冲+深度 2 回执 0.42，§15.60），
+所以脚本改读环境变量 `TAX_US`，末尾另打两档对照。
 """
+import os
 
 # 实测：§15.57(3) 主表（批量 ms，AUTO 档）
 FULL = {'big1': 0.6577, 'd2048': 5.0530, 'w4': 9.4417}
@@ -23,7 +26,7 @@ CASE = {
     'w4':    (128, 4, 48, 4096, 4096),   # SBS=2 ⇒ 每条展开 2 个 token
 }
 CORES = 40            # 910B3 的 AIV 核数；MIX 下 BD=20 组 × 2 AIV
-TAX_US = 1.35         # §15.43(c) 锁步交接税（1.33~1.37 取中）
+TAX_US = float(os.environ.get('TAX_US', '1.35'))   # 每轮交接税：锁步 1.35（§15.43c）/ 双缓冲 0.42（§15.60）
 AIC_TILE_US = 0.35    # §15.43(d)：真实 tile 16×64 的 AIC 每轮生产成本 ≈ 探针的 1/8
 
 print('%-6s %6s %6s %8s %9s | %8s %8s %8s | %8s' % (
@@ -52,10 +55,24 @@ for name in FULL:
     pr = (-(-units // CORES)) * (-(-valid // k))
     us_score = (FULL[name] - NOSC[name]) * 1e3 / pr
     both = NOSC[name] + NOPV[name] - FULL[name]      # full − score边际 − PV边际
-    print('  %-6s score %.2f µs/轮 vs 税 1.35 µs/轮 ⇒ 完全隐藏时 %.2f×、全不隐藏时 %.2f×；'
+    print('  %-6s score %.2f µs/轮 vs 税 %.2f µs/轮 ⇒ 完全隐藏时 %.2f×、全不隐藏时 %.2f×；'
           'M1+M2：乐观 %.2f× / 保守(两轮交接各付一次税) %.2f×' % (
-              name, us_score,
+              name, us_score, TAX_US,
               FULL[name] / NOSC[name],
               FULL[name] / (NOSC[name] + TAX_US * pr / 1e3),
               FULL[name] / both,
               FULL[name] / (both + 2 * TAX_US * pr / 1e3)))
+
+# ---- P45：把"锁步"换成"双缓冲 + 深度 2 的回执"到底值多少（§15.60 实测 tax=0.42）----
+LOCK, CREDIT = 1.35, float(os.environ.get('CREDIT_US', '0.42'))
+print('\n协议升级（锁步 %.2f → 双缓冲 %.2f µs/轮）:' % (LOCK, CREDIT))
+print('  %-6s %8s %8s %8s | %8s %8s' % ('案', '轮/核', '省 µs', '省 %full', '锁步落点', '双缓冲落点'))
+for name in FULL:
+    rows, nb, k, valid, _ = CASE[name]
+    pr = (-(-rows * ((8 + nb - 1) // nb) // CORES)) * (-(-valid // k))     # 轮/核（最慢那波）
+    save = (LOCK - CREDIT) * pr / 1e3
+    print('  %-6s %8.0f %8.1f %8.1f%% | %7.3f(%.2fx) %7.3f(%.2fx)' % (
+        name, pr, save * 1e3, 100 * save / FULL[name],
+        NOSC[name] + LOCK * pr / 1e3, FULL[name] / (NOSC[name] + LOCK * pr / 1e3),
+        NOSC[name] + CREDIT * pr / 1e3, FULL[name] / (NOSC[name] + CREDIT * pr / 1e3)))
+
