@@ -1,4 +1,4 @@
-# P47 nb=8 段账：读数提取件（原始日志 code 3/npu_debug/p47_nb8_ledger_130129.log，*.log 不进版本库）
+# P47 nb=8 段账：读数提取件（原始日志 code 3/probes/p47_nb8_ledger.log，*.log 被 .gitignore:22 挡住不进版本库）
 # 场次 2026-09-22 12:53~13:02 CST，同场次三档；host 仅在 nb8/nb8nosc 两档被 sed（NB_CAND={32,16,8} ⇒ qN=8 下唯一合法候选），trap 已还原
 # 每档三行依次 = big1 / d2048 / w4（批量口径，5 reps）
 # 判据只有时间：nb8nosc 的输出必然是错的 ⇒ 一律 act=none，未锁 golden
