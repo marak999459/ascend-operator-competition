@@ -49,13 +49,13 @@ echo "### so ts: $(date -r "$DST" '+%H:%M:%S')  bin ts: $(date -r "$BIN" '+%H:%M
 
 for i in $CASES; do
     if [ "$MHC_NOWALL" = "1" ]; then
-        MHC_PCASE=$i "$BIN" 50 64 prof2 2>&1 | grep -E "^\[PROF|=== |mismatch=" | sed "s/^/c$i /"
+        MHC_PCASE=$i "$BIN" 50 64 prof2 2>&1 | grep -E "^\[PROF|=== " | sed "s/^/c$i /"
         continue
     fi
     OUT=$ROOT/npu_debug/prof/${TAG}_c${i}_$(date +%H%M%S)
     mkdir -p "$OUT"
     MHC_PCASE=$i msprof --task-time=on --ai-core=on --output="$OUT" "$BIN" 50 64 prof2 2>&1 |
-        grep -E "^\[PROF|=== |Profiling|Failed|error|mismatch=" | sed "s/^/c$i /"
+        grep -E "^\[PROF|=== |Profiling|Failed|error" | sed "s/^/c$i /"
     CSVLIST=$(find "$OUT" -name "*.csv" 2>/dev/null | while read -r c; do
                   head -1 "$c" | grep -q "Task Duration" && echo "$c"
               done)
