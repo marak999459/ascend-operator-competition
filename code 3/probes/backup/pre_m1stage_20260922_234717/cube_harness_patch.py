@@ -29,8 +29,8 @@ if '[CUBEPROBE]' in t:
     # ⚠️ 必须认得出"是不是本版"：上一版探针跑完后残留的旧 harness 会让本脚本早退，
     #    于是 g++ 编的还是旧读数格式 ⇒ 打出来的字符串看着像新数据，其实是旧二进制（本轮踩过）。
     #    幂等 key 要用**只有本版才有**的串（`XC3 AICalive` 从 v3.x 就在，不能单独当 key）。
-    if all(k in t for k in ('SFA_CBASE', 'scRead=', 'Cdiag=', 'SFA_QUIET_XC3', 'P6mismatch=', 'sync1（kernel 挂了？）err=', 'M1S verdict:')):
-        print('harness already patched (v9)')
+    if all(k in t for k in ('SFA_CBASE', 'scRead=', 'Cdiag=', 'SFA_QUIET_XC3', 'P6mismatch=', 'sync1（kernel 挂了？）err=')):
+        print('harness already patched (v8)')
         raise SystemExit(0)
     raise SystemExit('[CUBEPROBE] 残留的是**旧版** harness（v7 之前），拒绝在其上叠加 ⇒ 先还原 test_sfa_dev.cpp')
 
@@ -220,74 +220,6 @@ INJ = '''    {   /* [CUBEPROBE] 只读探针出口，不做算子正确性判定
             }
             std::printf(" P6mismatch=%d\\n", p6bad);
         }
-        /* ---- [M1S] m1stage 档专用屏（SFA_M1S=1）：**AIV MTE3 写 → AIC ND2NZ 读** 的数值裁定 ----
-           kernel 侧把 key 行 **16..31** 列 0..127 打包成 4 KB 平铺写进本组输出行、AIC 从那儿读回当 B，
-           A = key 行 0..15 列 0..127（直读输入）⇒ 三种读数互不相同且都是精确期望值：
-             中 eShift=Σ key_i·key_{16+j} ⇒ 通路绿；中 eSelf=Σ key_i·key_j ⇒ AIC 读的是**原始 key**
-             （根本没走暂存）；全 0 / 垃圾 ⇒ AIV 的写在 AIC 侧不可见 ⇒ M1 判死。 */
-        if (std::getenv("SFA_M1S") != nullptr) {
-            int bs = 0, bf = 0, nz = 0;
-            double sabs = 0.0;
-            std::printf("[CUBE] M1S:");
-            for (int ii = 0; ii < 16; ++ii) {
-                for (int jj = 0; jj < 16; ++jj) {
-                    double es = 0.0, ef = 0.0;
-                    for (int k = 0; k < 128; ++k) {
-                        const double a = (double)HalfToFloat(kk[(size_t)ii * DD + k]);
-                        es += a * (double)HalfToFloat(kk[(size_t)(16 + jj) * DD + k]);
-                        ef += a * (double)HalfToFloat(kk[(size_t)jj * DD + k]);
-                    }
-                    const double g = (double)gsum[CB + ii * CS + jj];
-                    const double tol = 1e-2 + 1e-3 * std::fabs(es);
-                    if (std::fabs(g) > 1e-6) { ++nz; }
-                    sabs += std::fabs(g);
-                    if (std::fabs(g - es) > tol) { ++bs; }
-                    if (std::fabs(g - ef) > tol) { ++bf; }
-                    if (ii < 3 && jj < 3) {
-                        std::printf(" (%d,%d)g=%.4f shift=%.4f self=%.4f", ii, jj, g, es, ef);
-                    }
-                }
-            }
-            std::printf("\\n[CUBE] M1S verdict: nonzero=%d/256 sumabs=%.3f mismatchShift=%d mismatchSelf=%d"
-                        "  => %s\\n", nz, sabs, bs, bf,
-                        (bs == 0 ? "GREEN(AIV 的 MTE3 写被同组 AIC 看见了)" :
-                         (bf == 0 ? "FAKE(AIC 读的是原始 key，没走暂存)" :
-                          (sabs < 1e-3 ? "DEAD(暂存全 0 => AIV 的写对 AIC 不可见)" : "WRONG(数值错)"))));
-        }
-        /* ---- [M1G] m1g 档专用屏（SFA_M1G=1）：**AIC 自己在 GM 上按块 gather** 进 L1 的数值裁定 ----
-           B = 8 个离散块 ×2 行拼成 16 行（块 g 首行 bg=(7g+3)%32*2），A = key 行 0..15 列 0..127。
-           三值互斥：中 eg ⇒ 碎 gather + 行偏移落位成立；中 eself（B 退化成原始 0..15 行）⇒ 落位错；
-           全 0 / 垃圾 ⇒ nValue<16 的 ND2NZ 根本没写进 tile。 */
-        if (std::getenv("SFA_M1G") != nullptr) {
-            int bg_ = 0, bs = 0, nz = 0;
-            double sabs = 0.0;
-            std::printf("[CUBE] M1G:");
-            for (int ii = 0; ii < 16; ++ii) {
-                for (int jj = 0; jj < 16; ++jj) {
-                    const int tok = (int)(((jj / 2 * 7 + 3) % 32) * 2 + (jj % 2));   // gather 后的第 j 行
-                    double eg = 0.0, es = 0.0;
-                    for (int k = 0; k < 128; ++k) {
-                        const double a = (double)HalfToFloat(kk[(size_t)ii * DD + k]);
-                        eg += a * (double)HalfToFloat(kk[(size_t)tok * DD + k]);
-                        es += a * (double)HalfToFloat(kk[(size_t)jj * DD + k]);
-                    }
-                    const double g = (double)gsum[CB + ii * CS + jj];
-                    const double tol = 1e-2 + 1e-3 * std::fabs(eg);
-                    if (std::fabs(g) > 1e-6) { ++nz; }
-                    sabs += std::fabs(g);
-                    if (std::fabs(g - eg) > tol) { ++bg_; }
-                    if (std::fabs(g - es) > tol) { ++bs; }
-                    if (ii < 2 && jj < 4) {
-                        std::printf(" (%d,%d)g=%.4f gath=%.4f self=%.4f", ii, jj, g, eg, es);
-                    }
-                }
-            }
-            std::printf("\\n[CUBE] M1G verdict: nonzero=%d/256 sumabs=%.3f mismatchGather=%d"
-                        "  mismatchSelf=%d  => %s\\n", nz, sabs, bg_, bs,
-                        (bg_ == 0 ? "GREEN(AIC 能自己按块 gather 到行偏移 ⇒ M1 不需要进路暂存)" :
-                         (bs == 0 ? "NOOFFSET(B 退化成原始 0..15 行 ⇒ 行偏移没生效)" :
-                          (sabs < 1e-3 ? "DEAD(nValue<16 的 ND2NZ 没写进 tile)" : "WRONG(数值错)"))));
-        }
         int bad = 0, badT = 0;
         std::printf("\\n[CUBE] C4x4:");
         for (int ii = 0; ii < 4; ++ii) {
@@ -324,7 +256,7 @@ if BR != BR0:
     raise SystemExit('[FAIL] 注入后花括号平衡从 %d 变成 %d ⇒ 有注入吞掉了原行的右花括号，拒绝落盘' % (BR0, BR))
 for m in ('dsum=%p', 'sync rep%d err=', '标记区清零', 'scRead=', 'NONE(600..743 all zero)',
           'Cdiag=', 'SFA_CBASE', 'gsum[CB + ii * CS + jj]', 'SFA_QUIET_XC3', 'P6mismatch=',
-          'M1S verdict:', 'M1G verdict:', 'sync1（kernel 挂了？）err='):
+          'sync1（kernel 挂了？）err='):
     assert m in t, '注入缺失: %s' % m
 io.open(p, 'w', encoding='utf-8').write(t)
-print('harness patched: [CUBEPROBE] v10 (braces %+d)' % BR)
+print('harness patched: [CUBEPROBE] v8 (braces %+d)' % BR)

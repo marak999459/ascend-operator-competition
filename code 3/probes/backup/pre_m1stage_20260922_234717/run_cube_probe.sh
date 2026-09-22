@@ -48,22 +48,11 @@ for m in "$@"; do
   PROBEENV=''    # 传给 harness 的探针侧环境变量（C 的基址/行距）
   CLEANBUILD >/dev/null || { echo ">>> $m: 前置构建失败，跳过"; continue; }   # 每档从"host 声明 = 0、本地干净源"起步
   python3 "$REPO/code 3/probes/mk_probe_cube.py" "$m" | rssh "cat > ~/sfa_real/$KER" || { echo "PUSH FAIL"; continue; }
-  # NG：m1g 档的计时旋钮（每轮几次 gather）。sed 只在**已推上去的探针源**上动，
-  # 本地提交源一个字节不改（探针纪律）。NG=1 ⇒ 每轮 1 次 16 行整拷贝。
-  # ⚠️ KER 是**相对 ~/sfa_real** 的路径（push 那行就是这么拼的），上一版在这里写 `cd
-  #    ~/sfa_real/code` ⇒ sed 报 "can't read code/op_kernel/…" 后静默继续，NG=1 那发
-  #    量的其实是 NG=8（两发读数 0.1625/0.1645 只差 1.2 % 就是这么来的）。改成响亮失败。
-  if [ -n "${NG:-}" ]; then
-    NGOUT=$(rssh "cd ~/sfa_real && sed -i 's|constexpr uint32_t NG = 8u;|constexpr uint32_t NG = ${NG}u;  // CUBEPROBE NG|' $KER && grep -c 'CUBEPROBE NG' $KER" 2>&1 | tail -1)
-    if [ "$NGOUT" = "1" ]; then echo "NG=$NG 已生效"; else echo ">>> $m: NG sed 未生效（$NGOUT）⇒ 跳过，避免读假数"; continue; fi
-  fi
   case "$m" in
     wspeek)   # 有真 workspace 可对照：host 声明 128 KB，让调用方真的 malloc 一块（§15.21 的口径）
       rssh "cd ~/sfa_real/code && sed -i 's|if (currentWorkspace != nullptr) { currentWorkspace\[0\] = 0; }|if (currentWorkspace != nullptr) { currentWorkspace[0] = 128u * 1024u; }  // WSPEEK|' $HOST && grep -n 'WSPEEK' $HOST | head -2" ;;
     wsnw|wsmix|wshigh|wsaiv|wsmixo)   # usrWorkspace = 调用方 ws + 16 MB 保留区 ⇒ 必须声明 16 MB + 可用量
       rssh "cd ~/sfa_real/code && sed -i 's|if (currentWorkspace != nullptr) { currentWorkspace\[0\] = 0; }|if (currentWorkspace != nullptr) { currentWorkspace[0] = 16u * 1024u * 1024u + 128u * 1024u; }  // WSMIX|' $HOST && grep -n 'WSMIX' $HOST | head -2" ;;
-    ws2mb)   # §15.69(a) 唯一没测过的轴：声明 16 MB + **4 MB**，写点落在 usr + 2 MB（离框架小抄那 128 KB 很远）
-      rssh "cd ~/sfa_real/code && sed -i 's|if (currentWorkspace != nullptr) { currentWorkspace\[0\] = 0; }|if (currentWorkspace != nullptr) { currentWorkspace[0] = 16u * 1024u * 1024u + 4u * 1024u * 1024u; }  // WS2MB|' $HOST && grep -n 'WS2MB' $HOST | head -2" ;;
     xcoree|xcoref|xcoreg|xcorei|xcorej|xcorep|cubeloop3|cubeloop3nb|cubeloop2|cubemmad3)   # C 的落点改成"基址 32 / 行距 16"（只占 32..271），否则 Fixpipe 会把 echo 槽盖光
       PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16' ;;
     xcoremm3)   # P6 原语档：C_r 在 128+r*256、echo 在 896+bi*8 ⇒ 走 harness 的 P6 屏，关掉旧的 XC3 屏
@@ -72,10 +61,6 @@ for m in "$@"; do
       PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16 SFA_QUIET_XC3=1' ;;
     cubexfer)   # 交接税档：出口只用 [0]/[64+bi] 两格，其余全是计时 ⇒ 关掉 XC3/P6 两屏
       PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16 SFA_QUIET_XC3=1' ;;
-    m1stage)   # M1 通路档（AIV MTE3 写 → AIC ND2NZ 读）：只看 M1S 屏，C 在 32..287 ⇒ 关掉 XC3 屏
-      PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16 SFA_M1S=1 SFA_QUIET_XC3=1' ;;
-    m1g)   # 碎 gather 档（AIC 自己按块 ND2NZ 进 L1）：看 M1G 屏 + 256 轮 gather 的 `时间:` ⇒ 关 XC3 屏
-      PROBEENV='SFA_CBASE=32 SFA_CSTRIDE=16 SFA_M1G=1 SFA_QUIET_XC3=1' ;;
     mmad)   # C 自己就落在 16..991，把 XC3 那屏关掉，否则 C 的数值被当成 echo 槽的"假读数"（§15.30）
       PROBEENV='SFA_QUIET_XC3=1' ;;
   esac
@@ -111,7 +96,7 @@ for m in "$@"; do
     rssh "$ENVR; $PROBEENV SFA_CUBE_EXIT=1 timeout ${TO:-300} stdbuf -o0 -e0 ./test_sfa_dev cases/big1.bin 1 none >/tmp/cp.txt 2>&1; echo \"rc=\$?\"; grep -aE '\[CUBE\]|^case=' /tmp/cp.txt | grep -av C4x4; grep -aiE 'error|fail' /tmp/cp.txt | head -6; echo '--- tail(不通也看得见走到哪) ---'; tail -4 /tmp/cp.txt"
     # (b) 反复 launch：1 + 5 reps + 批量 20×3 ⇒ 专查"第 2 次 launch 挂"这个老现象（现在带设备侧错误码）
     if [ "$m" != "wspeek" ] && [ -z "${SOLO:-}" ]; then
-      rssh "$ENVR; $PROBEENV timeout ${TO2:-600} stdbuf -o0 -e0 ./test_sfa_dev cases/big1.bin 5 none >/tmp/cp2.txt 2>&1; echo \"rc=\$?\"; grep -aE '\[CUBE\] AIC|\[CUBE\] AIV|\[CUBE\] XC3|\[CUBE\] wsScan|\[CUBE\] M1S verdict|\[CUBE\] mismatchC|\[FAIL\]|平均' /tmp/cp2.txt | head -12; echo '--- tail ---'; tail -4 /tmp/cp2.txt"
+      rssh "$ENVR; $PROBEENV timeout ${TO2:-600} stdbuf -o0 -e0 ./test_sfa_dev cases/big1.bin 5 none >/tmp/cp2.txt 2>&1; echo \"rc=\$?\"; grep -aE '\[CUBE\] AIC|\[CUBE\] AIV|\[CUBE\] XC3|\[CUBE\] wsScan|\[CUBE\] mismatchC|\[FAIL\]|平均' /tmp/cp2.txt | head -12; echo '--- tail ---'; tail -4 /tmp/cp2.txt"
     fi
   fi
 done

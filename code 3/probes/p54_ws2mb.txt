@@ -1,0 +1,55 @@
+=== 0) 拉回干净态 + SoC 补丁 + harness 探针 + 首次构建 ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+harness patched: [CUBEPROBE] v9 (braces +0)
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+HARNESS OK
+-rwxrwxr-x 1 developer developer 43376 Sep 23 01:42 test_sfa_dev
+########## cube probe = ws2mb ##########
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+463:    if (currentWorkspace != nullptr) { currentWorkspace[0] = 16u * 1024u * 1024u + 4u * 1024u * 1024u; }  // WS2MB
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+459:        context->SetBlockDim(3);  // CUBEPROBE BD
+--- build ---
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+459:        context->SetBlockDim(3);  // CUBEPROBE BD
+构建 OK
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+rc=7
+case=big1 B=1 S1=128 S2=8192 N1=8 D=512 SBS=1 COUNT=2048 MODE=3 LSE=1
+[CUBE] wsSize=20971520 ws=0x12c082e00000 out=0x12c082c00000 key=0x12c081400000 dsum=0x12c0c003a000
+[CUBE] nlse=1024 reach=0 tail=0 AICbi= AIVbi=44:0,46:0,52:0,54:0,56:0,57:0,58:0,[CUBE] AIC  b1{bi=0 ws-out=4718592B t-out=525336638B arrive=0 survWS=0} b2{bi=2 ws-out=4718592B t-out=525336638B arrive=7 survWS=9} 
+[CUBE] AIV  b1{bi=0 ws-out=4718592B t-out=525336638B arrive=0 survWS=0} b3{bi=0 ws-out=4718592B t-out=525336638B arrive=0 survWS=0} b5{bi=5 ws-out=4718592B t-out=525336638B arrive=7 survWS=9} 
+[CUBE] 参照: (caller ws - out) = 2097152 B, +16MB 后 = 18874368 B
+[CUBE] wsScan n=1048576 usr=0x12c083e00000 memcpy=0: [524288]5/bi=0 [524352]5/bi=1 [524416]5/bi=2 [526336]6/bi=0 [526400]6/bi=1 [526464]6/bi=2 [526528]6/bi=3 [526592]6/bi=4 [526656]6/bi=5 hitAIC=3 hitAIV=6
+[CUBE] XC  AIC alive=0 bi9= AIVrd= AIVarrive=
+[CUBE] XC3 AICalive=0 AICbi= scRead=NONE(600..743 all zero) | Cdiag=[0.00,0.00,0.00]@16/64 AIVarrive=
+[CUBE] mismatchC=16 mismatchCT=16
+--- tail(不通也看得见走到哪) ---
+[CUBE] XC3 AICalive=0 AICbi= scRead=NONE(600..743 all zero) | Cdiag=[0.00,0.00,0.00]@16/64 AIVarrive=
+
+[CUBE] C4x4: (0,0)g=0.0000 e=-0.9876 et=-0.9876 (0,1)g=0.0000 e=2.6073 et=0.3245 (0,2)g=0.0000 e=4.0983 et=1.2017 (0,3)g=0.0000 e=2.5053 et=-0.6064 (1,0)g=0.0000 e=0.3245 et=2.6073 (1,1)g=0.0000 e=0.1993 et=0.1993 (1,2)g=0.0000 e=-0.9128 et=-1.8525 (1,3)g=0.0000 e=-0.8459 et=0.1325 (2,0)g=0.0000 e=1.2017 et=4.0983 (2,1)g=0.0000 e=-1.8525 et=-0.9128 (2,2)g=0.0000 e=-1.8673 et=-1.8673 (2,3)g=0.0000 e=-2.2829 et=2.6990 (3,0)g=0.0000 e=-0.6064 et=2.5053 (3,1)g=0.0000 e=0.1325 et=-0.8459 (3,2)g=0.0000 e=2.6990 et=-2.2829 (3,3)g=0.0000 e=1.2948 et=1.2948
+[CUBE] mismatchC=16 mismatchCT=16
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+rc=2
+[CUBE] nlse=1024 reach=0 tail=0 AICbi= AIVbi=36:0,38:0,41:0,42:0,52:0,54:0,56:0,57:0,58:0,[CUBE] AIC  b0{bi=0 ws-out=4718592B t-out=525336638B arrive=7 survWS=9} b2{bi=2 ws-out=4718592B t-out=525336638B arrive=7 survWS=9} 
+[CUBE] AIV  b1{bi=1 ws-out=4718592B t-out=525336638B arrive=7 survWS=9} b5{bi=5 ws-out=4718592B t-out=525336638B arrive=7 survWS=9} 
+[CUBE] wsScan n=1048576 usr=0x12c083e00000 memcpy=0: [524288]5/bi=0 [524352]5/bi=1 [524416]5/bi=2 [526336]6/bi=0 [526400]6/bi=1 [526464]6/bi=2 [526528]6/bi=3 [526592]6/bi=4 [526656]6/bi=5 hitAIC=3 hitAIV=6
+[CUBE] XC3 AICalive=0 AICbi= scRead=NONE(600..743 all zero) | Cdiag=[0.00,0.00,0.00]@16/64 AIVarrive=
+[CUBE] mismatchC=16 mismatchCT=16
+[CUBE][FAIL] sync rep0 err=EZ9999: Inner Error!
+--- tail ---
+       [DFX_INFO]Aicore kernel execute failed, device_id=0, stream_id=46, report_stream_id=46, task_id=1, flip_num=0, fault kernel_name=SparseFlashAttention_e26890ef935b1325df52b6ec3244c0d2_1, fault kernel info ext=none, program id=0, hash=10272072056995779346.[FUNC:GetError][FILE:stream.cc][LINE:1475]
+       rtStreamSynchronize execution failed, reason=aicore exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:65]
+       synchronize stream failed, runtime result = 507015[FUNC:ReportCallError][FILE:log_inner.cpp][LINE:148]
+
+=== 还原干净构建 ===
+  逐位一致 golden/p1.max (64 B)
+  逐位一致 golden/p1.sum (64 B)
+  时间: 平均 0.1791 ms  最小 0.1746  最大 0.1864  (reps=3)
