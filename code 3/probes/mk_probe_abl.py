@@ -90,14 +90,20 @@ def drop_line(text, line, tag):
 #      `nocalc − 本档` = 这条搬运在**串行暴露**下的真实份额（计算在场时它多半被
 #      MTE↔V 的双缓冲重叠吃掉一部分，那个数用地板差分是量不出来的）。
 L_K = '                CopyGm2Ub(kb[done * D_],  kGm_[kOff],  run * D_);\n'
-L_V = '                CopyGm2Ub(vb[done * D_],  vGm_[kOff],  run * D_);\n'
+# P32 之后 V 复用 kBuf_ ⇒ 这条 V 拷贝的行式变了（原来与 K 同形 `vGm_[kOff]`）；两个写法都试，
+# 命中哪个用哪个，全不命中就断言失败（宁可探针挂掉也不读假数）。
+L_V = '                CopyGm2Ub(vb[done * D_], vGm_[(rowBase + stageBeg_[j]) * D_], run * D_);\n'
+L_V_OLD = '                CopyGm2Ub(vb[done * D_],  vGm_[kOff],  run * D_);\n'
 L_KR = '                CopyGm2Ub(kr[done * Dr_], krGm_[rOff], run * Dr_);\n'
 L_WO = '            WriteOut(o, ml, lse, s1Base, lseBase + n0, n0, nbCur);\n'
 L_MG = '            MergeToken(b, s, hb);\n'
 if MODE in ('noK', 'noMTE'):
     s = drop_line(s, L_K, 'K 的 CopyGm2Ub')
 if MODE in ('noV', 'noMTE'):
-    s = drop_line(s, L_V, 'V 的 CopyGm2Ub')
+    if s.count(L_V) == 1:
+        s = drop_line(s, L_V, 'V 的 CopyGm2Ub')
+    else:
+        s = drop_line(s, L_V_OLD, 'V 的 CopyGm2Ub')
 if MODE == 'noMTE':
     s = drop_line(s, L_KR, 'K-rope 的 CopyGm2Ub')
 if MODE == 'noW':

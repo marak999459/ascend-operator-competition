@@ -1,0 +1,96 @@
+# P43 段级消融（AUTO 档，当前 P38 构建，批量 ms）2026-09-22 10:35~10:56
+=== 0) 干净态 ===
+构建 OK
+########## AUTO abl = full  kernel md5(远端)=0d5c5e28 ##########
+平均 0.6577 ms
+
+平均 5.0530 ms
+
+平均 9.4417 ms
+
+########## AUTO abl = nosc  kernel md5(远端)=5bdeb8ab ##########
+平均 0.3561 ms
+
+平均 2.6933 ms
+
+平均 4.6032 ms
+
+########## AUTO abl = nopv  kernel md5(远端)=f165c446 ##########
+平均 0.4723 ms
+
+平均 3.5804 ms
+
+平均 6.3952 ms
+
+########## AUTO abl = nocalc  kernel md5(远端)=73a55592 ##########
+平均 0.1026 ms
+
+平均 0.7171 ms
+
+平均 0.7510 ms
+
+########## AUTO abl = nomax  kernel md5(远端)=b1a2d074 ##########
+平均 0.6629 ms
+
+平均 5.1026 ms
+
+平均 9.4292 ms
+
+########## AUTO abl = noexp  kernel md5(远端)=ffef1bde ##########
+平均 0.6597 ms
+
+平均 5.0807 ms
+
+平均 9.3964 ms
+
+########## AUTO abl = nosum  kernel md5(远端)=406d54ea ##########
+平均 0.6387 ms
+
+平均 4.9223 ms
+
+平均 9.1555 ms
+
+=== 还原干净构建 ===
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.6576 ms  最小 0.6575  最大 0.6576   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)
+  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05
+0
+0d5c5e28b4d6154a9190533fd78deabf  code/op_kernel/sparse_flash_attention.cpp
+=== 0) 干净态 ===
+构建 OK
+########## AUTO abl = noK  kernel md5(远端)=a07fb05d ##########
+平均 0.0963 ms
+
+平均 0.6661 ms
+
+平均 0.6841 ms
+
+########## AUTO abl = noV  kernel md5(远端)=6a8f4f7e ##########
+平均 0.0838 ms
+
+平均 0.5656 ms
+
+平均 0.5775 ms
+
+########## AUTO abl = noMTE  kernel md5(远端)=e3734e49 ##########
+平均 0.0591 ms
+
+平均 0.3730 ms
+
+平均 0.3834 ms
+
+########## AUTO abl = noW  kernel md5(远端)=f2e5ec68 ##########
+平均 0.1024 ms
+
+平均 0.7322 ms
+
+平均 0.7612 ms
+
+=== 还原干净构建 ===
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.6575 ms  最小 0.6574  最大 0.6575   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)
+  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05
+0
+0d5c5e28b4d6154a9190533fd78deabf  code/op_kernel/sparse_flash_attention.cpp
