@@ -1,0 +1,44 @@
+=== PASS 1 ===
+AB big1 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.7055 ms 
+AB big1 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6598 ms 
+AB p_n64 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.1934 ms 
+AB p_n64 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1880 ms 
+AB p_n512 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 1.3773 ms 
+AB p_n512 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 1.2818 ms 
+AB p_n1024 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 2.7324 ms 
+AB p_n1024 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5470 ms 
+AB w4 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 10.4920 ms 
+AB w4 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 9.4571 ms 
+=== PASS 2 ===
+AB big1 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.7058 ms 
+AB big1 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6594 ms 
+AB p_n64 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.1938 ms 
+AB p_n64 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1877 ms 
+AB p_n512 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 1.3770 ms 
+AB p_n512 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 1.2826 ms 
+AB p_n1024 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 2.7326 ms 
+AB p_n1024 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5459 ms 
+AB w4 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 10.4927 ms 
+AB w4 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 9.4567 ms 
+=== PASS 3 ===
+AB big1 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.7051 ms 
+AB big1 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6599 ms 
+AB p_n64 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.1939 ms 
+AB p_n64 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1872 ms 
+AB p_n512 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 1.3782 ms 
+AB p_n512 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 1.2824 ms 
+AB p_n1024 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 2.7327 ms 
+AB p_n1024 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5465 ms 
+AB w4 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 10.4930 ms 
+AB w4 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 9.4506 ms 
+=== PASS 4 ===
+AB big1 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.7054 ms 
+AB big1 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6600 ms 
+AB p_n64 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.1932 ms 
+AB p_n64 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1880 ms 
+AB p_n512 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 1.3774 ms 
+AB p_n512 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 1.2818 ms 
+AB p_n1024 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 2.7327 ms 
+AB p_n1024 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5464 ms 
+AB w4 nb=8 kb=40 :: SFA_PICK nb=8 nblk=40 ks=1 平均 10.4930 ms 
+AB w4 nb=4 kb=48 :: SFA_PICK nb=4 nblk=48 ks=1 平均 9.4560 ms 

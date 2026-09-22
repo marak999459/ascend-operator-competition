@@ -1,0 +1,98 @@
+=== G) 造大形状计时案（纯输入 + 哑 expect）===
+w1   B=1 S1=4    S2=8192   N1=4 SBS=2 COUNT=2048  有效块=2048  token/行=4096  行×头=16    KV=19 MB     17.9 MB  6.1s
+w2   B=1 S1=32   S2=8192   N1=4 SBS=2 COUNT=2048  有效块=2048  token/行=4096  行×头=128   KV=19 MB     18.4 MB  6.3s
+w3   B=1 S1=128  S2=8192   N1=4 SBS=2 COUNT=2048  有效块=2048  token/行=4096  行×头=512   KV=19 MB     20.0 MB  6.7s
+w4   B=1 S1=128  S2=8192   N1=8 SBS=2 COUNT=2048  有效块=2048  token/行=4096  行×头=1024  KV=19 MB     21.1 MB  7.0s
+w5   B=1 S1=32   S2=32768  N1=4 SBS=2 COUNT=2048  有效块=2048  token/行=4096  行×头=128   KV=75 MB     71.8 MB  24.5s
+=== PASS 1 ===
+AUTO w1 SFA_PICK nb=1 nblk=48 ks=2 平均 0.2410 ms 平均 0.2667 ms 
+GRID w1 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 0.3255 ms 平均 0.3530 ms 
+GRID w1 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 0.2589 ms 平均 0.2851 ms 
+GRID w1 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 0.2472 ms 平均 0.2736 ms 
+GRID w1 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 0.2404 ms 平均 0.2659 ms 
+GRID w1 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 0.5121 ms 平均 0.5446 ms 
+GRID w1 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 0.4166 ms 平均 0.4446 ms 
+GRID w1 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 0.4029 ms 平均 0.4329 ms 
+GRID w1 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 0.3887 ms 平均 0.4187 ms 
+AUTO w2 SFA_PICK nb=4 nblk=48 ks=1 平均 1.3701 ms 平均 1.3962 ms 
+GRID w2 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 2.4745 ms 平均 2.5013 ms 
+GRID w2 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 1.9343 ms 平均 1.9644 ms 
+GRID w2 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 1.8349 ms 平均 1.8567 ms 
+GRID w2 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 1.7826 ms 平均 1.8097 ms 
+GRID w2 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 2.0166 ms 平均 2.0422 ms 
+GRID w2 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 1.6159 ms 平均 1.6403 ms 
+GRID w2 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 1.5627 ms 平均 1.5910 ms 
+GRID w2 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 1.5102 ms 平均 1.5336 ms 
+AUTO w3 SFA_PICK nb=4 nblk=48 ks=1 平均 5.4002 ms 平均 5.4273 ms 
+GRID w3 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 7.9953 ms 平均 8.0269 ms 
+GRID w3 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 6.2867 ms 平均 6.3102 ms 
+GRID w3 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 5.9507 ms 平均 5.9793 ms 
+GRID w3 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 5.7737 ms 平均 5.7916 ms 
+GRID w3 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 6.9912 ms 平均 7.0196 ms 
+GRID w3 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 5.6020 ms 平均 5.6330 ms 
+GRID w3 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 5.4053 ms 平均 5.4309 ms 
+GRID w3 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 5.2263 ms 平均 5.2528 ms 
+AUTO w4 SFA_PICK nb=8 nblk=40 ks=1 平均 10.4951 ms 平均 10.5206 ms 
+GRID w4 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 15.9757 ms 平均 15.9846 ms 
+GRID w4 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 12.5669 ms 平均 12.6022 ms 
+GRID w4 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 11.8980 ms 平均 11.9209 ms 
+GRID w4 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 11.5415 ms 平均 11.5682 ms 
+GRID w4 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 13.0083 ms 平均 13.0195 ms 
+GRID w4 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 10.3943 ms 平均 10.4239 ms 
+GRID w4 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 10.0409 ms 平均 10.0789 ms 
+GRID w4 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 9.6876 ms 平均 9.7172 ms 
+AUTO w5 SFA_PICK nb=4 nblk=48 ks=1 平均 1.3701 ms 平均 1.4008 ms 
+GRID w5 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 2.4733 ms 平均 2.5010 ms 
+GRID w5 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 1.9535 ms 平均 1.9823 ms 
+GRID w5 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 1.8426 ms 平均 1.8740 ms 
+GRID w5 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 1.7824 ms 平均 1.8189 ms 
+GRID w5 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 2.0242 ms 平均 2.0505 ms 
+GRID w5 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 1.6174 ms 平均 1.6412 ms 
+GRID w5 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 1.5628 ms 平均 1.5863 ms 
+GRID w5 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 1.5088 ms 平均 1.5330 ms 
+=== PASS 2 ===
+AUTO w1 SFA_PICK nb=1 nblk=48 ks=2 平均 0.2403 ms 平均 0.2659 ms 
+GRID w1 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 0.3256 ms 平均 0.3525 ms 
+GRID w1 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 0.2589 ms 平均 0.2845 ms 
+GRID w1 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 0.2476 ms 平均 0.2743 ms 
+GRID w1 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 0.2403 ms 平均 0.2656 ms 
+GRID w1 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 0.5119 ms 平均 0.5471 ms 
+GRID w1 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 0.4166 ms 平均 0.4473 ms 
+GRID w1 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 0.4028 ms 平均 0.4330 ms 
+GRID w1 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 0.3881 ms 平均 0.4179 ms 
+AUTO w2 SFA_PICK nb=4 nblk=48 ks=1 平均 1.3699 ms 平均 1.3941 ms 
+GRID w2 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 2.4739 ms 平均 2.4961 ms 
+GRID w2 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 1.9404 ms 平均 1.9543 ms 
+GRID w2 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 1.8436 ms 平均 1.8782 ms 
+GRID w2 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 1.7884 ms 平均 1.8164 ms 
+GRID w2 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 2.0189 ms 平均 2.0444 ms 
+GRID w2 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 1.6184 ms 平均 1.6449 ms 
+GRID w2 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 1.5631 ms 平均 1.5850 ms 
+GRID w2 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 1.5123 ms 平均 1.5378 ms 
+AUTO w3 SFA_PICK nb=4 nblk=48 ks=1 平均 5.4015 ms 平均 5.4275 ms 
+GRID w3 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 7.9968 ms 平均 8.0246 ms 
+GRID w3 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 6.2926 ms 平均 6.3075 ms 
+GRID w3 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 5.9534 ms 平均 5.9873 ms 
+GRID w3 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 5.7746 ms 平均 5.8099 ms 
+GRID w3 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 7.0052 ms 平均 7.0224 ms 
+GRID w3 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 5.6050 ms 平均 5.6376 ms 
+GRID w3 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 5.4084 ms 平均 5.4359 ms 
+GRID w3 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 5.2262 ms 平均 5.2518 ms 
+AUTO w4 SFA_PICK nb=8 nblk=40 ks=1 平均 10.4947 ms 平均 10.5183 ms 
+GRID w4 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 15.9805 ms 平均 16.0022 ms 
+GRID w4 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 12.5781 ms 平均 12.6083 ms 
+GRID w4 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 11.9073 ms 平均 11.9365 ms 
+GRID w4 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 11.5541 ms 平均 11.5807 ms 
+GRID w4 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 13.0164 ms 平均 13.0442 ms 
+GRID w4 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 10.3995 ms 平均 10.4302 ms 
+GRID w4 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 10.0430 ms 平均 10.0713 ms 
+GRID w4 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 9.6966 ms 平均 9.7361 ms 
+AUTO w5 SFA_PICK nb=4 nblk=48 ks=1 平均 1.3697 ms 平均 1.3986 ms 
+GRID w5 nb=1 kb=16 :: SFA_PICK nb=1 nblk=16 ks=2 平均 2.4781 ms 平均 2.5004 ms 
+GRID w5 nb=1 kb=32 :: SFA_PICK nb=1 nblk=32 ks=2 平均 1.9337 ms 平均 1.9469 ms 
+GRID w5 nb=1 kb=40 :: SFA_PICK nb=1 nblk=40 ks=2 平均 1.8301 ms 平均 1.8492 ms 
+GRID w5 nb=1 kb=48 :: SFA_PICK nb=1 nblk=48 ks=2 平均 1.7788 ms 平均 1.7966 ms 
+GRID w5 nb=2 kb=16 :: SFA_PICK nb=2 nblk=16 ks=2 平均 2.0217 ms 平均 2.0525 ms 
+GRID w5 nb=2 kb=32 :: SFA_PICK nb=2 nblk=32 ks=2 平均 1.6184 ms 平均 1.6427 ms 
+GRID w5 nb=2 kb=40 :: SFA_PICK nb=2 nblk=40 ks=2 平均 1.5631 ms 平均 1.5883 ms 
+GRID w5 nb=2 kb=48 :: SFA_PICK nb=2 nblk=48 ks=2 平均 1.5113 ms 平均 1.5390 ms 

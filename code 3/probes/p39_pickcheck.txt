@@ -1,0 +1,47 @@
+=== 0) 打 PICK 补丁 + 重建 ===
+PATCHED code/op_host/sparse_flash_attention.cpp
+5
+/home/developer/sfa_real/code/build/library/ascendc_kernels/_binary_custom_op_impl_ai_core_tbe_custom_impl_dynamic_sparse_flash_attention_py.o
+/home/developer/sfa_real/code/build/tmp/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910_93/sparse_flash_attention/SparseFlashAttention_bf6e58eb15d9ffbc0a3b6afb0933b40e.json
+=== 1) 逐案回读 AUTO 选档 ===
+PICK big1 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048 need=185568 safe=186485 e=2
+PICK e1empty :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK e2one :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK e3two :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK e4odd :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK e5s2one :: SFA_PICK nb=1 nblk=48 ks=2 sbs=2 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK e6many :: SFA_PICK nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048 need=185568 safe=186485 e=2
+PICK e7padq :: SFA_PICK nb=2 nblk=48 ks=2 sbs=1 rows=8 count=2048 need=176096 safe=186485 e=2
+PICK e8padkv :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK p1 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK p1s1 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK p1s1h :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK p1s2 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=2 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK p1s2h :: SFA_PICK nb=1 nblk=48 ks=2 sbs=2 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK p1s4 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=4 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK p1s8 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=8 rows=4 count=1024 need=171360 safe=186485 e=2
+PICK p2 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=8 count=2048 need=171360 safe=186485 e=2
+PICK p2s2 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=2 rows=8 count=2048 need=171360 safe=186485 e=2
+PICK p4 :: SFA_PICK nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048 need=185568 safe=186485 e=2
+PICK p4s2 :: SFA_PICK nb=4 nblk=48 ks=2 sbs=2 rows=16 count=2048 need=185568 safe=186485 e=2
+PICK p6 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048 need=185568 safe=186485 e=2
+PICK p6s2 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048 need=185568 safe=186485 e=2
+PICK p_n1024 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048 need=185568 safe=186485 e=2
+PICK p_n512 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048 need=185568 safe=186485 e=2
+PICK p_n64 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048 need=185568 safe=186485 e=2
+PICK q1h :: SFA_PICK nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK q2h :: SFA_PICK nb=1 nblk=48 ks=2 sbs=2 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK q3h :: SFA_PICK nb=2 nblk=48 ks=2 sbs=1 rows=8 count=2048 need=176096 safe=186485 e=2
+PICK r1_min :: SFA_PICK nb=1 nblk=48 ks=1 sbs=1 rows=1 count=16 need=171360 safe=186485 e=2
+PICK r2_chunk :: SFA_PICK nb=1 nblk=48 ks=1 sbs=1 rows=1 count=64 need=171360 safe=186485 e=2
+PICK r3_mode3 :: SFA_PICK nb=1 nblk=48 ks=1 sbs=1 rows=4 count=32 need=171360 safe=186485 e=2
+PICK r4_shortkv :: SFA_PICK nb=1 nblk=48 ks=1 sbs=1 rows=4 count=16 need=171360 safe=186485 e=2
+PICK r5_blocks :: SFA_PICK nb=1 nblk=48 ks=1 sbs=4 rows=2 count=32 need=171360 safe=186485 e=2
+PICK r6_multiB :: SFA_PICK nb=1 nblk=48 ks=1 sbs=1 rows=4 count=32 need=171360 safe=186485 e=2
+PICK r7_norope :: SFA_PICK nb=1 nblk=48 ks=1 sbs=1 rows=1 count=32 need=171360 safe=186485 e=2
+PICK r8_heads :: SFA_PICK nb=1 nblk=48 ks=1 sbs=1 rows=2 count=32 need=171360 safe=186485 e=2
+PICK w1 :: SFA_PICK nb=1 nblk=48 ks=2 sbs=2 rows=4 count=2048 need=171360 safe=186485 e=2
+PICK w2 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048 need=185568 safe=186485 e=2
+PICK w3 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048 need=185568 safe=186485 e=2
+PICK w4 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048 need=185568 safe=186485 e=2
+PICK w5 :: SFA_PICK nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048 need=185568 safe=186485 e=2

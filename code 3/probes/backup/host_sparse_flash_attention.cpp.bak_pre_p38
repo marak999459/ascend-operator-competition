@@ -122,9 +122,6 @@ static inline uint64_t CalcUbNeed(uint32_t nb, uint64_t nBlk, uint32_t qD, uint3
 //   （nb=1 把 32 行切成 128 单元 = 4 波，每单元贵 2.2 倍，而 32 行本来 1 波就跑完）。
 //   所以这里改成对候选 (nb, n_blk) 直接比 ceil(waves) × UnitCalls()，取最小代价；
 //   并列时取较大的 nb（单元少 = 固定开销少、也更省 UB 之外的搬运）。
-//   ⚠️ P38 更正：上面那行式子当时【少乘了一维】—— UnitCalls 是"一个 chunk"的代价，waves 是
-//   "整个单元"的波数，中间还要乘"这个单元扫几个 chunk"。小形状上这一维近似常数所以没出事，
-//   大形状上它把 nb 一路推过头（w4 慢 11 %、big1 慢 5~10 %），补法见下面的 UnitCost。
 //   返回 false 表示连最小分块都装不下 -> 调用方必须安全降级，绝不返回 tiling 错误。
 // 一个工作单元（nb 个头 × n_blk 个 token）处理一个 KV chunk 的【代价】，单位是
 // "等效向量调用条数"。只用于在候选之间比大小，绝对值没有意义（2201 上实测一条向量
@@ -164,29 +161,6 @@ static inline uint64_t UnitCalls(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32
          + GatherCalls(nb, k, qD, dr, elemSize);
 }
 
-// P38：一个工作单元扫完自己那段 sparse 列表要发起多少次"整 chunk"的处理 =
-//   ceil(本单元 token 数 / n_blk)，乘到代价里。
-// ⚠️ 这一维在此前的模型里【整个都没有】：`cost = waves × UnitCalls`，可 `UnitCalls` 的口径
-//   是"处理【一个 chunk】的调用数"，`waves` 却是【整个单元】的波数 ⇒ 中间少乘了"几个 chunk"。
-//   少掉它有两个后果，都被 P37 的三维实测网格抓到（code3.md §15.55）：
-//     ① **k 轴反指**：模型只剩"k 越大 → 每 chunk 调用越多 ⇒ 越贵"，表达不出"k 越大 → flush
-//        越少 → 越便宜"，与 §15.51(2) 那 24/24 格同臂"k 越大越快"直接反号。当时靠"每个 nb
-//        臂取最大可行 k"的贪心把符号错误常数化掉了，代价是①的兄弟②没人对冲。
-//     ② **nb 轴被系统性偏袒**：nb 变大 → 最大可行 k 变小 → 每 chunk 显得越便宜 → cost 越小，
-//        于是模型一路上推 nb。w4（rows=128、Q_N=8、4096 token/行）模型选 nb=8/k=40，实测它
-//        是第 3 名，比全场最快的 nb=4/k=48 慢 **11.0 %**；big1（同 rows/Q_N、256 token/行）
-//        从 P29 起就一直停在 nb=8，而 §15.51 的网格早就量到它的 nb=4 快 5 % 以上。
-//   token 数取 `min(sparse_count*sbs, KV_S)`：kernel 会跳过 -1 项，host 看不到"每行实际
-//   有几个有效块"（big1 的 2048 项里只有 256 个有效），所以这是一个【上界】。它不影响
-//   选档：误差只通过 ceil 的取整进入，而各 nb 臂吃的是同一个上界。
-static inline uint64_t UnitCost(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32_t dr,
-                                uint32_t elemSize, uint64_t toks)
-{
-    uint64_t chunks = (toks + nBlk - 1ULL) / nBlk;
-    if (chunks == 0ULL) { chunks = 1ULL; }
-    return UnitCalls(nb, nBlk, qD, dr, elemSize) * chunks;
-}
-
 // P16：kv_shard=2（把 sparse 列表切成两半分给两个核）这一档【能不能开】。
 // 三条门与 kernel 的 Init 同一口径，任何一条不满足就只能 ks=1：
 //   ① units0*2 <= coreNum —— 切完仍在【一波】内。多出一波等于白切：U 个单元 / C 核是
@@ -203,15 +177,11 @@ static inline bool Ks2Allowed(uint64_t units0, uint32_t coreNum, uint64_t lseEle
 
 static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD, uint32_t dr,
                          uint32_t qN, uint32_t elemSize, uint32_t coreNum, uint32_t rows,
-                         uint64_t sparseCount, uint64_t lseElems, uint64_t kvS,
+                         uint64_t sparseCount, uint64_t lseElems,
                          uint32_t &nbOut, uint32_t &nBlkOut, uint32_t &ksOut)
 {
     constexpr size_t NB_N = sizeof(NB_CAND) / sizeof(NB_CAND[0]);
     constexpr size_t NBLK_N = sizeof(NBLK_CAND) / sizeof(NBLK_CAND[0]);
-    // P38：每行最多扫这么多 token —— 上界，口径与 UnitCost 的注释同源（host 看不到
-    //      每行实际有效几个块，big1 那类"sparse 表 2048 项、有效 256 项"的用例会高估）。
-    uint64_t toks = sparseCount * static_cast<uint64_t>(sparseBlockSize);
-    if (kvS < toks) { toks = kvS; }
     // nb 超过头数没有意义：kernel 的 nbCur = min(Q_N - n0, nb) 会把它夹回来，
     // 多出来的 qBuf_/oBuf_/sBuf_ 全是死缓冲。
     const uint64_t nbCap = (static_cast<uint64_t>(qN) < NB_MIN) ? NB_MIN : qN;
@@ -241,24 +211,19 @@ static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD,
                 if (pass == 0 && nb * nBlk < sparseBlockSize) { continue; }
                 if (CalcUbNeed(nb, nBlk, qD, dr, elemSize) > ubSafe) { continue; }
                 const uint64_t calls = UnitCalls(nb, nBlk, qD, dr, elemSize);
-                uint64_t cost = waves * UnitCost(nb, nBlk, qD, dr, elemSize, toks);
+                uint64_t cost = waves * calls;
                 uint32_t ks = 1U;
                 // P16：kv_shard=2 也是【一等候选】，不是选完档之后再判的附加开关。
-                //      切完之后每单元的 token 数减半 ⇒ 波数按 2*units 重算，再乘一档归并税
-                //      （真机批量口径实测 5.7 % ⇒ 取 108/100 留余量）。
+                //      切完之后每单元的 token 数减半 ⇒ 调用数按 1/2 计，波数按 2*units
+                //      重算，再乘一档归并税（真机批量口径实测 5.7 % ⇒ 取 108/100 留余量）。
                 //      ⚠️ 少了这一档，模型会挑"不切时最便宜"的那一档 nb，而那一档往往
                 //      是切分后最贵的（p4：模型选 nb=2/ks=1 = 0.4905，实测 nb=4/ks=2 =
                 //      0.4252 ⇒ 慢 15 %，见 §15.34）。
-                // P38：省的是【flush 次数】不是"调用数"—— 一半 token 少一半 chunk，而每 chunk
-                //      的调用数不变。原式把 calls 整个折半，连"每头一次"那批固定项也折了半，
-                //      是同一个"漏乘 chunk 维度"带出来的近似；补上维度后按 chunk 折半才是对的形式。
                 if (Ks2Allowed(units, coreNum, lseElems, sparseCount, nBlk)) {
                     const uint64_t units2 = units * 2ULL;
                     const uint64_t waves2 = (coreNum == 0)
                         ? units2 : (units2 + coreNum - 1ULL) / coreNum;
-                    uint64_t chunks2 = (toks / 2ULL + nBlk - 1ULL) / nBlk;
-                    if (chunks2 == 0ULL) { chunks2 = 1ULL; }
-                    const uint64_t cost2 = ((waves2 * calls * chunks2) * 108ULL) / 100ULL + 1ULL;
+                    const uint64_t cost2 = ((waves2 * calls / 2ULL) * 108ULL) / 100ULL + 1ULL;
                     if (cost2 < cost) { cost = cost2; ks = 2U; }
                 }
                 // 迟滞：只有【明显更优】（< 0.95×）才从较大的 nb 改档，留一点余量给
@@ -398,7 +363,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
                       static_cast<uint32_t>(num_cores_aiv), B * Q_S,
                       static_cast<uint64_t>(sparse_count),
                       static_cast<uint64_t>(B) * static_cast<uint64_t>(Q_S) * Q_N,
-                      static_cast<uint64_t>(KV_S),
                       nb, nBlk, kvShard)) {
         nb = NB_MIN;   // 降级：取全表最省 UB 的合法组合，只保证能跑通、不报错
         nBlk = NBLK_MIN;
