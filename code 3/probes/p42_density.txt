@@ -1,0 +1,50 @@
+=== 0) 造密度族（gen_big.py <name> <nblk>，形状全同）===
+生成 d64: B=1 S1=128 S2=8192 N1=8 SBS=1 MODE=3 nblk=64  用时 14.3s
+生成 d256: B=1 S1=128 S2=8192 N1=8 SBS=1 MODE=3 nblk=256  用时 42.1s
+生成 d1024: B=1 S1=128 S2=8192 N1=8 SBS=1 MODE=3 nblk=1024  用时 172.5s
+生成 d2048: B=1 S1=128 S2=8192 N1=8 SBS=1 MODE=3 nblk=2048  用时 354.0s
+=== 1) 打 FORCE/PICK 补丁 + 重建 ===
+PATCHED code/op_host/sparse_flash_attention.cpp
+/home/developer/sfa_real/code/build/tmp/vendors/custom/op_impl/ai_core/tbe/kernel/ascend910_93/sparse_flash_attention/SparseFlashAttention_bf6e58eb15d9ffbc0a3b6afb0933b40e.json
+=== PASS 1 ===
+AUTO d64 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1871 ms 
+G d64 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1864 ms 
+G d64 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.1945 ms 
+G d64 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 0.1934 ms 
+G d64 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 0.2013 ms 
+AUTO d256 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6585 ms 
+G d256 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6582 ms 
+G d256 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.7052 ms 
+G d256 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 0.7208 ms 
+G d256 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 0.7054 ms 
+AUTO d1024 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5460 ms 
+G d1024 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5465 ms 
+G d1024 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 2.7316 ms 
+G d1024 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 2.8237 ms 
+G d1024 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 2.7205 ms 
+AUTO d2048 :: SFA_PICK nb=4 nblk=48 ks=1 平均 5.0536 ms 
+G d2048 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 5.0535 ms 
+G d2048 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 5.4379 ms 
+G d2048 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 5.6311 ms 
+G d2048 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 5.4073 ms 
+=== PASS 2 ===
+AUTO d64 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1872 ms 
+G d64 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.1869 ms 
+G d64 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.1939 ms 
+G d64 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 0.1935 ms 
+G d64 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 0.2018 ms 
+AUTO d256 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6578 ms 
+G d256 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 0.6584 ms 
+G d256 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 0.7057 ms 
+G d256 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 0.7201 ms 
+G d256 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 0.7059 ms 
+AUTO d1024 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5464 ms 
+G d1024 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 2.5462 ms 
+G d1024 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 2.7316 ms 
+G d1024 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 2.8244 ms 
+G d1024 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 2.7197 ms 
+AUTO d2048 :: SFA_PICK nb=4 nblk=48 ks=1 平均 5.0535 ms 
+G d2048 nb=4 kb=48 ks=1 :: SFA_PICK nb=4 nblk=48 ks=1 平均 5.0538 ms 
+G d2048 nb=8 kb=40 ks=1 :: SFA_PICK nb=8 nblk=40 ks=1 平均 5.4377 ms 
+G d2048 nb=8 kb=32 ks=1 :: SFA_PICK nb=8 nblk=32 ks=1 平均 5.6314 ms 
+G d2048 nb=2 kb=48 ks=1 :: SFA_PICK nb=2 nblk=48 ks=1 平均 5.4085 ms 
