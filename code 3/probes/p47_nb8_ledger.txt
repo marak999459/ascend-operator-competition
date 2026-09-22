@@ -1,0 +1,28 @@
+# P47 nb=8 段账：读数提取件（原始日志 code 3/npu_debug/p47_nb8_ledger_130129.log，*.log 不进版本库）
+# 场次 2026-09-22 12:53~13:02 CST，同场次三档；host 仅在 nb8/nb8nosc 两档被 sed（NB_CAND={32,16,8} ⇒ qN=8 下唯一合法候选），trap 已还原
+# 每档三行依次 = big1 / d2048 / w4（批量口径，5 reps）
+# 判据只有时间：nb8nosc 的输出必然是错的 ⇒ 一律 act=none，未锁 golden
+#
+=== 0) 干净态 ===
+构建 OK
+########## P47 = auto  kernel md5(远端)=0d5c5e28 ##########
+平均 0.6573 ms
+平均 5.0524 ms
+平均 9.4375 ms
+36:constexpr uint32_t NB_CAND[] = {32, 16, 8};  // P47 FORCE8
+########## P47 = nb8  kernel md5(远端)=0d5c5e28 ##########
+平均 0.7051 ms
+平均 5.4366 ms
+平均 10.4923 ms
+36:constexpr uint32_t NB_CAND[] = {32, 16, 8};  // P47 FORCE8
+########## P47 = nb8nosc  kernel md5(远端)=5bdeb8ab ##########
+平均 0.3438 ms
+平均 2.6005 ms
+平均 4.7498 ms
+=== 还原干净构建 ===
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.6577 ms  最小 0.6575  最大 0.6578   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)
+  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05
+code/op_kernel/sparse_flash_attention.cpp:0
+code/op_host/sparse_flash_attention.cpp:0
