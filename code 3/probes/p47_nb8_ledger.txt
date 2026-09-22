@@ -26,3 +26,18 @@
   LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05
 code/op_kernel/sparse_flash_attention.cpp:0
 code/op_host/sparse_flash_attention.cpp:0
+#
+# --- 追加档 nb8nopv（13:08~13:12 CST，同场次第四档；原始日志 code 3/probes/p47_nb8_nopv.log）---
+=== 0) 干净态 ===
+构建 OK
+########## P47 = nb8nopv  kernel md5(远端)=f165c446 ##########
+平均 0.4871 ms
+平均 3.7036 ms
+平均 6.9602 ms
+=== 还原干净构建 ===
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.6576 ms  最小 0.6573  最大 0.6577   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)
+  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05
+code/op_kernel/sparse_flash_attention.cpp:0
+code/op_host/sparse_flash_attention.cpp:0

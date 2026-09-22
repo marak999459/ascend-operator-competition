@@ -44,8 +44,8 @@ for m in "${MODES[@]}"; do
   case "$m" in
     auto)                            ;;
     nb8)     FORCE8                 ;;
-    nb8nosc) FORCE8
-             python3 "$REPO/code 3/probes/mk_probe_abl.py" nosc | rssh "cat > ~/sfa_real/$KER" || { echo "PUSH FAIL $m"; continue; } ;;
+    nb8nosc|nb8nopv) FORCE8
+             python3 "$REPO/code 3/probes/mk_probe_abl.py" "${m#nb8}" | rssh "cat > ~/sfa_real/$KER" || { echo "PUSH FAIL $m"; continue; } ;;
     *) echo "未知档 $m"; continue ;;
   esac
   echo "########## P47 = $m  kernel md5(远端)=$(rssh "md5sum ~/sfa_real/$KER" | cut -c1-8) ##########"
