@@ -13,7 +13,7 @@
 
 ## 1. 执行依据与事实基线
 
-阅读顺序：`../AGENT.MD` → `../算子开发工作流.md` → `../连接信息.md` → `../official_problem_statement.md` 第二题 → `../code2.md` 最新记录 → 本方案 → 实际源码。用户本次要求和实测证据优先于历史推测。
+阅读顺序：`../../AGENT.MD` → `../../算子开发工作流.md` → `../../连接信息.md` → `../../official_problem_statement.md` 第二题 → `../../code2.md` 最新记录 → 本方案 → 实际源码。用户本次要求和实测证据优先于历史推测。
 
 - 仓库基线提交：`daa26d3b0f7551a945e2d2cf6c07d39268929d08`。
 - 已验证提交：`6aaf5011b0477ec41e3e0fc4`，平台 Pass，5/5，未修改的 `code2/`。
@@ -133,7 +133,7 @@ P3各实验可由 profiling 结果调整先后，但仍逐一测量。不要为�
 - 平台全部Pass且性能收益成立才晋升best-platform；Compile Error/WA/超时保留完整证据，回退本地候选并定位，不盲目连续提交。
 - 同一方向两轮没有超过噪声的收益则转向；仅启动开销占主导时不继续堆叠复杂结构。长期目标按实测下限调整，不预承诺1.5µs。
 
-每轮保存以下字段：variant、parent、源码哈希、编译产物哈希、CANN/芯片、n/batch/iters/eps/dtype、K/C、seed、校验误差、计时方法及单位、median/P90/波动、相对B0和当前best提升、profiling解释、提交ID/平台结果、保留或放弃原因。同步更新 `../code2.md`，失败路径也要记录。
+每轮保存以下字段：variant、parent、源码哈希、编译产物哈希、CANN/芯片、n/batch/iters/eps/dtype、K/C、seed、校验误差、计时方法及单位、median/P90/波动、相对B0和当前best提升、profiling解释、提交ID/平台结果、保留或放弃原因。同步更新 `../../code2.md`，失败路径也要记录。
 
 ## 9. 下次开始执行时的第一批任务
 

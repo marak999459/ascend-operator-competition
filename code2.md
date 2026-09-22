@@ -512,7 +512,7 @@ PROF=1 BENCH=1 bash run.sh ...         # 纯 kernel 时长（msprof，产物 $T/
 
 - [ ] 真机重测 step-1 向量版基线（形状前缀务必记全，回应 §1 的"303/341µs 口径未统一"）
 - [ ] **第一刀改 §10.6 #0**（`WholeReduceSum`/`WholeReduceMax` 替 n 次 `ReduceSum`/`ReduceMax` + 删 workBuffer），**不再先试 `BlockReduceSum`** —— 单点改动、39 项对拍复跑 + 单次真机计时
-- [ ] 上云端仿真机时先在现有 probe 里加一行 `WholeReduceSum<float>(dst, src, n, n, 1, 1, 1)` 过编译门（§10.6 第 1 条末段"编译门状态要分清"；题3 过的那支是 `<half>` + `mask[]`，不同重载）
+- [ ] 下次上真机时先在现有 probe 里加一行 `WholeReduceSum<float>(dst, src, n, n, 1, 1, 1)` 过编译门（§10.6 第 1 条末段"编译门状态要分清"；题3 过的那支是 `<half>` + `mask[]`，不同重载；仿真机已停用，编译门直接在真机做）
 
 ---
 
@@ -543,7 +543,7 @@ WholeReduceSum(output, input, curColNum, curRowNum, 1, 1, CeilDiv(curColNum, ele
 对到本题：`LoadRows` 后第 i 行就在第 i 个 32B 块（RS=8=fp32 每块元素数）⇒ 每行 1 块 ⇒ `blocksPerRow=1` ⇒ **`WholeReduceSum<float>(red, mat, n, n, 1, 1, 1)` 替掉 `:131-133` 的 n 次 `ReduceSum`，`WholeReduceMax<float>(red, mat, n, n, 1, 1, 1, ORDER_ONLY_VALUE)` 替掉 `:120-122` 的 n 次 `ReduceMax`，并连带删掉 `tmp_buf_`**。每轮 11→4 条，比 #1 少一个必须猜对才成立的量。
 ⚠️ 全仓 **82 个文件**在引用 `WholeReduce*`（`grep -rl "WholeReduce" ops-transformer-master --include=*.h --include=*.cpp | wc -l`；用例见 `norm_rope_concat.h:106`、`vector_common.h:436`、`kv_rms_norm_rope_cache_*.h`），"arch22 不能用"这个担心不成立。
 
-**编译门状态要分清（别把题3 的结论套过头）**：题3 的 probe 过的是 **`WholeReduceSum<half>(dst, src, mask[], 8, 1, 1, 1)`**（`code3.md:1115`，mask 数组那一支）；官方 mhc_pre 用的是 **`(dst, src, count, outLen, 1, 1, blocksPerRow)`** 这支 —— **同一函数的不同重载，后者在 2201 上还没过过编译**。⇒ 下次上云端仿真机，第一件事是在现有 probe 里加这 1 行浮点调用（题3 只读引用，不动 `code 3/`）。另：`code3.md:1071` 记的是"SFA 官方 arch22 自己没用 `WholeReduceSum`"，别误读成"910B 没有这个函数"。
+**编译门状态要分清（别把题3 的结论套过头）**：题3 的 probe 过的是 **`WholeReduceSum<half>(dst, src, mask[], 8, 1, 1, 1)`**（`code3.md:1115`，mask 数组那一支）；官方 mhc_pre 用的是 **`(dst, src, count, outLen, 1, 1, blocksPerRow)`** 这支 —— **同一函数的不同重载，后者在 2201 上还没过过编译**。⇒ 下次上真机，第一件事是在现有 probe 里加这 1 行浮点调用过编译门（题3 只读引用，不动 `code 3/`；仿真机已停用）。另：`code3.md:1071` 记的是"SFA 官方 arch22 自己没用 `WholeReduceSum`"，别误读成"910B 没有这个函数"。
 
 **2）§10.2 #4"省掉哨兵播种"的前提（已核对，成立但有条件）**
 官方用 `{true,0,8-n,0}` 右填充 0 而不炸，靠的是**归约用非对齐计数 `curColNum`**（`:633/:637`）而 `Exp`/`Sub`/`Div` 用对齐计数 `curRowNum*curColNumAlign`（`:635`）⇒ padding lane 变成 `exp(0)=1` 的垃圾，**但没有任何归约会读到它**。

@@ -29,7 +29,7 @@
 
 | 文件 | 用途 |
 |---|---|
-| `mhc_sinkhorn_scalar.cpp` | ⭐ 当前 5/5 正确版 kernel（纯标量、无 `SyncAll`） |
+| `mhc_sinkhorn_scalar.cpp` | ⭐ **历史 5/5 通过版**（纯标量、无 `SyncAll`；**已被向量版取代**——当前在榜 = 向量版 step-7，见 `../code2.md §1`） |
 | `sinkhorn_ref.py` | Python 参考实现（`gen` / `check` 子命令） |
 | `test_mhc_sinkhorn.cpp` | C++ harness（aclnn 调用、fp16 解码、行和自检） |
 | `run.sh` / `build_test.sh` | 一键构建 + 组装 vendor + 跑用例矩阵 |

@@ -34,8 +34,8 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 #   use      = free（可派活）/ reserved（正给别人当通道，-Role 会跳过，必须 -Env 点名）
 #   note     = 显示在 -List 的备注列
 $EnvTable = @{
-    'tpm0u' = @{ role='cpu'; use='free';     note='题1 全量仿真用（large 组会把 16 核压满 -> ssh banner 超时属预期）。⚠️ 18:56 起当前登录账号列表里查不到它的 devEnvId => 需桌面 VS Code 切回它所属账号' }
-    'e6z6k' = @{ role='cpu'; use='free';     note='18:53 实测可自举成功（forward.ready）；下午那次 no longer exists 是账号可见性问题而非环境回收 => 与 tpm0u 分属不同账号，谁可见取决于 VS Code 当前登录态' }
+    'tpm0u' = @{ role='deleted'; use='no';   note='云端仿真机 —— 2026-09-22 起仿真流程停用（用户决定直连真机），不再使用' }
+    'e6z6k' = @{ role='deleted'; use='no';   note='云端仿真机 —— 2026-09-22 起仿真流程停用（用户决定直连真机），不再使用' }
     '02aeb' = @{ role='npu'; use='free';     note='NPU 真机：隧道可自举，但上机跑东西前仍按纪律先问用户' }
     'bna7c' = @{ role='deleted'; use='no';   note='已删除，不要再用' }
 }
