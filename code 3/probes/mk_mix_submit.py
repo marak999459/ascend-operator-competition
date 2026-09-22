@@ -138,12 +138,12 @@ def do_apply():
 
 
 def do_revert():
-    for name, path in (('kernel', KER), ('host', HOST)):
-        bak = os.path.join(STAMP, BAK[name])
+    for key, path in (('ker', KER), ('host', HOST)):
+        bak = os.path.join(STAMP, BAK[key])
         src, cur = rd(bak), rd(path)
         with io.open(path, 'w', encoding='utf-8') as f:
             f.write(src)
-        print('[BACK] %-6s md5 %s -> %s' % (name, md5(cur)[:8], md5(src)[:8]))
+        print('[BACK] %-6s md5 %s -> %s' % (key, md5(cur)[:8], md5(src)[:8]))
     print('[BACK] 还原后请重跑 §3.2：md5 复验 + 闸门 + grep')
 
 
