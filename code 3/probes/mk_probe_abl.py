@@ -55,9 +55,12 @@ M4 = '// ---- 4) O 重缩放'
 M5 = '// ---- 5) PV 累加'
 MEND = '    TPipe pipe_;'
 # 5) 是 SoftmaxPv 的最后一段 ⇒ 尾巴上没有"下一段标题"可挂，只能挂到**函数收尾的那个 `    }`**。
-# 直接拿 `    TPipe pipe_;` 当 end marker 会把函数闭合花括号一起吃掉（nopv 首跑就是这么挂的：
-# op_kernel:1045 起满屏 "shadows template parameter" —— 类结构塌了）。
-MCLOSE = '\n    }\n\n' + MEND
+# 锚点必须紧跟在闭合花括号后面：拿 `    TPipe pipe_;` 当 end marker 会把函数闭合花括号一起吃掉
+# （nopv 首跑就是这么挂的：op_kernel:1045 起满屏 "shadows template parameter" —— 类结构塌了）。
+# ⚠️ P84 复跑又踩了一次升级版：M1d 落地后 `TPipe pipe_;` 离 SoftmaxPv 有 300 行（中间夹着整个
+# Cube 生产者），旧锚点会把 M1d 整段删掉（`[ABL]` 照样命中、md5 照样变，但砍了 296 行 ⇒ 编译必挂）
+# ⇒ 换锚到"紧跟函数尾的第一行"，并且下面显式断言只命中一次。
+MCLOSE = '\n    }\n\n    // ==================== P19-M1d'
 
 CALCLESS = MODE in ('nocalc', 'noK', 'noV', 'noMTE', 'noW')   # 这些档 = 地板再分解
 drop_sc = MODE in ('nosc',) or CALCLESS
@@ -86,28 +89,54 @@ def drop_line(text, line, tag):
     return text.replace(line, '        // [ABL] %s 已删（档 %s）\n' % (tag, MODE), 1)
 
 
+def drop_line_like(text, needle, tag, multi=False):
+    """按"剥掉行首缩进后包含 needle"定位整行并替换成注释。
+    ⚠️ 全行锚点（`drop_line`）在搬运行上已经两次失配：P32 让 V 复用 kb 那块、P79 又把 V 搬运
+    整段前移了一级缩进 ⇒ `noV` 那一发直接 assert 挂掉（P85 实测）。缩进不该是判据。
+    ⚠️ P86 又踩到第二层：V 搬运在 `if (cubeOn_) / else` 两个分支里**各有一份**（:1145 / :1161），
+    锚点命中 2 次又挂一次。两份都删才是这一档想要的东西 —— 运行时只走其中一支，所以"删两支"
+    与"删活的那支"在读数上逐字等价，而`multi=True` 不必猜哪支是活的。"""
+    lines = text.split('\n')
+    hit = [i for i, ln in enumerate(lines) if needle in ln.lstrip()]
+    if multi:
+        assert len(hit) >= 1, 'needle 命中 0 次: %s' % tag
+    else:
+        assert len(hit) == 1, 'needle 命中 %d 次（应为 1）: %s' % (len(hit), tag)
+    for i in hit:
+        ind = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+        lines[i] = ind + '// [ABL] %s 已删 %d 处（档 %s）' % (tag, len(hit), MODE)
+    return '\n'.join(lines)
+
+
 # ---- #36：地板再分解。全部档都在"计算已清空"的地板之上再砍搬运，所以
 #      `nocalc − 本档` = 这条搬运在**串行暴露**下的真实份额（计算在场时它多半被
 #      MTE↔V 的双缓冲重叠吃掉一部分，那个数用地板差分是量不出来的）。
-L_K = '                CopyGm2Ub(kb[done * D_],  kGm_[kOff],  run * D_);\n'
-# P32 之后 V 复用 kBuf_ ⇒ 这条 V 拷贝的行式变了（原来与 K 同形 `vGm_[kOff]`）；两个写法都试，
-# 命中哪个用哪个，全不命中就断言失败（宁可探针挂掉也不读假数）。
-L_V = '                CopyGm2Ub(vb[done * D_], vGm_[(rowBase + stageBeg_[j]) * D_], run * D_);\n'
-L_V_OLD = '                CopyGm2Ub(vb[done * D_],  vGm_[kOff],  run * D_);\n'
-L_KR = '                CopyGm2Ub(kr[done * Dr_], krGm_[rOff], run * Dr_);\n'
+N_K = 'CopyGm2Ub(kb[done * D_]'
+N_V = 'CopyGm2Ub(vb[done * D_]'
+N_KR = 'CopyGm2Ub(kr[done * Dr_]'
 L_WO = '            WriteOut(o, ml, lse, s1Base, lseBase + n0, n0, nbCur);\n'
 L_MG = '            MergeToken(b, s, hb);\n'
 if MODE in ('noK', 'noMTE'):
-    s = drop_line(s, L_K, 'K 的 CopyGm2Ub')
+    s = drop_line_like(s, N_K, 'K 的 CopyGm2Ub')
 if MODE in ('noV', 'noMTE'):
-    if s.count(L_V) == 1:
-        s = drop_line(s, L_V, 'V 的 CopyGm2Ub')
-    else:
-        s = drop_line(s, L_V_OLD, 'V 的 CopyGm2Ub')
+    s = drop_line_like(s, N_V, 'V 的 CopyGm2Ub', multi=True)
 if MODE == 'noMTE':
-    s = drop_line(s, L_KR, 'K-rope 的 CopyGm2Ub')
+    s = drop_line_like(s, N_KR, 'K-rope 的 CopyGm2Ub')
 if MODE == 'noW':
     s = drop_line(s, L_WO, 'WriteOut')
     s = drop_line(s, L_MG, 'MergeToken')
+
+# ---- 结构自检（P84）：探针档只准删计算段，不准把 M1d 的 Cube 生产者一起带走。
+#      锚点漂移这类事故的特征正是"[ABL] 命中了、md5 变了、但删得比预期多" ⇒ 只看命中数不够，
+#      必须把"该在的东西还在"和"删掉的行数"两项都当场钉住，宁可探针挂掉也不读假数。
+assert 'struct CubeCtx' in s, '结构自检失败：CubeCtx 被删（锚点漂移）'
+# ⚠️ P86：`d0`（净删行数）对"整行注释掉"那一族恒等于 0 ⇒ 拿它当"锚点是否命中"的判据会
+#      假挂（noV 就是这里第二次挂掉）。命中与否的正确判据是**本文件打进去的 [ABL] 标记数**。
+nmark = s.count('[ABL]')
+d0 = io.open(SRC, encoding='utf-8').read().count('\n') - s.count('\n')
+sys.stderr.write('[ABL] mode=%s 标记 %d 处、净删 %d 行\n' % (MODE, nmark, d0))
+assert nmark >= 1, 'mode=%s 一处都没删 ⇒ 锚点没命中' % MODE
+if MODE in ('nopv', 'nosum', 'noexp', 'nocalc'):
+    assert 1 <= d0 <= 40, 'mode=%s 净删 %d 行 ⇒ 越界（锚点漂移？）' % (MODE, d0)
 
 sys.stdout.write(s)

@@ -28,21 +28,13 @@
 // ⚠️ 必须是 8（一个 UB 块的 fp32 个数）的整数倍：分数矩阵行间距 = n_blk 个 float，
 //    否则行起点落在块中间 -> 真机 ADDR_MISALIGN（与 nb<8 同一类，见 host 的 NBLK_MIN 注释）。
 constexpr uint32_t SFA_STAGE_MAX = 48;
-// cube 路径（M1d）的段登记上限【单独放宽】。账要算准（P81 第一版把这笔账写错过一次）：
-//   · 真正【整段空转】的只有 krBuf_（n_blk·Dr·2）与 krfBuf_（scGrp·Dr·4）两块 ≈ 18 KB。
-//   · kfBuf_ 不能删 —— 它除了 ComputeScores 还是 SoftmaxPv 第 5) 步"V 加宽"的落点，
-//     而 PV 在 cube 形态下仍在向量侧。但它的尺子来自 scGrp_（P24 把组宽抬到【整个 chunk】
-//     是为了让"部分积就地压在 kf 上"，而 cube 形态根本不跑 ComputeScores ⇒ 这一理由消失），
-//     所以 cube 侧把组宽钳回 SFA_SC_GRP_CUBE ⇒ kf 从 n_blk·D·4（64 档 = 131 KB）降到 65 KB。
-//   · host 侧原来按【整份 N1】预算 qBuf_/oBuf_/sBuf_/pBuf_，而 kernel 在 cube 形态下把 nb_
-//     折半（两颗 AIV 各吃一半头）⇒ 这四项一直按 2× 空转，P81 起按同一口径折半。
-// 三项合计才让 n_blk 从 48 抬到 64。上限卡在 **64** 而不是环容量(16·N1)：arch22 一条
+// cube 路径（M1d）的段登记上限【单独放宽】：AIV 在 cube 形态下不搬 K/K-rope、也不算
+// ComputeScores ⇒ krBuf_/kfBuf_/krfBuf_ 三块（n_blk=48、nb=8 时约 117 KB）整段空转，
+// 让给 V 与 s/p 之后 n_blk 能到 64。上限卡在 **64** 而不是环容量(16·N1)：arch22 一条
 // `Mmad` 的 n 最大 64（L0C 只有 64 列），要 128 得先把 n 轴切成两半 ⇒ 另发再做。
 // ⚠️ 只放宽 cube 侧：向量侧仍按 SFA_STAGE_MAX=48 钳着，否则 P31 那 184 格网格收敛出来的
 //    选档轴会被重新打开（64/128 两档在向量路径实测是亏的）。
 constexpr uint32_t SFA_STAGE_MAX_CUBE = 64;
-// cube 形态下 SoftmaxPv 的 V 加宽组宽（= kfBuf_ 的行数），见上面的账。
-constexpr uint32_t SFA_SC_GRP_CUBE = 32U;
 
 struct SparseFlashAttentionTilingData {
     // ---- 原骨架字段（保持顺序不变）----

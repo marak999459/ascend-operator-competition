@@ -94,12 +94,7 @@ constexpr uint32_t CF_CRED  = 5u;   // 两颗 AIV -> AIC（扇入）：本片的
 //   的收支推导）⇒ 先锁步 RING=1（每片一轮 ≈1.35 µs，§15.60 价目表）。要拿回流水深度就得换
 //   按颗的 GM 计数轮询（38.6 ns/次，且天然分得清是谁交的），不是换旗标编号。
 constexpr uint32_t SFA_RING = 1u;
-// L0A/L0B 的分片宽度。**128 是量出来的最优点，不是照抄官方**：
-//   · 往宽改（P83：256 ⇒ content 2 片 + rope 1 片 = 3 片下发）在 AIC 受限形态上实测
-//     **慢 2.5 %**（同场次 3-vs-5 片，w3 +2.5 % / p6 +2.6 % / w2 +2.5 %，AIV 受限的 w4 持平；
-//     两臂输出逐位相同 ⇒ 纯成本差）。⇒ 每片的成本【不是】下发条数主导，Mmad/LoadData 少两条
-//     换不来任何东西，字节数与 MAC 数才是账（P82 的"每片 ≈1.5 %"是真实计算+搬运时间，别当税额）。
-//   · 往窄改更亏（P82 的 5→13 片放大 = 每多一片真活 +11.8 %/8 ≈ 1.5 %）。
+// L0A/L0B 的分片宽度：官方 ComputeMm1 取 kL0Size=128（content 512/128=4 片），
 // rope 那一片按实际 64 列走 ⇒ 一共 5 片，bufA/bufB 只需装下最宽的一片。
 constexpr uint32_t CUBE_KSLICE = 128u;
 
@@ -224,26 +219,22 @@ public:
         // 那几条，任何一条不成立就整个退回向量路径 —— 退回是【安全】的：cube_on 只是把
         // ComputeScores 换成读环，其余语义（扫描 / softmax / 写回）两条路径逐字节相同。
         //   · kv_shard 必须为 1：环借的正是"本单元自己的输出行"，而分片 1 的归并通道也是它。
-        //   · P91-A′：`nb_ == CubeBlock(N1_)` 而不是 `nb_ == N1_` —— 一个单元吃的是【一个头块】
-        //     （块宽 ≤16，正好一个 L0C 分形），头多就切成多块、每块一个单元。`N1_ % 块宽 == 0`
-        //     保证没有"跨不满的末块"（题面枚举 1/2/4/8/16/32/64/128 全满足；块宽向下取偶保证
-        //     两颗 AIV 各拿整数个头且都不空转，§15.72(a)）。
+        //   · nb_ == N1_ 且 2<=N1_<=16 且【N1_ 为偶数】：一个 L0C tile 装得下整组头（否则同一
+        //     份 K 要被每个头块各 gather 一遍，且 M 轴要再切一层），偶数头才切得平两颗 AIV。
         //   · n_blk 是 16 的整数倍：NZ 的行按 16 个组成"分形行组"，dstNzC0Stride 与 Mmad 的
         //     n 都按整组算（host 的 CubeGate 同一口径）。
-        //   · 环装得下：一片写 16(定死的 L0C 行)×n_blk 个 fp32，必须整块落在【本单元那个头块】
-        //     的输出区间（块宽×D 个 DT_QUERY）之内，否则就踩到【相邻单元】的输出行 —— 相邻单元
-        //     可能正活在别的核上（host 的 CubeGate 同一口径，P73 加、P91 换成按块宽算）。
+        //   · 环装得下：一片写 16(定死的 L0C 行)×n_blk 个 fp32，必须整块落在本单元那一行
+        //     输出（N1*D 个 DT_QUERY）之内，否则就踩到【相邻单元】的输出行 —— 相邻单元可能
+        //     正活在别的核上（host 的 CubeGate 同一口径，P73 加）。
         //   · 只有 fp16 实例进 cube 路径（§15.70(f)4）—— 与 AIC 侧的 if constexpr 配对，
         //     少一侧就会让 AIV 等一条永远不会有人 set 的旗标（§15.70(f) 记过这条）。
-        const uint32_t cubeBlk = (N1_ >= 16u) ? 16u : (N1_ & ~1u);   // = op_host 的 CubeBlock()
         cubeOn_ = (tiling_data.cube_on != 0u) && (tiling_data.kv_shard == 1u) &&
-                  (nb_ == cubeBlk) && (cubeBlk >= 2u) && ((N1_ % cubeBlk) == 0u) &&
+                  (nb_ == N1_) && (N1_ >= 2u) && (N1_ <= 16u) && ((N1_ & 1u) == 0u) &&
                   (D_ == sfa::HQ_DIM) && (Dr_ == sfa::ROPE_DIM) &&
                   ((nBlk_ % 16u) == 0u) && (sizeof(DT_QUERY) == 2u) &&
-                  (nBlk_ <= SFA_STAGE_MAX_CUBE) &&
                   (16ull * nBlk_ * sizeof(float) <=
-                   static_cast<uint64_t>(cubeBlk) * static_cast<uint64_t>(D_) * sizeof(DT_QUERY));
-        if (cubeOn_) { ks_ = 1u; cubeBlk_ = cubeBlk; }   // 块宽要在折半【之前】记下来（AIC 也用）
+                   static_cast<uint64_t>(N1_) * static_cast<uint64_t>(D_) * sizeof(DT_QUERY));
+        if (cubeOn_) { ks_ = 1u; }
         sub_ = coreIdx & 1u;   // MIX：AIV 块号 = group*2 + sub
         if ASCEND_IS_AIC {
             ks_ = 1u;   // AIC 不进纯 AIV 的 SyncAll（那是向量核硬件屏障，AIC 调它等一块不存在的旗标）
@@ -253,15 +244,17 @@ public:
         // ---- P19-M1d：cube 形态下【一组共一个单元】，两颗 AIV 各吃一半头 ----
         // READY 是广播的（见 sfa::CF_READY 那一段），所以两颗 AIV 必须消费同一条片序列 ⇒
         // 单元按【组】切、不再按【块】切。头这一维天生可分（softmax/PV/LSE/输出全按头独立），
-        // 所以分法就是 sub_0 拿块内前一半、sub_1 拿块内后一半（P91-A′：块宽 = cubeBlk_ ≤16，
-        // 不再等于整组 N1）。
-        // ⚠️ 块宽必须是【偶数】：奇数会让 sub_1 拿到 0 个头而变成"只交旗标不做向量活"的
-        //    搭档，那种 AIV 要把 Duplicate/WriteOut 的零长度分支一路特判下去，收益却是零
-        //    ⇒ 直接在形态门里排除（CubeBlock 已经向下取偶）。
+        // 所以分法就是 sub_0 拿前一半、sub_1 拿后一半。
+        // ⚠️ N1 必须是【偶数】：奇数会让 sub_1 拿到 ⌊N1/2⌋=0 个头（N1=1）而变成"只交旗标
+        //    不做向量活"的搭档，那种 AIV 要把 Duplicate/WriteOut 的零长度分支一路特判下去，
+        //    收益却是零（所有目标形状 N1=4/8 都是偶数）⇒ 直接在形态门里排除，退回向量路径。
         // ⚠️ nb_ 在这里折半 ⇒ 下面所有 UB 尺寸/stageMax_ 自动按半份头算，而 host 的预算是按
-        //    【整块 cubeBlk_】算的（CalcUbNeed 收到的 nb 就是 cubeBlk_）⇒ 只会更空，不会越界。
-        //    halfOff_ 在上面（折半之前）已按整块算好 ⇒ mlBuf_/lseBuf_ 仍留整块宽度。
-        if (cubeOn_) { nb_ = cubeBlk_ >> 1; }
+        //    【整份 N1】算的 ⇒ 只会更空，不会越界。halfOff_ 在上面已按整份算好 ⇒ mlBuf_/
+        //    lseBuf_ 仍留整份宽度（更空，同样安全）。
+        if (cubeOn_) {
+            headBase_ = (sub_ == 0u) ? 0u : (N1_ >> 1);
+            nb_ = N1_ >> 1;
+        }
         const uint32_t total = cubeOn_ ? total0 : (total0 * ks_);
         if (coreNum == 0 || coreIdx >= coreNum) { unitBegin_ = 0; unitEnd_ = 0; unitStep_ = 1; return; }
         // ⚠️ 跨步而不是连续：单元编号 u = tok * nHeadBlk_ + hb，所以连续分配会把
@@ -286,14 +279,7 @@ public:
         //   那块 n_blk×D×2 字节上（同 DT_QUERY、同 32B 对齐口径，尺寸逐字节相同），
         //   代价是每 chunk 多一次"V 排空 + MTE2 旗标对"，换来的是 host 预算里省掉
         //   align(n_blk×D×2) ⇒ nb≥2 的臂第一次装得下 n_blk=48。见 code3.md §15.53。
-        // P81：cube 形态下 AIV 既不搬 K-rope（K/K-rope 由 AIC 自己 ND2NZ 进 L1）也不算
-        //   ComputeScores ⇒ krBuf_/krfBuf_ 两块【整段不分配】。kfBuf_ 【不能】不分配 —— 它还是
-        //   SoftmaxPv 第 5) 步 V 加宽的落点，而 PV 仍在向量侧；能动的是它的【行数】：
-        //   P24 把 scGrp_ 抬到整个 chunk 的理由是"部分积就地压在 kf 上"，cube 侧没有
-        //   ComputeScores ⇒ 理由消失 ⇒ 组宽钳回 SFA_SC_GRP_CUBE（账见 tiling.h）。
-        //   host 的 CalcUbNeed(cube=true) 与这里逐项同口径，差一项就是真机越界。
-        const uint32_t krBytes = cubeOn_ ? 0u : sfa::UbAlignBuf(nBlk_ * Dr_ * sizeof(DT_QUERY));
-        if (krBytes != 0u) { pipe_.InitBuffer(krBuf_, krBytes); }
+        pipe_.InitBuffer(krBuf_,  sfa::UbAlignBuf(nBlk_ * Dr_ * sizeof(DT_QUERY)));
         pipe_.InitBuffer(sBuf_,   sfa::UbAlignBuf(nb_   * nBlk_ * sizeof(float)));
         pipe_.InitBuffer(pBuf_,   sfa::UbAlignBuf(nb_   * nBlk_ * sizeof(float)));
         pipe_.InitBuffer(mlBuf_,  sfa::UbAlignBuf(3 * halfOff_ * sizeof(float)));
@@ -318,18 +304,9 @@ public:
         //   两边都得放得下；只按 nb_ 定宽时组宽超过 nb_ 会压到下一切片（§15.13：GRP=16 时
         //   r5/big1 全错）。下限"2 块"是 MergeToken 要的 2×8 个 exp 自变量（合并窗口一个
         //   UB 块 = 8 个头）。
-        scGrp_ = cubeOn_ ? ((nBlk_ < SFA_SC_GRP_CUBE) ? nBlk_ : SFA_SC_GRP_CUBE)
-                         : nBlk_;
-        // P81：krf 只有 ComputeScores 用（rope 部分积）⇒ cube 形态不分配；kf 保留，宽度
-        //   = 上面的 scGrp_。两条口径都在 host 的 CalcUbNeed(cube=true) 里逐项对。
-        const uint32_t kfBytes = sfa::UbAlignBuf(scGrp_ * D_ * sizeof(float));
-        const uint32_t krfBytes = cubeOn_ ? 0u : sfa::UbAlignBuf(scGrp_ * Dr_ * sizeof(float));
-        // kfBuf_ 同时是 WriteOut / ZeroPaddingOut 的 fp16/fp32 落点（一次一批 stageMax_ 行），
-        // 所以批宽不能超过它的行数。今天 stageMax_ ≤ N1_ ≤ 16 < 32 恒成立，这一钳是防"以后
-        // 抬 N1_ 或抬 SFA_SC_GRP_CUBE"时把两处口径错开。
-        if (cubeOn_ && stageMax_ > scGrp_) { stageMax_ = scGrp_; }
-        pipe_.InitBuffer(kfBuf_, kfBytes);
-        if (krfBytes != 0u) { pipe_.InitBuffer(krfBuf_, krfBytes); }
+        scGrp_ = nBlk_;
+        pipe_.InitBuffer(kfBuf_,  sfa::UbAlignBuf(scGrp_ * D_ * sizeof(float)));
+        pipe_.InitBuffer(krfBuf_, sfa::UbAlignBuf(scGrp_ * Dr_ * sizeof(float)));
         redW_ = (nb_ > scGrp_) ? nb_ : scGrp_;
         {
             const uint32_t mergeMin = 2u * sfa::F32_PER_BLK;
@@ -557,15 +534,9 @@ private:
         LocalTensor<float> ml = mlBuf_.Get<float>();
         LocalTensor<float> lse = lseBuf_.Get<float>();   // sum 半区在 lse[halfOff_]，见 Init
 
-        // cube 形态：一个单元 = 一行的【一个头块】(cubeBlk_ 个头，≤16)，两颗 AIV 各拿块内
-        // 连续半块 ⇒ n0 = 块首 + 本颗的半块偏移（P91-A′，形态门保证 N1 % cubeBlk_ == 0）；
-        // 非 cube：单元 = 头块本身，n0 = headBlk * nb_。
-        const uint32_t blkHead0 = cubeOn_ ? (headBlk * cubeBlk_) : 0u;
-        const uint32_t n0 = cubeOn_ ? (blkHead0 + sub_ * nb_) : (headBlk * nb_);
-        // 回程环的 GM 落点 = 本单元那个头块自己的输出区间（AIC 的 Fixpipe 与 AIV 的读回
-        // 都按它算；环里的行号是【块内】第 0..cubeBlk_-1 行，与 AIV 的半块偏移 sub_*nb_ 一起
-        // 对上，见 ScoreFromRing）。⚠️ 不是 s1Base：那个还要留给整行口径的 padding 写零。
-        const uint32_t ringBase = s1Base + blkHead0 * static_cast<uint32_t>(D_);
+        // cube 形态：一个单元 = 一行【全部 N1 个头】，两颗 AIV 各拿连续的一半（headBase_，
+        // 形态门保证 N1 是偶数 ⇒ 两边都不空）；非 cube：单元 = 头块，n0 = 头块起始头。
+        const uint32_t n0 = cubeOn_ ? headBase_ : (headBlk * nb_);
         uint32_t nbCur = N1_ - n0;
         if (nbCur > nb_) { nbCur = nb_; }
 
@@ -626,7 +597,7 @@ private:
             //    扫描 / 搬运 / 计算三段实测完全串行（§15.38(c) 那 98~103 % 的可加性就是它），
             //    每单元 1024 次标量读 = 39.5 µs 整个摊在墙钟上（§15.39 的地板拆解）。
             if (pend > 0u) {
-                FlushChunk(q, o, kb, kr, sc, ml, nbCur, pend, rowBase, pendRuns, ringBase);
+                FlushChunk(q, o, kb, kr, sc, ml, nbCur, pend, rowBase, pendRuns, s1Base);
                 pend = 0u;
             }
             // 2) 扫满一个 chunk：只把 (token 起点, 长度) 登记进定长暂存，不碰 UB、不碰管道。
@@ -672,7 +643,7 @@ private:
             pend = cnt;
             pendRuns = nRun;
         }
-        if (pend > 0u) { FlushChunk(q, o, kb, kr, sc, ml, nbCur, pend, rowBase, pendRuns, ringBase); }
+        if (pend > 0u) { FlushChunk(q, o, kb, kr, sc, ml, nbCur, pend, rowBase, pendRuns, s1Base); }
 
         // 归一化 + 写回：Muls(1/l) -> Cast 暂存 -> 整批 DataCopy（P5b）
         // ⚠️ 只有分片 0 发布：它写下的就是 MergeToken 要读回的"已发布半行"。分片 1 的
@@ -1090,18 +1061,17 @@ private:
      * 尾列：nTile 向上取整到 16，多出来的列是 AIC 写的垃圾/AIV 从不读（SoftmaxPv 只看前 m 列）。
      */
     __aicore__ inline void ScoreFromRing(LocalTensor<float> &sc, uint32_t nbCur, uint32_t m,
-                                         uint32_t ringBase)
+                                         uint32_t s1Base)
     {
         CrossCoreWaitFlag<2, PIPE_MTE2>(sfa::CF_READY);
         const uint32_t nTile = (m + 15u) & ~15u;
-        const uint64_t base = static_cast<uint64_t>(ringBase) >> 1;
+        const uint64_t base = static_cast<uint64_t>(s1Base) >> 1;
         const uint32_t blkPerRow = nTile * static_cast<uint32_t>(sizeof(float)) / sfa::UB_BLK;
         const DataCopyParams dcp{1, static_cast<uint16_t>(blkPerRow), 0, 0};
         for (uint32_t i = 0u; i < nbCur; ++i) {
-            // 环里躺的是本【头块】的 cubeBlk_ 行（AIC 按块写），本颗 AIV 只挑块内自己那半
-            // ⇒ 行号 = sub_*nb_ + i（P91-A′：块宽可以小于 N1，所以不能再按整份算）。
+            // 环里躺的是本行【整份 N1 个头】，本颗 AIV 只挑自己那半 ⇒ 行号 = headBase_+i。
             DataCopy(sc[i * nBlk_],
-                     ringOutGm_[base + static_cast<uint64_t>((sub_ * nb_) + i) * nTile], dcp);
+                     ringOutGm_[base + static_cast<uint64_t>(headBase_ + i) * nTile], dcp);
         }
         // ⚠️ DataCopy 是 MTE2 队列的异步搬：不插 MTE2_V 对的话，下面那条 Muls 会先在
         //    【还没落地的 UB】上做一次乘 scale，然后 DMA 才把**未乘 scale**的原值盖回来
@@ -1120,7 +1090,7 @@ private:
                                       LocalTensor<DT_QUERY> &kb,
                                       LocalTensor<DT_QUERY> &kr, LocalTensor<float> &sc,
                                       LocalTensor<float> &ml, uint32_t nbCur, uint32_t m,
-                                      int64_t rowBase, uint32_t nRun, uint32_t ringBase)
+                                      int64_t rowBase, uint32_t nRun, uint32_t s1Base)
     {
         // ⚠️ 跨流水线同步（CANN 9.0.0 / arch2201 不插自动同步，实测反汇编里
         //    没有任何 set_flag/wait_flag）：
@@ -1133,46 +1103,28 @@ private:
         //  P19-M1d 之后仍然成立：cube 路径上这两对退化成"空 set + 等它"，语义不变。
         SetFlag<HardEvent::MTE2_V>(0);
         WaitFlag<HardEvent::MTE2_V>(0);
-        LocalTensor<DT_QUERY> vb = kBuf_.Get<DT_QUERY>();
-        // id=1 那两对是给这次 kb 复用用的：
-        //   V_MTE2 保证【上一处】发给 kb 的向量读已经退休，MTE2 才准写；
-        //   MTE2_V 保证 V 搬完，SoftmaxPv 才准读。两条都是"紧挨着"，与另两对同构。
+        // 1) score = (q·k + q_rope·k_rope) * scale   —— 向量化（P3a）/ 读回程环（M1d）
         if (cubeOn_) {
-            // P79：cube 路径把 V 的搬运提到【等 CF_READY 之前】。V 只依赖 stageLen_/GM，
-            //   不依赖本片的 score ⇒ 这段 DMA 正好压在 AIC 算本片 score 的时间里跑；
-            //   旧写法是"先等 READY、再搬 V"，于是 AIV 在 READY 之前整段空转 —— 与 (g)
-            //   在 AIC 侧抓到的那笔空转同构（那边每片省 1.23~1.71×）。
-            //   MTE2 队列是 FIFO：环拷贝排在 V 之后，两者都在 SoftmaxPv 之前被 wait 齐；
-            //   而交还 credit 的位置没动（仍是 SoftmaxPv 读完 sc 之后）⇒ 握手记账逐字不变。
-            SetFlag<HardEvent::V_MTE2>(1);
-            WaitFlag<HardEvent::V_MTE2>(1);
-            {
-                uint32_t done = 0u;
-                for (uint32_t j = 0u; j < nRun; ++j) {
-                    const uint32_t run = stageLen_[j];
-                    CopyGm2Ub(vb[done * D_], vGm_[(rowBase + stageBeg_[j]) * D_], run * D_);
-                    done += run;
-                }
-            }
-            SetFlag<HardEvent::MTE2_V>(1);       // 只 set，wait 挪到 ScoreFromRing 之后
-            ScoreFromRing(sc, nbCur, m, ringBase);
-            WaitFlag<HardEvent::MTE2_V>(1);
+            ScoreFromRing(sc, nbCur, m, s1Base);
         } else {
-            // 1) score = (q·k + q_rope·k_rope) * scale —— 向量路径（P32/P38 原次序）
             ComputeScores(q, kb, kr, sc, nbCur, m);
-            SetFlag<HardEvent::V_MTE2>(1);
-            WaitFlag<HardEvent::V_MTE2>(1);
-            {
-                uint32_t done = 0u;
-                for (uint32_t j = 0u; j < nRun; ++j) {
-                    const uint32_t run = stageLen_[j];
-                    CopyGm2Ub(vb[done * D_], vGm_[(rowBase + stageBeg_[j]) * D_], run * D_);
-                    done += run;
-                }
-            }
-            SetFlag<HardEvent::MTE2_V>(1);
-            WaitFlag<HardEvent::MTE2_V>(1);
         }
+        // 2) V 进 kb 自己的块（P32）。id=1 那一对是给这次复用用的：
+        //    V_MTE2 保证 ComputeScores 发给 kb 的最后一次加宽已经退休，MTE2 才准写；
+        //    MTE2_V 保证 V 搬完，SoftmaxPv 才准读。两条都是"紧挨着"，与另两对同构。
+        SetFlag<HardEvent::V_MTE2>(1);
+        WaitFlag<HardEvent::V_MTE2>(1);
+        LocalTensor<DT_QUERY> vb = kBuf_.Get<DT_QUERY>();
+        {
+            uint32_t done = 0u;
+            for (uint32_t j = 0u; j < nRun; ++j) {
+                const uint32_t run = stageLen_[j];
+                CopyGm2Ub(vb[done * D_], vGm_[(rowBase + stageBeg_[j]) * D_], run * D_);
+                done += run;
+            }
+        }
+        SetFlag<HardEvent::MTE2_V>(1);
+        WaitFlag<HardEvent::MTE2_V>(1);
         // 3) 行最大 + 在线 softmax + PV 累加 —— 向量化（P2）
         SoftmaxPv(o, vb, sc, ml, nbCur, m);
         SetFlag<HardEvent::V_MTE2>(0);
@@ -1296,13 +1248,12 @@ private:
      * 一组一份的工作区句柄 + 参数模板。
      *
      * L1 布局（元素号，DT_QUERY=fp16）：
-     *   [0, 16·(D+Dr))          A content/rope：本单元那个头块的 ≤16 行
+     *   [0, 16·(D+Dr))          A content/rope：本单元那一行的【全部 N1 个头】
      *   [16·(D+Dr), +nBlk·D)    B content：n_tile 个 token × 512 列（每片重新 gather）
      *   [..., +nBlk·Dr)         B rope
-     *   ⚠️ A 侧是一个【头块】（cubeBlk_ ≤ 16 行，占满 L0C 那一个 16 行分形）：tile 的 M 轴
-     *    就是本单元的 head-block，两颗 AIV 各自只读块内自己那半（行号 sub_*nb_ 起 nb_ 行）。
-     *    分成两份 A 是上一版"一 AIV 一单元"留下的形状，那一版因为 READY 是广播的而必挂
-     *    （§15.72(a)）。
+     * ⚠️ A 侧是【整份头】而不是半份：tile 的 M 轴就是一行 token 的全部头，两颗 AIV 各自
+     *    只读自己那几行（headBase_ 起 nb_ 行）。分成两份 A 是上一版"一 AIV 一单元"留下的
+     *    形状，那一版因为 READY 是广播的而必挂（§15.72(a)）。
      * ⚠️ B 侧两块按【最大 nBlk_】错开，而每片的 dstNzC0Stride 按【本片 n_tile】算 ——
      *    末片 n_tile<nBlk_ 时中间留一段空隙，只会浪费 L1，不会串位（每片的 LoadData
      *    只在自己的 n_tile·D 段里走）。
@@ -1328,7 +1279,6 @@ private:
     {
         const uint32_t unit = cu_;
         const uint32_t tok = unit / nHeadBlk_;
-        const uint32_t hb  = unit - tok * nHeadBlk_;
         const uint32_t b = tok / S1_;
         const uint32_t s = tok - b * S1_;
         uint32_t actQ = 0, actKV = 0;
@@ -1337,25 +1287,15 @@ private:
         cthr_ = CalcThreshold(s, actQ, actKV);
         ctok_ = 0u;
         csegB_ = 0; csegE_ = 0; chas_ = 0u;
-        // P91-A′：单元 = (行, 头块)。sparse 列表 / 因果阈值是【行】口径，两颗 AIV 与本块的
-        // 所有片共用；cs1_ 与 ropeBase 是【块】口径 —— 它同时是 Q gather 的源基址和回程环的
-        // 落点基址（环就借本块自己的输出行，见 CubeOneChunk 的 Fixpipe）。
         const uint64_t row = static_cast<uint64_t>(b) * S1_ + s;
-        const uint64_t head0 = row * N1_ + static_cast<uint64_t>(hb) * cubeBlk_;
-        cs1_  = static_cast<uint32_t>(head0 * static_cast<uint64_t>(D_));
+        cs1_  = static_cast<uint32_t>(row * N1_ * static_cast<uint64_t>(D_));
         cidx_ = row * sparseCount_;
         crb_  = static_cast<int64_t>(b) * S2_;
         if (cskip_ != 0u) { return; }          // padding 行：ProcessToken 那边也不产片
-        const uint64_t ropeBase = head0 * static_cast<uint64_t>(Dr_);
-        // ⚠️ A tile 的行数 = 本【块】的头数（≤16，L0C 的 m 轴就是一个 16 行分形），既不是
-        //    整份 N1_ 也不是 AIV 的半份 nb_。不足 16 时高出的那些行是 L1 里的旧数据：M 轴
-        //    逐行独立 ⇒ 它们只污染 L0C 里没人读的行，而 Fixpipe 那 16 行的写入区间由形态门
-        //    （CubeRingNeed/CubeRingRoom）压在【本块自己的】N1 行输出之内，不会踩邻块。
-        const uint32_t nHead = (N1_ - hb * cubeBlk_ < cubeBlk_) ? (N1_ - hb * cubeBlk_)
-                                                                : cubeBlk_;
-        ctx.nzA.nValue = nHead;
+        const uint64_t ropeBase = row * N1_ * static_cast<uint64_t>(Dr_);
+        ctx.nzA.nValue = N1_;                  // ⚠️ 整份头，不是 AIV 的半份 nb_
         DataCopy(ctx.l1qa, qGm_[cs1_], ctx.nzA);
-        ctx.nzAr.nValue = nHead;
+        ctx.nzAr.nValue = N1_;
         DataCopy(ctx.l1qr, qrGm_[ropeBase], ctx.nzAr);
     }
 
@@ -1609,17 +1549,14 @@ private:
     // P21：一个 chunk 的 gather 段暂存（扫描前置用）。段数上限 = n_blk，host 已把 n_blk
     //      钳在 SFA_STAGE_MAX 内（见 tiling.h 与该文件 CalcBlocking），所以这里定长即可。
     //      放对象里而不是 UB：UB 的标量读实测比 GM 的标量读还贵 2.5 倍（§15.40 P20 二分）。
-    int32_t stageBeg_[SFA_STAGE_MAX_CUBE];
-    uint32_t stageLen_[SFA_STAGE_MAX_CUBE];
+    int32_t stageBeg_[SFA_STAGE_MAX];
+    uint32_t stageLen_[SFA_STAGE_MAX];
 
     // ---- P19-M1d：cube 路径的状态 ----
     // cubeOn_ 两侧都要有：AIV 用它把 ComputeScores 换成"读环"，AIC 用它决定要不要当生产者。
     bool cubeOn_ = false;
     uint32_t sub_ = 0;        // 本 AIV 在同组里的编号（0/1）⇒ 拿哪一半头、交哪条 credit
-    // P91-A′：一个 cube 单元 = 一行的【一个头块】，块宽 = min(N1 向下取偶, 16)。两颗 AIV
-    // 各吃块内连续半块 ⇒ 本颗的第一个头 = sub_*nb_（相对块首，见 ScoreFromRing 的行号）。
-    // AIC 也用它定 L1 A tile 的行数与环基址，所以必须在 AIC 早退【之前】赋值。
-    uint32_t cubeBlk_ = 16u;
+    uint32_t headBase_ = 0u;  // 本 AIV 在本单元里负责的第一个头（cube 形态；非 cube 恒 0）
     // AIC 侧【当前单元】的游标。一组只有一条片流（两颗 AIV 共用），所以全是标量。
     uint32_t cu_ = 0u;      // 下一个待领的单元号（= 本组两颗 AIV 的 unitBegin_ 口径）
     uint32_t cp_ = 0u;      // 累计已产片数：定环槽位 + credit 配平（跨单元【不清零】）

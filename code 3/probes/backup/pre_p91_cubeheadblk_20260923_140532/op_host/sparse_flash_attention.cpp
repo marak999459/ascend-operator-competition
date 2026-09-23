@@ -334,23 +334,9 @@ static inline uint64_t CubeRingRoom(uint32_t nb, uint32_t qD, uint32_t elemSize)
     return static_cast<uint64_t>(nb) * qD * elemSize;
 }
 
-// P91-A′：**一个 cube 单元吃几头**。M 轴定死"一个 16 行的分形"（`mp.m=16`、L0C 16 行、
-// A tile 16 行）⇒ 上限就是 16；不足 16 的整组头一次吃完，奇数向下取偶（一半给一颗 AIV
-// 的那半块必须是整数，且两颗都要有活，见下面 CubeGate 里那条"偶数"注释）。
-// ⚠️ kernel `Init` 里有**同一个式子**，两侧必须逐字同口径：不一致就会出现"host 按组数
-//    起了块、kernel 却按 AIV 路径解释单元"的错映射（op_kernel:236 那段注释记过后果）。
-static inline uint32_t CubeBlock(uint32_t qN)
-{
-    return (qN >= 16U) ? 16U : (qN & ~1U);
-}
-
-// 形态门：一条不满足就退回 AIV 路径。返回真时把强制档 (nb=块宽, n_blk) 写出来。
+// 形态门：一条不满足就退回 AIV 路径。返回真时把强制档 (nb=Q_N, n_blk) 写出来。
 //   · 只走 fp16（§15.70(f)4：fp32 实例 cube 收益被 L0B 字节数吃掉一半）
-//   · P91-A′：原来这里是 `qN<=16`（一个单元吃【整组】头），**已换成"一个单元吃 16 头一块"**
-//     ⇒ 题面枚举的 32/64/128 三档从这条拒因里捞出来（`code3.md §15.73(o)(p)`：P89 六点零
-//     响应的唯一剩余解释就是门没开，而 dtype/奇数头两条在题面口径下恒不成立）。
-//     `qN % blk == 0` 是要保证**没有跨不满的末块**：末块头数 < blk 时 `nzA.nValue` 与
-//     `nHeadBlk` 两处口径要再特判一次，而题面枚举值全是 16 的整数倍或 <16 ⇒ 直接排除。
+//   · Q_N<=16：一个 L0C tile 装得下整组头，才不需要 M 轴再切一层
 //   · D=512 / Dr=64：k 轴"4×128 内容 + 1×64 rope"两段就是这个口径
 //   · n_blk 同时过四道钳：>=NBLK_MIN、<=SFA_STAGE_MAX_CUBE（cube 侧段登记数组，比向量侧的
 //     48 宽，见 tiling.h）、是 16 的整数倍、环装得下
@@ -360,9 +346,16 @@ static bool CubeGate(uint32_t want, ge::DataType dtype, uint32_t qN, uint32_t qD
     constexpr size_t NBLK_N = sizeof(NBLK_CAND) / sizeof(NBLK_CAND[0]);
     if (want == 0U) { return false; }
     if (dtype != ge::DT_FLOAT16) { return false; }
-    const uint32_t nb = CubeBlock(qN);
-    if (nb < 2U || (qN % nb) != 0U) { return false; }
+    if (qN == 0U || qN > 16U) { return false; }
+    // 偶数头：cube 形态下【一组一颗单元、两颗 AIV 各吃一半头】（READY 是广播的，
+    // 见 kernel sfa::CF_READY 与 code3.md §15.72(a)）。奇数头会让其中一颗拿到 0 个头，
+    // 那种"只交旗标不做向量活"的特判要一路铺到 Duplicate/WriteOut 的零长度分支，
+    // 而所有目标形状都是 N1=4/8 ⇒ 直接排除，退回向量路径。
+    // ⚠️ 这一条必须与 kernel Init 里重算 cubeOn_ 的那一串【逐字同口径】：两侧不一致
+    //    就会出现"host 按组数起了块、kernel 却按 AIV 路径解释单元"的错映射。
+    if ((qN & 1U) != 0U) { return false; }
     if (qD != HQ_DIM || dr != ROPE_DIM) { return false; }
+    const uint32_t nb = qN;   // 一个单位吃整组头：否则同一份 K 被每个头块各 gather 一遍
     const uint64_t room = CubeRingRoom(nb, qD, elemSize);
     for (size_t j = 0; j < NBLK_N; ++j) {   // NBLK_CAND 降序 ⇒ 第一个过门的就是最大档
         const uint32_t nBlk = NBLK_CAND[j];
@@ -379,7 +372,7 @@ static bool CubeGate(uint32_t want, ge::DataType dtype, uint32_t qN, uint32_t qD
     return false;
 }
 
-// cube 的【并行度门】：cube 形态下一个单元 = (行, 16 头一块) ⇒ 单元数 = B·Q_S·⌈Q_N/块宽⌉，
+// cube 的【并行度门】：cube 形态下单元数 = B·Q_S（nb 强制 = Q_N ⇒ 头不再切块），
 // 组数 = AIV 核数 / 2 ⇒ "波数" = 单元/组。P76 把 credit 门挪到 Fixpipe 之前之后，
 // 整条胜负线左移到 **0.8 波**（同场次两臂 A/B，§15.73(f) 的表）：
 //   0.2 波(4 行) → 慢 1.67~2.13×；0.4 波(8 行) → 慢 2.22×；0.8 波(16 行) → 快 4.9 %；
@@ -387,10 +380,7 @@ static bool CubeGate(uint32_t want, ge::DataType dtype, uint32_t qN, uint32_t qD
 // ⚠️ 判据**不能先 ceil**：ceil 将把任何非空形状抬到 1 波 ⇒ "门槛 = 1 波"其实等于没装门
 //    （P77 闸门实证：那样写之后 p1/p2/p4/p6 的 fp16 全从"逐位一致"翻成"不逐位"，
 //     即 4 行的 p1 也进了 cube，而它在 cube 下慢 2.13×）。故这里用【百分数波数】做纯整数比较。
-// ⚠️ P91-A′ 之前这里数的是【行数】（`nb=qN` 强制 ⇒ 头不切块），现在数的是【单元数】——
-//    同一颗门，分子换了轴：少行多头的形状（题面枚举里 `Q_N≥32` 配 `B·Q_S<16`）在旧口径下
-//    永远进不了 cube，而它按单元数算已经有 2~8 倍并行度。
-constexpr uint64_t CUBE_MIN_WAVES_PCT = 80ULL;   // 80 ⇒ 0.8 波 = 20 组机型上的 16 个单元
+constexpr uint64_t CUBE_MIN_WAVES_PCT = 80ULL;   // 80 ⇒ 0.8 波 = 20 组机型上的 16 行
 
 // 变长长度数组的元素个数：末维大小；探测不到时按 1（= 广播语义，见 SEMANTICS §3）。
 // ⚠️ tiling 阶段（推断期）GetStorageShape() 往往是空的，GetShapeSize() 会返回 0，
@@ -508,24 +498,19 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
         kvShard = 1U;  // 降级路径不赌并行度，退回与参考实现逐位一致的那条路
     }
 
-    // P19-M1d：形态门通过 ⇒ 覆盖成 cube 档（nb 强制 = 头块宽、不切 KV、n_blk 重选）。
-    // 不通过（fp32 实例 / 头数不凑成整块 / 环装不下 / UB 预算不许可 / 单元数不够一波）就一行
-    // 都不动，与 P38 完全同路径 —— 这一条是回滚位，也是同场次 A/B 的对照臂。
+    // P19-M1d：形态门通过 ⇒ 覆盖成 cube 档（nb 强制 = Q_N、不切 KV、n_blk 重选）。
+    // 不通过（fp32 实例 / 头数 >16 / 环装不下 / UB 预算不许可）就一行都不动，
+    // 与 P38 完全同路径 —— 这一条是回滚位，也是同场次 A/B 的对照臂。
     //
-    // P74 追加【并行度门】：cube 形态下 nb 被钉死成头块宽 ⇒ 单元数不再由 CalcBlocking 说话，
-    // 而是 `行 × ⌈Q_N/块宽⌉`（P91-A′ 之前是"行"一个轴，因为 nb 强制 = Q_N ⇒ 头不切块）。
-    // 少于一波就有一批组空转，而锁步握手（SFA_RING=1）的每片税是不随形状变的固定项。门槛的
-    // 具体取值随 P76（credit 门左移）改过一轮，判据与两侧读数的表都在上面
-    // CUBE_MIN_WAVES_PCT 的定义处（那里是唯一口径，别在这里再抄一遍数字 —— P74 那版抄的
-    // "≥4 波"就被 P76 作废了）。
+    // P74 追加【并行度门】：cube 强制 nb=Q_N ⇒ 单元数从"行 × 头块"塌回"行"，少于一波就有
+    // 一批组空转，而锁步握手（SFA_RING=1）的每片税是不随形状变的固定项。门槛的具体取值
+    // 随 P76（credit 门左移）改过一轮，判据与两侧读数的表都在上面 CUBE_MIN_WAVES_PCT 的
+    // 定义处（那里是唯一口径，别在这里再抄一遍数字 —— P74 那版抄的"≥4 波"就被 P76 作废了）。
     uint32_t cubeOn = 0U;
     {
         uint32_t cnb = 0U, cnk = 0U;
         const uint32_t groups = (num_cores_aiv >= 2) ? static_cast<uint32_t>(num_cores_aiv / 2) : 1U;
-        // P91-A′：数【单元】而不是数行 —— 一个单元吃 CubeBlock(Q_N) 个头。
-        const uint32_t cblk = CubeBlock(Q_N);
-        const uint64_t cubeUnits = static_cast<uint64_t>(B) * static_cast<uint64_t>(Q_S) *
-                                   ((static_cast<uint64_t>(Q_N) + cblk - 1ULL) / cblk);
+        const uint64_t cubeUnits = static_cast<uint64_t>(B) * static_cast<uint64_t>(Q_S);
         if (cubeUnits * 100ULL >= CUBE_MIN_WAVES_PCT * groups &&
             CubeGate(SFA_CUBE_ON, dtype_query, Q_N, Q_D, Dr, elemSize, ubSafe, cnb, cnk)) {
             nb = cnb;

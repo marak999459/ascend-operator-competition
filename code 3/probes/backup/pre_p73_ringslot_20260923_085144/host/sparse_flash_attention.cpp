@@ -75,41 +75,22 @@ static inline uint64_t RedWOf(uint32_t nb, uint64_t nBlk)
     return (g > RED_MIN_W) ? g : RED_MIN_W;
 }
 
-// ⭐ P81：`cube` = 这一份预算是给 cube 形态（M1d）算的还是给纯向量路径算的。
-//   两边与 kernel 的 Init 逐项对，三处形态差异必须在这里同步反映，否则要么白留 2× 余量
-//   （抬不动 n_blk），要么少留而在真机越界：
-//   1) qBuf_/oBuf_/sBuf_/pBuf_ 的行数：cube 形态下一个单元两颗 AIV 各吃【一半头】
-//      （kernel 在 Init 里把 nb_ 折半），旧写法按整份 N1 预算 ⇒ 这四项一直 2× 空转。
-//   2) krBuf_：AIV 在 cube 形态不搬 K-rope（K 由 AIC 自己 ND2NZ 进 L1）⇒ 不分配。
-//   3) kfBuf_ 的行数 = scGrp_：cube 形态没有 ComputeScores（P24 把组宽抬到整个 chunk 就是
-//      为了"部分积就地压在 kf 上"）⇒ 钳回 SFA_SC_GRP_CUBE，kf 从 n_blk·D·4 变成常数；
-//      krfBuf_（rope 部分积）随之整段不分配。
-static inline uint64_t ScGrpOf(uint32_t nb, uint64_t nBlk, bool cube)
-{
-    if (!cube) { return nBlk; }                       // kernel: scGrp_ = n_blk
-    return (nBlk < SFA_SC_GRP_CUBE) ? nBlk : SFA_SC_GRP_CUBE;
-}
-
 static inline uint64_t CalcUbNeed(uint32_t nb, uint64_t nBlk, uint32_t qD, uint32_t dr,
-                                  uint32_t elemSize, bool cube)
+                                  uint32_t elemSize)
 {
     const uint64_t e = elemSize;
-    const uint64_t nh = cube ? (static_cast<uint64_t>(nb) >> 1) : static_cast<uint64_t>(nb);
-    const uint64_t n = nh;
+    const uint64_t n = nb;
     const uint64_t k = nBlk;
-    const uint64_t g = ScGrpOf(nb, nBlk, cube);
-    // 与 kernel Init 的 InitBuffer 逐项对应，漏一项就会真机越界。
+    // 与 kernel Init 的 InitBuffer 逐项对应，漏一项就会真机越界
     // P32：kernel 不再有 vBuf_ —— V 在 ComputeScores 之后才由 MTE2 搬进 kBuf_ 自己那块
     //      （同 dtype、同 size、同对齐口径），所以这里少一项 align(n_blk*D*e)。
     //      省下的 40,960 B(n_blk=40) 正好让 n_blk=48 在 nb=1/2/4 上第一次过门。
     return UbAlignBuf(n * (qD + dr) * 4ULL)      // qBuf_ : Q+Qrope 恒 fp32
          + UbAlignBuf(n * qD * 4ULL)             // oBuf_ : 累加器 fp32
          + UbAlignBuf(k * qD * e)                // kBuf_（V 复用它，见上）
-         + (cube ? 0ULL : UbAlignBuf(k * dr * e))            // krBuf_
+         + UbAlignBuf(k * dr * e)                // krBuf_
          + UbAlignBuf(n * k * 4ULL)              // sBuf_
          + UbAlignBuf(n * k * 4ULL)              // pBuf_
-         // mlBuf_/lseBuf_ 按【整份 N1】：kernel 的 halfOff_ 在 nb_ 折半【之前】就按整份算好
-         // 了，所以半区偏移和这两块的宽度都是全头口径（cube 形态下更空，但两边必须一致）。
          + UbAlignBuf(3ULL * HalfElems(nb) * 4ULL)  // mlBuf_ : m/l/mnew，半区各占整块（kernel halfOff_）
          + 2ULL * UbAlignBuf(HalfElems(nb) * 4ULL)  // lseBuf_ : max/sum 两个半区各自对齐整块
          // ---- P24 的 scratch：一组 = **整个 chunk** 个 token 的 fp32 展开 + 三条归约工作区，
@@ -117,9 +98,9 @@ static inline uint64_t CalcUbNeed(uint32_t nb, uint64_t nBlk, uint32_t qD, uint3
          //      部分积就地写在 kf/krf 上 ⇒ pfBuf_/prfBuf_ 根本不分配。nb==1 档的字节数
          //      与 P21 相同（那时 kf 已经是 32 行）；nb>1 档回收 pf/prf 两份，多出的是
          //      kf 从 16 行变 n_blk 行。----
-         + UbAlignBuf(g * qD * 4ULL)             // kfBuf_（cube 形态下 g = SFA_SC_GRP_CUBE）
-         + (cube ? 0ULL : UbAlignBuf(g * dr * 4ULL))   // krfBuf_
-         + 3ULL * UbAlignBuf(RedWOf(static_cast<uint32_t>(n), g) * 4ULL);
+         + UbAlignBuf(k * qD * 4ULL)             // kfBuf_
+         + UbAlignBuf(k * dr * 4ULL)             // krfBuf_
+         + 3ULL * UbAlignBuf(RedWOf(nb, k) * 4ULL);
 }
 
 // 反算分块。
@@ -258,7 +239,7 @@ static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD,
                 //      binding 的（口径与 kernel 的 stageBeg_ 同源，见 tiling.h）。
                 if (nBlk > SFA_STAGE_MAX) { continue; }
                 if (pass == 0 && nb * nBlk < sparseBlockSize) { continue; }
-                if (CalcUbNeed(nb, nBlk, qD, dr, elemSize, false) > ubSafe) { continue; }
+                if (CalcUbNeed(nb, nBlk, qD, dr, elemSize) > ubSafe) { continue; }
                 const uint64_t calls = UnitCalls(nb, nBlk, qD, dr, elemSize);
                 uint64_t cost = waves * UnitCost(nb, nBlk, qD, dr, elemSize, toks);
                 uint32_t ks = 1U;
@@ -315,82 +296,58 @@ static bool CalcBlocking(uint32_t sparseBlockSize, uint64_t ubSafe, uint32_t qD,
 // 0 ⇒ tiling 里 cube_on 恒 0 ⇒ kernel 走的与 P38 **逐字节同一条路径**（回滚位）。
 constexpr uint32_t SFA_CUBE_ON = 1U;
 
-// 回程环（【单槽】）占的字节数：cube 一个 tile 是 align16(nb) 行 × tile 列的 **fp32** L0C，
+// 回程环（两槽）占的字节数：cube 一个 tile 是 align16(nb) 行 × tile 列的 **fp32** L0C，
 // Fixpipe 一次搬 mSize=align16 行（不到 16 的倍数搬不动），所以即便 nb=4 也要按 16 行算。
-// P73：SFA_RING=1（锁步）⇒ 环里任何时刻只有一片，不需要第二槽；上一版拿 query 行当第二槽
-// 是**毒源** —— query 那一行的字节区间正好盖住本单元 A tile 的 lane 0，AIC 下一次 ND2NZ
-// 读回的就是"fp32 score 位模式解释成 fp16"= NaN，整条 L0C 跟着烂（§15.72(i)）。
 static inline uint64_t CubeRingNeed(uint32_t nb, uint64_t tile)
 {
     const uint64_t mRows = (static_cast<uint64_t>(nb) + 15ULL) / 16ULL * 16ULL;
-    return mRows * tile * 4ULL;
+    return 2ULL * mRows * tile * 4ULL;
 }
 
-// 环能放哪儿：只有【本单元自己的那一行输出】（§15.70(a) —— workspace 那条通道判死）。
-//   attention_out 行 = nb*qD*elemSize，本单元收工时 WriteOut 整行覆回 ⇒ 中间的垃圾出不了门。
-//   ⚠️ 不再算 query 行（见上面 CubeRingNeed 的 P73 注）。
+// 环能放哪儿：只有**本单元自己**的两行（§15.70(a) —— workspace 那条通道判死）。
+//   attention_out 行 = nb*qD*elemSize，本单元结束才写；
+//   query 行        = 同宽，cube 版里 Q 由 cube 侧一次性灌进 L0A，向量侧不再读它。
 static inline uint64_t CubeRingRoom(uint32_t nb, uint32_t qD, uint32_t elemSize)
 {
-    return static_cast<uint64_t>(nb) * qD * elemSize;
+    return 2ULL * static_cast<uint64_t>(nb) * qD * elemSize;
 }
 
-// P91-A′：**一个 cube 单元吃几头**。M 轴定死"一个 16 行的分形"（`mp.m=16`、L0C 16 行、
-// A tile 16 行）⇒ 上限就是 16；不足 16 的整组头一次吃完，奇数向下取偶（一半给一颗 AIV
-// 的那半块必须是整数，且两颗都要有活，见下面 CubeGate 里那条"偶数"注释）。
-// ⚠️ kernel `Init` 里有**同一个式子**，两侧必须逐字同口径：不一致就会出现"host 按组数
-//    起了块、kernel 却按 AIV 路径解释单元"的错映射（op_kernel:236 那段注释记过后果）。
-static inline uint32_t CubeBlock(uint32_t qN)
-{
-    return (qN >= 16U) ? 16U : (qN & ~1U);
-}
-
-// 形态门：一条不满足就退回 AIV 路径。返回真时把强制档 (nb=块宽, n_blk) 写出来。
+// 形态门：一条不满足就退回 AIV 路径。返回真时把强制档 (nb=Q_N, n_blk) 写出来。
 //   · 只走 fp16（§15.70(f)4：fp32 实例 cube 收益被 L0B 字节数吃掉一半）
-//   · P91-A′：原来这里是 `qN<=16`（一个单元吃【整组】头），**已换成"一个单元吃 16 头一块"**
-//     ⇒ 题面枚举的 32/64/128 三档从这条拒因里捞出来（`code3.md §15.73(o)(p)`：P89 六点零
-//     响应的唯一剩余解释就是门没开，而 dtype/奇数头两条在题面口径下恒不成立）。
-//     `qN % blk == 0` 是要保证**没有跨不满的末块**：末块头数 < blk 时 `nzA.nValue` 与
-//     `nHeadBlk` 两处口径要再特判一次，而题面枚举值全是 16 的整数倍或 <16 ⇒ 直接排除。
+//   · Q_N<=16：一个 L0C tile 装得下整组头，才不需要 M 轴再切一层
 //   · D=512 / Dr=64：k 轴"4×128 内容 + 1×64 rope"两段就是这个口径
-//   · n_blk 同时过四道钳：>=NBLK_MIN、<=SFA_STAGE_MAX_CUBE（cube 侧段登记数组，比向量侧的
-//     48 宽，见 tiling.h）、是 16 的整数倍、环装得下
+//   · n_blk 同时过三道钳：>=NBLK_MIN、<=SFA_STAGE_MAX（向量侧段登记数组）、环装得下
 static bool CubeGate(uint32_t want, ge::DataType dtype, uint32_t qN, uint32_t qD, uint32_t dr,
                      uint32_t elemSize, uint64_t ubSafe, uint32_t &nbOut, uint32_t &nBlkOut)
 {
     constexpr size_t NBLK_N = sizeof(NBLK_CAND) / sizeof(NBLK_CAND[0]);
     if (want == 0U) { return false; }
     if (dtype != ge::DT_FLOAT16) { return false; }
-    const uint32_t nb = CubeBlock(qN);
-    if (nb < 2U || (qN % nb) != 0U) { return false; }
+    if (qN == 0U || qN > 16U) { return false; }
+    // 偶数头：cube 形态下【一组一颗单元、两颗 AIV 各吃一半头】（READY 是广播的，
+    // 见 kernel sfa::CF_READY 与 code3.md §15.72(a)）。奇数头会让其中一颗拿到 0 个头，
+    // 那种"只交旗标不做向量活"的特判要一路铺到 Duplicate/WriteOut 的零长度分支，
+    // 而所有目标形状都是 N1=4/8 ⇒ 直接排除，退回向量路径。
+    // ⚠️ 这一条必须与 kernel Init 里重算 cubeOn_ 的那一串【逐字同口径】：两侧不一致
+    //    就会出现"host 按组数起了块、kernel 却按 AIV 路径解释单元"的错映射。
+    if ((qN & 1U) != 0U) { return false; }
     if (qD != HQ_DIM || dr != ROPE_DIM) { return false; }
+    const uint32_t nb = qN;   // 一个单位吃整组头：否则同一份 K 被每个头块各 gather 一遍
     const uint64_t room = CubeRingRoom(nb, qD, elemSize);
     for (size_t j = 0; j < NBLK_N; ++j) {   // NBLK_CAND 降序 ⇒ 第一个过门的就是最大档
         const uint32_t nBlk = NBLK_CAND[j];
-        if (nBlk < NBLK_MIN || nBlk > SFA_STAGE_MAX_CUBE) { continue; }
+        if (nBlk < NBLK_MIN || nBlk > SFA_STAGE_MAX) { continue; }
         // NZ 的行按 16 一行组成"分形行组"，dstNzC0Stride 与 Mmad 的 n 都要求 chunk 是 16
         // 的整数倍 ⇒ 候选表里的 40 这一档在 cube 路径上直接跳过（向量侧照旧能用它）。
         if ((nBlk % 16U) != 0U) { continue; }
         if (CubeRingNeed(nb, nBlk) > room) { continue; }
-        if (CalcUbNeed(nb, nBlk, qD, dr, elemSize, true) > ubSafe) { continue; }
+        if (CalcUbNeed(nb, nBlk, qD, dr, elemSize) > ubSafe) { continue; }
         nbOut = nb;
         nBlkOut = nBlk;
         return true;
     }
     return false;
 }
-
-// cube 的【并行度门】：cube 形态下一个单元 = (行, 16 头一块) ⇒ 单元数 = B·Q_S·⌈Q_N/块宽⌉，
-// 组数 = AIV 核数 / 2 ⇒ "波数" = 单元/组。P76 把 credit 门挪到 Fixpipe 之前之后，
-// 整条胜负线左移到 **0.8 波**（同场次两臂 A/B，§15.73(f) 的表）：
-//   0.2 波(4 行) → 慢 1.67~2.13×；0.4 波(8 行) → 慢 2.22×；0.8 波(16 行) → 快 4.9 %；
-//   1.6 波(32 行) → 快 2.6 %(短表) ~ **59 %**(长表)；6.4 波(128 行) → 快 **81~91 %**。
-// ⚠️ 判据**不能先 ceil**：ceil 将把任何非空形状抬到 1 波 ⇒ "门槛 = 1 波"其实等于没装门
-//    （P77 闸门实证：那样写之后 p1/p2/p4/p6 的 fp16 全从"逐位一致"翻成"不逐位"，
-//     即 4 行的 p1 也进了 cube，而它在 cube 下慢 2.13×）。故这里用【百分数波数】做纯整数比较。
-// ⚠️ P91-A′ 之前这里数的是【行数】（`nb=qN` 强制 ⇒ 头不切块），现在数的是【单元数】——
-//    同一颗门，分子换了轴：少行多头的形状（题面枚举里 `Q_N≥32` 配 `B·Q_S<16`）在旧口径下
-//    永远进不了 cube，而它按单元数算已经有 2~8 倍并行度。
-constexpr uint64_t CUBE_MIN_WAVES_PCT = 80ULL;   // 80 ⇒ 0.8 波 = 20 组机型上的 16 个单元
 
 // 变长长度数组的元素个数：末维大小；探测不到时按 1（= 广播语义，见 SEMANTICS §3）。
 // ⚠️ tiling 阶段（推断期）GetStorageShape() 往往是空的，GetShapeSize() 会返回 0，
@@ -508,26 +465,13 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
         kvShard = 1U;  // 降级路径不赌并行度，退回与参考实现逐位一致的那条路
     }
 
-    // P19-M1d：形态门通过 ⇒ 覆盖成 cube 档（nb 强制 = 头块宽、不切 KV、n_blk 重选）。
-    // 不通过（fp32 实例 / 头数不凑成整块 / 环装不下 / UB 预算不许可 / 单元数不够一波）就一行
-    // 都不动，与 P38 完全同路径 —— 这一条是回滚位，也是同场次 A/B 的对照臂。
-    //
-    // P74 追加【并行度门】：cube 形态下 nb 被钉死成头块宽 ⇒ 单元数不再由 CalcBlocking 说话，
-    // 而是 `行 × ⌈Q_N/块宽⌉`（P91-A′ 之前是"行"一个轴，因为 nb 强制 = Q_N ⇒ 头不切块）。
-    // 少于一波就有一批组空转，而锁步握手（SFA_RING=1）的每片税是不随形状变的固定项。门槛的
-    // 具体取值随 P76（credit 门左移）改过一轮，判据与两侧读数的表都在上面
-    // CUBE_MIN_WAVES_PCT 的定义处（那里是唯一口径，别在这里再抄一遍数字 —— P74 那版抄的
-    // "≥4 波"就被 P76 作废了）。
+    // P19-M1d：形态门通过 ⇒ 覆盖成 cube 档（nb 强制 = Q_N、不切 KV、n_blk 重选）。
+    // 不通过（fp32 实例 / 头数 >16 / 环装不下 / UB 预算不许可）就一行都不动，
+    // 与 P38 完全同路径 —— 这一条是回滚位，也是同场次 A/B 的对照臂。
     uint32_t cubeOn = 0U;
     {
         uint32_t cnb = 0U, cnk = 0U;
-        const uint32_t groups = (num_cores_aiv >= 2) ? static_cast<uint32_t>(num_cores_aiv / 2) : 1U;
-        // P91-A′：数【单元】而不是数行 —— 一个单元吃 CubeBlock(Q_N) 个头。
-        const uint32_t cblk = CubeBlock(Q_N);
-        const uint64_t cubeUnits = static_cast<uint64_t>(B) * static_cast<uint64_t>(Q_S) *
-                                   ((static_cast<uint64_t>(Q_N) + cblk - 1ULL) / cblk);
-        if (cubeUnits * 100ULL >= CUBE_MIN_WAVES_PCT * groups &&
-            CubeGate(SFA_CUBE_ON, dtype_query, Q_N, Q_D, Dr, elemSize, ubSafe, cnb, cnk)) {
+        if (CubeGate(SFA_CUBE_ON, dtype_query, Q_N, Q_D, Dr, elemSize, ubSafe, cnb, cnk)) {
             nb = cnb;
             nBlk = cnk;
             kvShard = 1U;
@@ -536,8 +480,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext *context)
     }
 
     SparseFlashAttentionTilingData *tiling = context->GetTilingData<SparseFlashAttentionTilingData>();
-    if (tiling == nullptr) { return ge::GRAPH_FAILED; }
-    tiling->B = B;
+    if (tiling == nullptr) { return ge::GRAPH_FAILED; }    tiling->B = B;
     tiling->Q_S = Q_S;
     tiling->KV_S = KV_S;
     tiling->Q_N = Q_N;
