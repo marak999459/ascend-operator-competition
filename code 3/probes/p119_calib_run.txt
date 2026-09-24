@@ -1,0 +1,96 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+>>> pristine sha 本地=f815bf1eaba0f8bc 远端应同
+f815bf1eaba0f8bc
+########## ARM N=0 (PV x1) ##########
+N=0 MARK=0/0（pristine 直拷）
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P119=0 期望=0
+g64c1       golden 写入 golden_p119/g64c1: OK 
+g64c4       golden 写入 golden_p119/g64c4: OK 
+g64c16      golden 写入 golden_p119/g64c16: OK 
+v64c8       golden 写入 golden_p119/v64c8: OK 
+r64c65      golden 写入 golden_p119/r64c65: OK 
+p6          golden 写入 golden_p119/p6: OK 
+big1        golden 写入 golden_p119/big1: OK 
+w3          golden 写入 golden_p119/w3: OK 
+  g64c1        0.3131 ms
+  g64c4        1.2477 ms
+  g64c16       4.8129 ms
+  v64c8        2.2971 ms
+  r64c65      18.8364 ms
+  p6           0.7492 ms
+  big1         0.6718 ms
+  w3           5.4416 ms
+########## ARM N=1 (PV x2) ##########
+N=1 MARK=2/2  bytes=69564
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P119=2 期望=2
+g64c1       逐位一致 golden_p119/g64c1.out 逐位一致 golden_p119/g64c1.max 逐位一致 golden_p119/g64c1.sum 
+g64c4       逐位一致 golden_p119/g64c4.out 逐位一致 golden_p119/g64c4.max 逐位一致 golden_p119/g64c4.sum 
+g64c16      逐位一致 golden_p119/g64c16.out 逐位一致 golden_p119/g64c16.max 逐位一致 golden_p119/g64c16.sum 
+v64c8       逐位一致 golden_p119/v64c8.out 逐位一致 golden_p119/v64c8.max 逐位一致 golden_p119/v64c8.sum 
+r64c65      逐位一致 golden_p119/r64c65.out 逐位一致 golden_p119/r64c65.max 逐位一致 golden_p119/r64c65.sum 
+p6          逐位一致 golden_p119/p6.out 逐位一致 golden_p119/p6.max 逐位一致 golden_p119/p6.sum 
+big1        逐位一致 golden_p119/big1.out 逐位一致 golden_p119/big1.max 逐位一致 golden_p119/big1.sum 
+w3          逐位一致 golden_p119/w3.out 逐位一致 golden_p119/w3.max 逐位一致 golden_p119/w3.sum 
+  g64c1        0.3707 ms
+  g64c4        1.4785 ms
+  g64c16       5.7330 ms
+  v64c8        2.7612 ms
+  r64c65      22.4607 ms
+  p6           0.9791 ms
+  big1         0.8715 ms
+  w3           7.2591 ms
+########## ARM N=2 (PV x3) ##########
+N=2 MARK=2/2  bytes=69564
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P119=2 期望=2
+g64c1       逐位一致 golden_p119/g64c1.out 逐位一致 golden_p119/g64c1.max 逐位一致 golden_p119/g64c1.sum 
+g64c4       逐位一致 golden_p119/g64c4.out 逐位一致 golden_p119/g64c4.max 逐位一致 golden_p119/g64c4.sum 
+g64c16      逐位一致 golden_p119/g64c16.out 逐位一致 golden_p119/g64c16.max 逐位一致 golden_p119/g64c16.sum 
+v64c8       逐位一致 golden_p119/v64c8.out 逐位一致 golden_p119/v64c8.max 逐位一致 golden_p119/v64c8.sum 
+r64c65      逐位一致 golden_p119/r64c65.out 逐位一致 golden_p119/r64c65.max 逐位一致 golden_p119/r64c65.sum 
+p6          逐位一致 golden_p119/p6.out 逐位一致 golden_p119/p6.max 逐位一致 golden_p119/p6.sum 
+big1        逐位一致 golden_p119/big1.out 逐位一致 golden_p119/big1.max 逐位一致 golden_p119/big1.sum 
+w3          逐位一致 golden_p119/w3.out 逐位一致 golden_p119/w3.max 逐位一致 golden_p119/w3.sum 
+  g64c1        0.4266 ms
+  g64c4        1.7010 ms
+  g64c16       6.6248 ms
+  v64c8        3.2060 ms
+  r64c65      25.9890 ms
+  p6           1.2051 ms
+  big1         1.0671 ms
+  w3           9.0594 ms
+########## ARM N=4 (PV x5) ##########
+N=4 MARK=2/2  bytes=69564
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P119=2 期望=2
+g64c1       逐位一致 golden_p119/g64c1.out 逐位一致 golden_p119/g64c1.max 逐位一致 golden_p119/g64c1.sum 
+g64c4       逐位一致 golden_p119/g64c4.out 逐位一致 golden_p119/g64c4.max 逐位一致 golden_p119/g64c4.sum 
+g64c16      逐位一致 golden_p119/g64c16.out 逐位一致 golden_p119/g64c16.max 逐位一致 golden_p119/g64c16.sum 
+v64c8       逐位一致 golden_p119/v64c8.out 逐位一致 golden_p119/v64c8.max 逐位一致 golden_p119/v64c8.sum 
+r64c65      逐位一致 golden_p119/r64c65.out 逐位一致 golden_p119/r64c65.max 逐位一致 golden_p119/r64c65.sum 
+p6          逐位一致 golden_p119/p6.out 逐位一致 golden_p119/p6.max 逐位一致 golden_p119/p6.sum 
+big1        逐位一致 golden_p119/big1.out 逐位一致 golden_p119/big1.max 逐位一致 golden_p119/big1.sum 
+w3          逐位一致 golden_p119/w3.out 逐位一致 golden_p119/w3.max 逐位一致 golden_p119/w3.sum 
+  g64c1        0.5404 ms
+  g64c4        2.1557 ms
+  g64c16       8.4410 ms
+  v64c8        4.1079 ms
+  r64c65      33.1921 ms
+  p6           1.6612 ms
+  big1         1.4639 ms
+  w3          12.6777 ms
+P119_CALIB_DONE
+=== 还原：只做 sync（远端源码 = 本地提交字节，无 sed、无 build） ===
+f815bf1eaba0f8bc
+SEDHITS=0
