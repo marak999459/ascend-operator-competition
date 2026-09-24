@@ -1,0 +1,60 @@
+=== ① 本地拉回 pristine 并 sync（探针要建在 pristine 上，auto 臂才是真的 auto） ===
+[revert] NB_CAND{1}=0  NB_CAND=4  旧表体=1  禁用词=0  sha=3a8f53050c8f15ae
+REVERTED sha=3a8f53050c8f15ae823846eace857d0db1b5abb98a5fb330d332839b235fb453
+=== 1) 推提交源 code 3/code -> ~/sfa_real/code ===
+=== 2) 推 harness / 参考实现 ===
+=== 3) md5 复验（本地提交源 vs 远端） ===
+HITS_SOC=1 OLDTAB=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+PATCHED code/op_host/sparse_flash_attention.cpp
+HITS_FORCE_NB=1 HITS_PICK=1
+构建 OK
+=== ② 探活 ===
+>>> 第 1 次 OK
+=== ③ 两臂 ===
+p1        nb=auto  批量  0.1192 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=2048]
+p1        nb=1     批量  0.1603 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=1 nblk=48 ks=2 sbs=1 rows=4 count=2048]
+p1        nb=2     批量  0.1196 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=2048]
+p1        nb=4     批量  0.1298 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=4 nblk=48 ks=8 sbs=1 rows=4 count=2048]
+p1        nb=8     批量  0.3754 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=1 nblk=16 ks=1 sbs=1 rows=4 count=2048]
+p1        nb=auto  批量  0.1183 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=2048]
+p2        nb=auto  批量  0.1162 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=2 nblk=48 ks=5 sbs=1 rows=8 count=2048]
+p2        nb=1     批量  0.1599 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=1 nblk=48 ks=2 sbs=1 rows=8 count=2048]
+p2        nb=2     批量  0.1164 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=2 nblk=48 ks=5 sbs=1 rows=8 count=2048]
+p2        nb=4     批量  0.3752 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=1 nblk=16 ks=1 sbs=1 rows=8 count=2048]
+p2        nb=8     批量  0.3752 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=1 nblk=16 ks=1 sbs=1 rows=8 count=2048]
+p2        nb=auto  批量  0.1157 ms  逐位 3/3  超差[超差 0/8192 超差 0/16 超差 0/16 ] pick[nb=2 nblk=48 ks=5 sbs=1 rows=8 count=2048]
+p4        nb=auto  批量  0.3883 ms  逐位 3/3  超差[超差 0/32768 超差 0/64 超差 0/64 ] pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048]
+p4        nb=1     批量  0.5798 ms  逐位 3/3  超差[超差 0/32768 超差 0/64 超差 0/64 ] pick[nb=1 nblk=48 ks=1 sbs=1 rows=16 count=2048]
+p4        nb=2     批量  0.4467 ms  逐位 3/3  超差[超差 0/32768 超差 0/64 超差 0/64 ] pick[nb=2 nblk=48 ks=1 sbs=1 rows=16 count=2048]
+p4        nb=4     批量  0.3883 ms  逐位 3/3  超差[超差 0/32768 超差 0/64 超差 0/64 ] pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048]
+p4        nb=8     批量  0.7498 ms  逐位 3/3  超差[超差 0/32768 超差 0/64 超差 0/64 ] pick[nb=1 nblk=16 ks=1 sbs=1 rows=16 count=2048]
+p4        nb=auto  批量  0.3883 ms  逐位 3/3  超差[超差 0/32768 超差 0/64 超差 0/64 ] pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048]
+p6        nb=auto  批量  0.7492 ms  逐位 3/3  超差[超差 0/65536 超差 0/128 超差 0/128 ] pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+p6        nb=1     批量  1.1467 ms  逐位 3/3  超差[超差 0/65536 超差 0/128 超差 0/128 ] pick[nb=1 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+p6        nb=2     批量  0.8834 ms  逐位 3/3  超差[超差 0/65536 超差 0/128 超差 0/128 ] pick[nb=2 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+p6        nb=4     批量  0.7495 ms  逐位 3/3  超差[超差 0/65536 超差 0/128 超差 0/128 ] pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+p6        nb=8     批量  1.4843 ms  逐位 3/3  超差[超差 0/65536 超差 0/128 超差 0/128 ] pick[nb=1 nblk=16 ks=1 sbs=1 rows=32 count=2048]
+p6        nb=auto  批量  0.7494 ms  逐位 3/3  超差[超差 0/65536 超差 0/128 超差 0/128 ] pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+big1      nb=auto  批量  0.6715 ms  逐位 3/3  超差[超差 0/524288 超差 0/1024 超差 0/1024 ] pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1      nb=1     批量  0.9571 ms  逐位 3/3  超差[超差 0/524288 超差 0/1024 超差 0/1024 ] pick[nb=1 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1      nb=2     批量  0.7364 ms  逐位 3/3  超差[超差 0/524288 超差 0/1024 超差 0/1024 ] pick[nb=2 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1      nb=4     批量  0.6714 ms  逐位 3/3  超差[超差 0/524288 超差 0/1024 超差 0/1024 ] pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1      nb=8     批量  0.7132 ms  逐位 3/3  超差[超差 0/524288 超差 0/1024 超差 0/1024 ] pick[nb=8 nblk=40 ks=1 sbs=1 rows=128 count=2048]
+big1      nb=auto  批量  0.6712 ms  逐位 3/3  超差[超差 0/524288 超差 0/1024 超差 0/1024 ] pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+w3        nb=auto  批量  5.4416 ms  逐位 -/3  超差[-] pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3        nb=1     批量  5.9719 ms  逐位 -/3  超差[-] pick[nb=1 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3        nb=2     批量  5.3258 ms  逐位 -/3  超差[-] pick[nb=2 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3        nb=4     批量  5.4422 ms  逐位 -/3  超差[-] pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3        nb=8     批量  8.2663 ms  逐位 -/3  超差[-] pick[nb=1 nblk=16 ks=1 sbs=2 rows=128 count=2048]
+w3        nb=auto  批量  5.4423 ms  逐位 -/3  超差[-] pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+r64c65    nb=auto  批量 18.8255 ms  逐位 -/3  超差[-] pick[nb=1 nblk=48 ks=1 sbs=1 rows=64 count=65536]
+r64c65    nb=1     批量 18.8228 ms  逐位 -/3  超差[-] pick[nb=1 nblk=48 ks=1 sbs=1 rows=64 count=65536]
+r64c65    nb=2     批量 24.7700 ms  逐位 -/3  超差[-] pick[nb=1 nblk=16 ks=1 sbs=1 rows=64 count=65536]
+r64c65    nb=4     批量 24.7697 ms  逐位 -/3  超差[-] pick[nb=1 nblk=16 ks=1 sbs=1 rows=64 count=65536]
+r64c65    nb=8     批量 24.7697 ms  逐位 -/3  超差[-] pick[nb=1 nblk=16 ks=1 sbs=1 rows=64 count=65536]
+r64c65    nb=auto  批量 18.8226 ms  逐位 -/3  超差[-] pick[nb=1 nblk=48 ks=1 sbs=1 rows=64 count=65536]
+=== 收尾：远端还原干净构建 + 本地重新钉档 ===
+构建 OK
+[apply] NB_CAND{1}=1  NB_CAND=4  旧表体=0  禁用词=0  sha=3969800637a4ce58
+PINNED sha=3969800637a4ce58dae7a8f2165c3947e66be37424cd4830d1b0fffc2b6f5dfb
