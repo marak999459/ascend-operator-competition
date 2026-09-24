@@ -1,0 +1,79 @@
+# 第一题真机复验 2026-09-24 18:55–18:56 (UTC+8) · host bd23984d636345e490f7c1d42dbef049 / NPU 3 卡 6/7 · aiv=50 ub=64KB
+# 源码 = 本地 code1/ 四文件 md5 逐字节推送的副本 ~/mhc1_check/code1；唯一远端侧改动 = CMakeLists 与 op_host 补 ascend910_93（提交源不含此改动）
+# 修法 = op_kernel/mhc_expand.cpp:110 的 PipeBarrier<PIPE_ALL>()（§11.9.6 候选 (c)，9/22 随 eaf0d4e 落进源码但从未复验）
+########## quick  (npu_quick_20260924_185545.log) ##########
+[fwd-fp16-small] S=64 D=256 m=2 blk=50 mode=0 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/32768 PASS
+[fwd-fp16-D100] S=7 D=100 m=2 blk=14 mode=2 tile=100 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/1400 PASS
+[fwd-fp16-D7167] S=3 D=7167 m=2 blk=6 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/43002 PASS
+[fwd-fp16-S1D1] S=1 D=1 m=2 blk=2 mode=2 tile=1 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/2 PASS
+[fwd-fp16-m1] S=5 D=33 m=1 blk=5 mode=2 tile=33 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/165 PASS
+[fwd-fp16-m16] S=64 D=512 m=16 blk=50 mode=0 tile=512 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/524288 PASS
+[bwd-fp16-small] S=64 D=256 m=2 blk=50 mode=0 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16384 PASS
+[bwd-fp16-D100] S=4 D=100 m=2 blk=4 mode=2 tile=100 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/400 PASS
+[bwd-fp16-D7167] S=2 D=7167 m=2 blk=2 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/14334 PASS
+[bwd-fp16-S1D1] S=1 D=1 m=2 blk=1 mode=2 tile=1 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/1 PASS
+[bwd-fp16-m1] S=5 D=33 m=1 blk=5 mode=2 tile=33 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/165 PASS
+[bwd-fp16-m16] S=64 D=512 m=16 blk=50 mode=0 tile=512 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/32768 PASS
+[bwd-fp16-sat-m1] S=4 D=128 m=1 blk=4 mode=2 tile=128 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/512 PASS
+[bwd-fp16-sat-m2] S=4 D=128 m=2 blk=4 mode=2 tile=128 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/512 PASS
+[fwd-bf16-small] S=64 D=256 m=2 blk=50 mode=0 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/32768 PASS
+[fwd-bf16-D7167] S=3 D=7167 m=2 blk=6 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/43002 PASS
+[bwd-bf16-small] S=64 D=256 m=2 blk=50 mode=0 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16384 PASS
+[bwd-bf16-D7167] S=2 D=7167 m=2 blk=2 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/14334 PASS
+[fwd-fp16-ROW-m8] S=4 D=2048 m=8 blk=32 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/65536 PASS
+[bwd-fp16-m2] S=8 D=256 m=2 blk=8 mode=2 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/2048 PASS
+[bwd-fp16-m3] S=8 D=256 m=3 blk=8 mode=2 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/2048 PASS
+[bwd-fp16-m4] S=8 D=256 m=4 blk=8 mode=2 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/2048 PASS
+[bwd-fp16-m5] S=8 D=256 m=5 blk=8 mode=2 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/2048 PASS
+[bwd-fp16-D7167-m5] S=2 D=7167 m=5 blk=2 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/14334 PASS
+[bwd-bf16-m4] S=8 D=256 m=4 blk=8 mode=2 tile=256 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/2048 PASS
+=== ALL PASS | cases=25 fail=0 err=0 ===
+########## medium  (npu_medium_20260924_185601.log) ##########
+[fwd-fp16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16777216 PASS
+[bwd-fp16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/4194304 PASS
+[fwd-bf16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16777216 PASS
+[bwd-bf16-medium] S=1024 D=4096 m=4 blk=50 mode=0 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/4194304 PASS
+=== ALL PASS | cases=4 fail=0 err=0 ===
+########## bnd  (npu_bnd_20260924_185604.log) ##########
+[bwd-fp16-MT-ELEM] S=4 D=4096 m=16 blk=4 mode=2 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16384 PASS
+[bwd-fp16-MT-ODD] S=2 D=7167 m=8 blk=2 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/14334 PASS
+[bwd-bf16-MT-ELEM] S=4 D=4096 m=16 blk=4 mode=2 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16384 PASS
+[bwd-bf16-MT-ODD] S=2 D=7167 m=8 blk=2 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/14334 PASS
+[bwd-fp16-MTL-D70000-m8] S=2 D=70000 m=8 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[bwd-fp16-MTL-D70000-m2] S=2 D=70000 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[bwd-fp16-MTL-D33000-m8] S=1 D=33000 m=8 blk=17 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/33000 PASS
+[bwd-bf16-MTL-D70000-m2] S=2 D=70000 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[fwd-fp16-MTL-D70000-m2] S=1 D=70000 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[bwd-fp16-MTL-D70001-m2] S=2 D=70001 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140002 PASS
+[bwd-bf16-MTL-D33001-m8] S=1 D=33001 m=8 blk=17 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/33001 PASS
+[fwd-fp16-MTL-D70001-m2] S=1 D=70001 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140002 PASS
+[bwd-fp16-BND-D32768-m2] S=2 D=32768 m=2 blk=2 mode=2 tile=32768 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/65536 PASS
+[bwd-fp16-BND-D32769-m2] S=2 D=32769 m=2 blk=34 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/65538 PASS
+[fwd-fp16-BND-D32769-m4] S=1 D=32769 m=4 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/131076 PASS
+=== ALL PASS | cases=15 fail=0 err=0 ===
+########## ub48  (npu_ub48_20260924_185606.log) ##########
+[bwd-fp16-UB48-D26001-m2] S=2 D=26001 m=2 blk=26 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/52002 PASS
+[fwd-fp16-UB48-D26000-m4] S=2 D=26000 m=4 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/208000 PASS
+[bwd-fp16-BND-D24576-m2] S=2 D=24576 m=2 blk=2 mode=2 tile=24576 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/49152 PASS
+[bwd-fp16-BND-D24577-m2] S=2 D=24577 m=2 blk=26 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/49154 PASS
+=== ALL PASS | cases=4 fail=0 err=0 ===
+########## mtile  (npu_mtile_20260924_185608.log) ##########
+[bwd-fp16-MT-ELEM] S=4 D=4096 m=16 blk=4 mode=2 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16384 PASS
+[bwd-fp16-MT-ODD] S=2 D=7167 m=8 blk=2 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/14334 PASS
+[bwd-bf16-MT-ELEM] S=4 D=4096 m=16 blk=4 mode=2 tile=4096 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/16384 PASS
+[bwd-bf16-MT-ODD] S=2 D=7167 m=8 blk=2 mode=2 tile=7167 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/14334 PASS
+[bwd-fp16-MTL-D70000-m8] S=2 D=70000 m=8 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[bwd-fp16-MTL-D70000-m2] S=2 D=70000 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[bwd-fp16-MTL-D33000-m8] S=1 D=33000 m=8 blk=17 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/33000 PASS
+[bwd-bf16-MTL-D70000-m2] S=2 D=70000 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[fwd-fp16-MTL-D70000-m2] S=1 D=70000 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140000 PASS
+[bwd-fp16-MTL-D70001-m2] S=2 D=70001 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140002 PASS
+[bwd-bf16-MTL-D33001-m8] S=1 D=33001 m=8 blk=17 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/33001 PASS
+[fwd-fp16-MTL-D70001-m2] S=1 D=70001 m=2 blk=50 mode=2 tile=2048 ws=0 kern=0.000s -> maxdiff=0.00000 mismatch=0/140002 PASS
+=== ALL PASS | cases=12 fail=0 err=0 ===
+########## large  (npu_large_20260924_185624.log) ##########
+[fwd-fp16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s -> maxdiff=0.00000 mismatch=0/469762048 PASS
+[fwd-bf16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s -> maxdiff=0.00000 mismatch=0/469762048 PASS
+[bwd-fp16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s -> maxdiff=0.00000 mismatch=0/58720256 PASS
+[bwd-bf16-large] S=8192 D=7168 m=8 blk=50 mode=0 tile=7168 ws=0 kern=0.001s -> maxdiff=0.00000 mismatch=0/58720256 PASS
+=== ALL PASS | cases=4 fail=0 err=0 ===

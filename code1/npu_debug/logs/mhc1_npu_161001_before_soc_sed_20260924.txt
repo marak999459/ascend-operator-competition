@@ -1,0 +1,6 @@
+# 未补 ascend910_93 时的失败原文（9/24 18:52，同一份源码、同一台机）：25/25 全部 GetWorkspaceSize 失败，
+# 打开 ASCEND_GLOBAL_LOG_LEVEL=1 才看到 errno[161001] Get regInfo failed / Check nnopExecutor != nullptr failed
+    [fwd-fp16-small] GetWorkspaceSize failed st=161001
+    [fwd-fp16-D100] GetWorkspaceSize failed st=161001
+=== HAS FAIL 见下一行 ===
+=== HAS FAIL | cases=25 fail=0 err=25 ===
