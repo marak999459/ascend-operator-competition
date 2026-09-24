@@ -1,0 +1,171 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+>>> pristine：本地=f815bf1eaba0f8bc 远端应同 ↓
+f815bf1eaba0f8bc
+############ ARM=q（prologue：LoadQ + 3×Duplicate）############
+##########   q N=0 ##########
+N=0 MARK=0 REP=0（pristine 直拷） FLAG=36 BUFF=13 MULS=11
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=0 REP=0 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=0 REP=0 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 golden 写入 golden_p125/p1: OK 
+  p2        超差 0 超差 0 超差 0 golden 写入 golden_p125/p2: OK 
+  p4        超差 0 超差 0 超差 0 golden 写入 golden_p125/p4: OK 
+  p6        超差 0 超差 0 超差 0 golden 写入 golden_p125/p6: OK 
+  big1      超差 0 超差 0 超差 0 golden 写入 golden_p125/big1: OK 
+  w3        超差 220831 超差 512 超差 512 golden 写入 golden_p125/w3: OK 
+  r64c65    超差 13173 超差 64 超差 64 golden 写入 golden_p125/r64c65: OK 
+  p1         0.1187 ms
+  p2         0.1162 ms
+  p4         0.3876 ms
+  p6         0.7489 ms
+  big1       0.6721 ms
+  w3         5.4432 ms
+  r64c65    18.8350 ms
+##########   q N=1 ##########
+ARM=q N=1 MARK=1 REP=1 FLAG=36（应 36） BUFF=13 MULS=11 bytes=69123
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=1 REP=1 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=1 REP=1 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 逐位一致 golden_p125/p1.out 逐位一致 golden_p125/p1.max 逐位一致 golden_p125/p1.sum 
+  p2        超差 0 超差 0 超差 0 逐位一致 golden_p125/p2.out 逐位一致 golden_p125/p2.max 逐位一致 golden_p125/p2.sum 
+  p4        超差 0 超差 0 超差 0 逐位一致 golden_p125/p4.out 逐位一致 golden_p125/p4.max 逐位一致 golden_p125/p4.sum 
+  p6        超差 0 超差 0 超差 0 逐位一致 golden_p125/p6.out 逐位一致 golden_p125/p6.max 逐位一致 golden_p125/p6.sum 
+  big1      超差 0 超差 0 超差 0 逐位一致 golden_p125/big1.out 逐位一致 golden_p125/big1.max 逐位一致 golden_p125/big1.sum 
+  w3        超差 220831 超差 512 超差 512 逐位一致 golden_p125/w3.out 逐位一致 golden_p125/w3.max 逐位一致 golden_p125/w3.sum 
+  r64c65    超差 13173 超差 64 超差 64 逐位一致 golden_p125/r64c65.out 逐位一致 golden_p125/r64c65.max 逐位一致 golden_p125/r64c65.sum 
+  p1         0.1200 ms
+  p2         0.1162 ms
+  p4         0.3882 ms
+  p6         0.7493 ms
+  big1       0.6717 ms
+  w3         5.4413 ms
+  r64c65    18.8254 ms
+##########   q N=2 ##########
+ARM=q N=2 MARK=1 REP=1 FLAG=36（应 36） BUFF=13 MULS=11 bytes=69123
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=1 REP=1 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=1 REP=1 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 逐位一致 golden_p125/p1.out 逐位一致 golden_p125/p1.max 逐位一致 golden_p125/p1.sum 
+  p2        超差 0 超差 0 超差 0 逐位一致 golden_p125/p2.out 逐位一致 golden_p125/p2.max 逐位一致 golden_p125/p2.sum 
+  p4        超差 0 超差 0 超差 0 逐位一致 golden_p125/p4.out 逐位一致 golden_p125/p4.max 逐位一致 golden_p125/p4.sum 
+  p6        超差 0 超差 0 超差 0 逐位一致 golden_p125/p6.out 逐位一致 golden_p125/p6.max 逐位一致 golden_p125/p6.sum 
+  big1      超差 0 超差 0 超差 0 逐位一致 golden_p125/big1.out 逐位一致 golden_p125/big1.max 逐位一致 golden_p125/big1.sum 
+  w3        超差 220831 超差 512 超差 512 逐位一致 golden_p125/w3.out 逐位一致 golden_p125/w3.max 逐位一致 golden_p125/w3.sum 
+  r64c65    超差 13173 超差 64 超差 64 逐位一致 golden_p125/r64c65.out 逐位一致 golden_p125/r64c65.max 逐位一致 golden_p125/r64c65.sum 
+  p1         0.1202 ms
+  p2         0.1165 ms
+  p4         0.3888 ms
+  p6         0.7497 ms
+  big1       0.6747 ms
+  w3         5.4479 ms
+  r64c65    18.8479 ms
+##########   q N=8 ##########
+ARM=q N=8 MARK=1 REP=1 FLAG=36（应 36） BUFF=13 MULS=11 bytes=69123
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=1 REP=1 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=1 REP=1 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 逐位一致 golden_p125/p1.out 逐位一致 golden_p125/p1.max 逐位一致 golden_p125/p1.sum 
+  p2        超差 0 超差 0 超差 0 逐位一致 golden_p125/p2.out 逐位一致 golden_p125/p2.max 逐位一致 golden_p125/p2.sum 
+  p4        超差 0 超差 0 超差 0 逐位一致 golden_p125/p4.out 逐位一致 golden_p125/p4.max 逐位一致 golden_p125/p4.sum 
+  p6        超差 0 超差 0 超差 0 逐位一致 golden_p125/p6.out 逐位一致 golden_p125/p6.max 逐位一致 golden_p125/p6.sum 
+  big1      超差 0 超差 0 超差 0 逐位一致 golden_p125/big1.out 逐位一致 golden_p125/big1.max 逐位一致 golden_p125/big1.sum 
+  w3        超差 220831 超差 512 超差 512 逐位一致 golden_p125/w3.out 逐位一致 golden_p125/w3.max 逐位一致 golden_p125/w3.sum 
+  r64c65    超差 13173 超差 64 超差 64 逐位一致 golden_p125/r64c65.out 逐位一致 golden_p125/r64c65.max 逐位一致 golden_p125/r64c65.sum 
+  p1         0.1199 ms
+  p2         0.1161 ms
+  p4         0.3870 ms
+  p6         0.7436 ms
+  big1       0.6791 ms
+  w3         5.4233 ms
+  r64c65    18.3209 ms
+############ ARM=w（epilogue：WriteOut 两段 DMA 尾巴）############
+##########   w N=0 ##########
+N=0 MARK=0 REP=0（pristine 直拷） FLAG=36 BUFF=13 MULS=11
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=0 REP=0 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=0 REP=0 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 golden 写入 golden_p125/p1: OK 
+  p2        超差 0 超差 0 超差 0 golden 写入 golden_p125/p2: OK 
+  p4        超差 0 超差 0 超差 0 golden 写入 golden_p125/p4: OK 
+  p6        超差 0 超差 0 超差 0 golden 写入 golden_p125/p6: OK 
+  big1      超差 0 超差 0 超差 0 golden 写入 golden_p125/big1: OK 
+  w3        超差 220831 超差 512 超差 512 golden 写入 golden_p125/w3: OK 
+  r64c65    超差 13173 超差 64 超差 64 golden 写入 golden_p125/r64c65: OK 
+  p1         0.1188 ms
+  p2         0.1161 ms
+  p4         0.3879 ms
+  p6         0.7490 ms
+  big1       0.6713 ms
+  w3         5.4427 ms
+  r64c65    18.8370 ms
+##########   w N=1 ##########
+ARM=w N=1 MARK=2 REP=2 FLAG=36（应 36） BUFF=13 MULS=11 bytes=69669
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=2 REP=2 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=2 REP=2 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 逐位一致 golden_p125/p1.out 逐位一致 golden_p125/p1.max 逐位一致 golden_p125/p1.sum 
+  p2        超差 0 超差 0 超差 0 逐位一致 golden_p125/p2.out 逐位一致 golden_p125/p2.max 逐位一致 golden_p125/p2.sum 
+  p4        超差 0 超差 0 超差 0 逐位一致 golden_p125/p4.out 逐位一致 golden_p125/p4.max 逐位一致 golden_p125/p4.sum 
+  p6        超差 0 超差 0 超差 0 逐位一致 golden_p125/p6.out 逐位一致 golden_p125/p6.max 逐位一致 golden_p125/p6.sum 
+  big1      超差 0 超差 0 超差 0 逐位一致 golden_p125/big1.out 逐位一致 golden_p125/big1.max 逐位一致 golden_p125/big1.sum 
+  w3        超差 220831 超差 512 超差 512 逐位一致 golden_p125/w3.out 逐位一致 golden_p125/w3.max 逐位一致 golden_p125/w3.sum 
+  r64c65    超差 13173 超差 64 超差 64 逐位一致 golden_p125/r64c65.out 逐位一致 golden_p125/r64c65.max 逐位一致 golden_p125/r64c65.sum 
+  p1         0.1187 ms
+  p2         0.1162 ms
+  p4         0.3884 ms
+  p6         0.7488 ms
+  big1       0.6723 ms
+  w3         5.4439 ms
+  r64c65    18.8344 ms
+##########   w N=2 ##########
+ARM=w N=2 MARK=2 REP=2 FLAG=36（应 36） BUFF=13 MULS=11 bytes=69669
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=2 REP=2 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=2 REP=2 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 逐位一致 golden_p125/p1.out 逐位一致 golden_p125/p1.max 逐位一致 golden_p125/p1.sum 
+  p2        超差 0 超差 0 超差 0 逐位一致 golden_p125/p2.out 逐位一致 golden_p125/p2.max 逐位一致 golden_p125/p2.sum 
+  p4        超差 0 超差 0 超差 0 逐位一致 golden_p125/p4.out 逐位一致 golden_p125/p4.max 逐位一致 golden_p125/p4.sum 
+  p6        超差 0 超差 0 超差 0 逐位一致 golden_p125/p6.out 逐位一致 golden_p125/p6.max 逐位一致 golden_p125/p6.sum 
+  big1      超差 0 超差 0 超差 0 逐位一致 golden_p125/big1.out 逐位一致 golden_p125/big1.max 逐位一致 golden_p125/big1.sum 
+  w3        超差 220831 超差 512 超差 512 逐位一致 golden_p125/w3.out 逐位一致 golden_p125/w3.max 逐位一致 golden_p125/w3.sum 
+  r64c65    超差 13173 超差 64 超差 64 逐位一致 golden_p125/r64c65.out 逐位一致 golden_p125/r64c65.max 逐位一致 golden_p125/r64c65.sum 
+  p1         0.1185 ms
+  p2         0.1156 ms
+  p4         0.3889 ms
+  p6         0.7500 ms
+  big1       0.6738 ms
+  w3         5.4491 ms
+  r64c65    18.8113 ms
+##########   w N=8 ##########
+ARM=w N=8 MARK=2 REP=2 FLAG=36（应 36） BUFF=13 MULS=11 bytes=69669
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+MARK=2 REP=2 FLAG=36 MULS=11 LOADQ=1 FORBID=0 期望 MARK=2 REP=2 FLAG=36 MULS=11 LOADQ=1 FORBID=0
+  p1        超差 0 超差 0 超差 0 逐位一致 golden_p125/p1.out 逐位一致 golden_p125/p1.max 逐位一致 golden_p125/p1.sum 
+  p2        超差 0 超差 0 超差 0 逐位一致 golden_p125/p2.out 逐位一致 golden_p125/p2.max 逐位一致 golden_p125/p2.sum 
+  p4        超差 0 超差 0 超差 0 逐位一致 golden_p125/p4.out 逐位一致 golden_p125/p4.max 逐位一致 golden_p125/p4.sum 
+  p6        超差 0 超差 0 超差 0 逐位一致 golden_p125/p6.out 逐位一致 golden_p125/p6.max 逐位一致 golden_p125/p6.sum 
+  big1      超差 0 超差 0 超差 0 逐位一致 golden_p125/big1.out 逐位一致 golden_p125/big1.max 逐位一致 golden_p125/big1.sum 
+  w3        超差 220831 超差 512 超差 512 逐位一致 golden_p125/w3.out 逐位一致 golden_p125/w3.max 逐位一致 golden_p125/w3.sum 
+  r64c65    超差 13173 超差 64 超差 64 逐位一致 golden_p125/r64c65.out 逐位一致 golden_p125/r64c65.max 逐位一致 golden_p125/r64c65.sum 
+  p1         0.1211 ms
+  p2         0.1178 ms
+  p4         0.3911 ms
+  p6         0.7539 ms
+  big1       0.6982 ms
+  w3         5.4500 ms
+  r64c65    18.7462 ms
+P125_CALIB_DONE
+=== 还原：只做 sync（远端源码 = 本地提交字节，无 sed、无 build） ===
+f815bf1eaba0f8bc
+SEDHITS=0
+P125_CALIB_EXIT=0

@@ -1,0 +1,7 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+TAG=q32 DIR=/home/developer/sfa_real/p125q_code payload 字段={'problemId': 24, 'userId': 24, 'tiling_h': 2672, 'tiling_key_h': 385, 'host_cpp': 28321, 'kernel_cpp': 55530}
+HTTP 429
+H Server           nginx/1.18.0 (Ubuntu)
+H Date             Thu, 24 Sep 2026 10:28:54 GMT
+BODY {"code":429,"msg":"今日提交次数已达上限（50次），请于北京时间 2026-09-25 00:00 后再提交","message":"今日提交次数已达上限（50次），请于北京时间 2026-09-25 00:00 后再提交","data":{"reason":"daily_limit","limit":50,"used":50,"remaining":0,"reset_at":"2026-09-24T16:00:00.000Z"}}
+DIAG_EXIT=2
