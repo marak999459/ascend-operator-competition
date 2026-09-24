@@ -1,0 +1,46 @@
+[revert] P127钉=0  旧门=1  cost * 20ULL=1  bestCost==0=2  禁用词=0  sha=3a8f53050c8f15ae
+REVERTED sha=3a8f53050c8f15ae823846eace857d0db1b5abb98a5fb330d332839b235fb453
+本地四枚：
+f815bf1eaba0f8bc op_kernel/sparse_flash_attention.cpp
+f2b28a86e998c194 op_kernel/sparse_flash_attention_tiling.h
+1046b349538f3007 op_kernel/tiling_key_sparse_flash_attention.h
+3a8f53050c8f15ae op_host/sparse_flash_attention.cpp
+02dd48f90480ac6d8774457e6f649b9b  code/op_kernel/tiling_key_sparse_flash_attention.h
+f815bf1eaba0f8bc op_kernel/sparse_flash_attention.cpp
+f2b28a86e998c194 op_kernel/sparse_flash_attention_tiling.h
+1046b349538f3007 op_kernel/tiling_key_sparse_flash_attention.h
+3a8f53050c8f15ae op_host/sparse_flash_attention.cpp
+SOCEDEX=0 P127=0 OLDANCHOR=1 OLDTAB=1 KRES=0
+FORBID=op_kernel/sparse_flash_attention.cpp:0 op_host/sparse_flash_attention.cpp:0
+>>> 期望 SOCEDEX=0 P127=0 OLDANCHOR=1 OLDTAB=1 KRES=0 FORBID=0；host 回到 3a8f53050c8f15ae
+      "bytes": 4149,
+      "sha256": "f2b28a86e998c194f3e816bfb85f8769f89c5f0da694de41170e1f6c970baff6"
+      "bytes": 460,
+      "sha256": "1046b349538f3007c3fda6a06e2fae4a6b81c9fda47646dabfcab09b32c89eff"
+      "bytes": 36758,
+      "sha256": "3a8f53050c8f15ae823846eace857d0db1b5abb98a5fb330d332839b235fb453"
+      "bytes": 68923,
+      "sha256": "f815bf1eaba0f8bc3224729d488d3958dc0b11e18470ebfe765d44e427d1e52f"
+提交代码到题目 6a7c22d6a52e0f540a8a098d...
+提交成功! Submission ID: 6ab4d8f6694b590c3c02cf6b
+
+等待结果...
+
+============================================================
+状态: Pass
+============================================================
+
+测试用例结果:
+  Case 1: Pass
+           precision_ratio: 1, time（平台原值）: 8.46
+  Case 2: Pass
+           precision_ratio: 1, time（平台原值）: 8.38
+  Case 3: Pass
+           precision_ratio: 1, time（平台原值）: 12.82
+  Case 4: Pass
+           precision_ratio: 1, time（平台原值）: 12.38
+  Case 5: Pass
+           precision_ratio: 1, time（平台原值）: 10.98
+  Case 6: Pass
+           precision_ratio: 1, time（平台原值）: 14.04
+通过: 6/6
