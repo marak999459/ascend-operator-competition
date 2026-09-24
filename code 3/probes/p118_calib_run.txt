@@ -1,0 +1,96 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+>>> pristine sha 本地=f815bf1eaba0f8bc 远端应同
+f815bf1eaba0f8bc
+########## ARM 0 (N=0 MODE=na) ##########
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P118=0
+g64c1       golden 写入 golden_p118/g64c1: OK 
+g64c4       golden 写入 golden_p118/g64c4: OK 
+g64c16      golden 写入 golden_p118/g64c16: OK 
+v64c8       golden 写入 golden_p118/v64c8: OK 
+r64c65      golden 写入 golden_p118/r64c65: OK 
+p6          golden 写入 golden_p118/p6: OK 
+big1        golden 写入 golden_p118/big1: OK 
+w3          golden 写入 golden_p118/w3: OK 
+  g64c1        0.3130 ms
+  g64c4        1.2479 ms
+  g64c16       4.8107 ms
+  v64c8        2.2952 ms
+  r64c65      18.8289 ms
+  p6           0.7493 ms
+  big1         0.6698 ms
+  w3           5.4432 ms
+########## ARM 1warm (N=1 MODE=warm) ##########
+N=1 MODE=warm  MARK=2/2  GROUPS/chunk=1  CALLS/chunk=3
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P118=2
+g64c1       逐位一致 golden_p118/g64c1.out 逐位一致 golden_p118/g64c1.max 逐位一致 golden_p118/g64c1.sum 
+g64c4       逐位一致 golden_p118/g64c4.out 逐位一致 golden_p118/g64c4.max 逐位一致 golden_p118/g64c4.sum 
+g64c16      逐位一致 golden_p118/g64c16.out 逐位一致 golden_p118/g64c16.max 逐位一致 golden_p118/g64c16.sum 
+v64c8       逐位一致 golden_p118/v64c8.out 逐位一致 golden_p118/v64c8.max 逐位一致 golden_p118/v64c8.sum 
+r64c65      逐位一致 golden_p118/r64c65.out 逐位一致 golden_p118/r64c65.max 逐位一致 golden_p118/r64c65.sum 
+p6          逐位一致 golden_p118/p6.out 逐位一致 golden_p118/p6.max 逐位一致 golden_p118/p6.sum 
+big1        逐位一致 golden_p118/big1.out 逐位一致 golden_p118/big1.max 逐位一致 golden_p118/big1.sum 
+w3          逐位一致 golden_p118/w3.out 逐位一致 golden_p118/w3.max 逐位一致 golden_p118/w3.sum 
+  g64c1        0.4009 ms
+  g64c4        1.6158 ms
+  g64c16       6.4423 ms
+  v64c8        4.1436 ms
+  r64c65      26.4022 ms
+  p6           0.8989 ms
+  big1         0.8089 ms
+  w3           6.3628 ms
+########## ARM 1cold (N=1 MODE=cold) ##########
+N=1 MODE=cold  MARK=2/2  GROUPS/chunk=1  CALLS/chunk=3
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P118=2
+g64c1       逐位一致 golden_p118/g64c1.out 逐位一致 golden_p118/g64c1.max 逐位一致 golden_p118/g64c1.sum 
+g64c4       逐位一致 golden_p118/g64c4.out 逐位一致 golden_p118/g64c4.max 逐位一致 golden_p118/g64c4.sum 
+g64c16      逐位一致 golden_p118/g64c16.out 逐位一致 golden_p118/g64c16.max 逐位一致 golden_p118/g64c16.sum 
+v64c8       逐位一致 golden_p118/v64c8.out 逐位一致 golden_p118/v64c8.max 逐位一致 golden_p118/v64c8.sum 
+r64c65      逐位一致 golden_p118/r64c65.out 逐位一致 golden_p118/r64c65.max 逐位一致 golden_p118/r64c65.sum 
+p6          逐位一致 golden_p118/p6.out 逐位一致 golden_p118/p6.max 逐位一致 golden_p118/p6.sum 
+big1        逐位一致 golden_p118/big1.out 逐位一致 golden_p118/big1.max 逐位一致 golden_p118/big1.sum 
+w3          逐位一致 golden_p118/w3.out 逐位一致 golden_p118/w3.max 逐位一致 golden_p118/w3.sum 
+  g64c1        0.3823 ms
+  g64c4        1.5240 ms
+  g64c16       5.6877 ms
+  v64c8        3.6058 ms
+  r64c65      22.7278 ms
+  p6           1.1749 ms
+  big1         1.1382 ms
+  w3           6.4088 ms
+########## ARM 2cold (N=2 MODE=cold) ##########
+N=2 MODE=cold  MARK=2/2  GROUPS/chunk=2  CALLS/chunk=6
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+HITS_P118=2
+g64c1       逐位一致 golden_p118/g64c1.out 逐位一致 golden_p118/g64c1.max 逐位一致 golden_p118/g64c1.sum 
+g64c4       逐位一致 golden_p118/g64c4.out 逐位一致 golden_p118/g64c4.max 逐位一致 golden_p118/g64c4.sum 
+g64c16      逐位一致 golden_p118/g64c16.out 逐位一致 golden_p118/g64c16.max 逐位一致 golden_p118/g64c16.sum 
+v64c8       逐位一致 golden_p118/v64c8.out 逐位一致 golden_p118/v64c8.max 逐位一致 golden_p118/v64c8.sum 
+r64c65      逐位一致 golden_p118/r64c65.out 逐位一致 golden_p118/r64c65.max 逐位一致 golden_p118/r64c65.sum 
+p6          逐位一致 golden_p118/p6.out 逐位一致 golden_p118/p6.max 逐位一致 golden_p118/p6.sum 
+big1        逐位一致 golden_p118/big1.out 逐位一致 golden_p118/big1.max 逐位一致 golden_p118/big1.sum 
+w3          逐位一致 golden_p118/w3.out 逐位一致 golden_p118/w3.max 逐位一致 golden_p118/w3.sum 
+  g64c1        0.4341 ms
+  g64c4        1.8408 ms
+  g64c16       6.9039 ms
+  v64c8        4.1631 ms
+  r64c65      28.2055 ms
+  p6           1.1684 ms
+  big1         1.1742 ms
+  w3           6.9783 ms
+P118_CALIB_DONE
+=== 还原：只做 sync（远端源码 = 本地提交字节，无 sed、无 build） ===
+f815bf1eaba0f8bc
+SEDHITS=0

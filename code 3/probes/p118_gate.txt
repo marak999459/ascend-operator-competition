@@ -1,0 +1,62 @@
+########## 0) pristine 校验 (MODE=cold) ##########
+f815bf1eaba0f8bcqsn/ops_comp/ascend-operator-competition/code 3/probes/backup/p114_pre_probe/sparse_flash_attention.cpp
+f815bf1eaba0f8bcqsn/ops_comp/ascend-operator-competition/code 3/code/op_kernel/sparse_flash_attention.cpp
+########## 1) 本地铺 N=1 MODE=cold ##########
+N=1 MODE=cold  MARK=2/2  GROUPS/chunk=1  CALLS/chunk=3
+本地 MARK=2 目的条=2 栅栏=1 行差=20
+########## 2) sync + sed + build ##########
+4ad6b976c24c7cd9061379f6ab88c583  code/op_kernel/sparse_flash_attention_tiling.h
+02dd48f90480ac6d8774457e6f649b9b  code/op_kernel/tiling_key_sparse_flash_attention.h
+1fed830962009a07 op_kernel/sparse_flash_attention.cpp
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+########## 3) 远端命中数门 ##########
+MARK=2 DSTK=2 BAR=1 MODE=cold OLD=0 PRINTF=0
+########## 4) p32_gate 数值闸门 ##########
+-rwxrwxr-x 1 developer developer 35048 Sep 24 09:12 test_sfa_dev
+########## GATE1 fp16 ##########
+fp16   r1_min     out : dtype=fp16 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r1_min.out 逐位一致 golden/r1_min.max 逐位一致 golden/r1_min.sum PASS 
+fp16   r2_chunk   out : dtype=fp16 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.out 逐位一致 golden/r2_chunk.max 逐位一致 golden/r2_chunk.sum PASS 
+fp16   r3_mode3   out : dtype=fp16 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r3_mode3.out 逐位一致 golden/r3_mode3.max 逐位一致 golden/r3_mode3.sum PASS 
+fp16   r4_shortkv out : dtype=fp16 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r4_shortkv.out 逐位一致 golden/r4_shortkv.max 逐位一致 golden/r4_shortkv.sum PASS 
+fp16   r5_blocks  out : dtype=fp16 超差 0/1024 超差 0/2 超差 0/2 逐位一致 golden/r5_blocks.out 逐位一致 golden/r5_blocks.max 逐位一致 golden/r5_blocks.sum PASS 
+fp16   r6_multiB  out : dtype=fp16 超差 0/4096 超差 0/8 超差 0/8 逐位一致 golden/r6_multiB.out 逐位一致 golden/r6_multiB.max 逐位一致 golden/r6_multiB.sum PASS 
+fp16   r7_norope  out : dtype=fp16 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r7_norope.out 逐位一致 golden/r7_norope.max 逐位一致 golden/r7_norope.sum PASS 
+fp16   r8_heads   out : dtype=fp16 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/r8_heads.out 逐位一致 golden/r8_heads.max 逐位一致 golden/r8_heads.sum PASS 
+fp16   p1         out : dtype=fp16 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p1.out 逐位一致 golden/p1.max 逐位一致 golden/p1.sum PASS 
+fp16   p2         out : dtype=fp16 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p2.out 逐位一致 golden/p2.max 逐位一致 golden/p2.sum PASS 
+fp16   p4         out : dtype=fp16 超差 0/32768 超差 0/64 超差 0/64 逐位一致 golden/p4.out 逐位一致 golden/p4.max 逐位一致 golden/p4.sum PASS 
+fp16   p6         out : dtype=fp16 超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.out 逐位一致 golden/p6.max 逐位一致 golden/p6.sum PASS 
+fp16   big1       out : dtype=fp16 超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.out 逐位一致 golden/big1.max 逐位一致 golden/big1.sum PASS 
+########## GATE1 fp32 ##########
+fp32   r1_min     out : dtype=fp32 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r1_min.f32.out 逐位一致 golden/r1_min.f32.max 逐位一致 golden/r1_min.f32.sum PASS 
+fp32   r2_chunk   out : dtype=fp32 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.f32.out 逐位一致 golden/r2_chunk.f32.max 逐位一致 golden/r2_chunk.f32.sum PASS 
+fp32   r3_mode3   out : dtype=fp32 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r3_mode3.f32.out 逐位一致 golden/r3_mode3.f32.max 逐位一致 golden/r3_mode3.f32.sum PASS 
+fp32   r4_shortkv out : dtype=fp32 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r4_shortkv.f32.out 逐位一致 golden/r4_shortkv.f32.max 逐位一致 golden/r4_shortkv.f32.sum PASS 
+fp32   r5_blocks  out : dtype=fp32 超差 0/1024 超差 0/2 超差 0/2 逐位一致 golden/r5_blocks.f32.out 逐位一致 golden/r5_blocks.f32.max 逐位一致 golden/r5_blocks.f32.sum PASS 
+fp32   r6_multiB  out : dtype=fp32 超差 0/4096 超差 0/8 超差 0/8 逐位一致 golden/r6_multiB.f32.out 逐位一致 golden/r6_multiB.f32.max 逐位一致 golden/r6_multiB.f32.sum PASS 
+fp32   r7_norope  out : dtype=fp32 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r7_norope.f32.out 逐位一致 golden/r7_norope.f32.max 逐位一致 golden/r7_norope.f32.sum PASS 
+fp32   r8_heads   out : dtype=fp32 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/r8_heads.f32.out 逐位一致 golden/r8_heads.f32.max 逐位一致 golden/r8_heads.f32.sum PASS 
+fp32   p1         out : dtype=fp32 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p1.f32.out 逐位一致 golden/p1.f32.max 逐位一致 golden/p1.f32.sum PASS 
+fp32   p2         out : dtype=fp32 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p2.f32.out 逐位一致 golden/p2.f32.max 逐位一致 golden/p2.f32.sum PASS 
+fp32   p4         out : dtype=fp32 超差 0/32768 超差 0/64 超差 0/64 逐位一致 golden/p4.f32.out 逐位一致 golden/p4.f32.max 逐位一致 golden/p4.f32.sum PASS 
+fp32   p6         out : dtype=fp32 超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.f32.out 逐位一致 golden/p6.f32.max 逐位一致 golden/p6.f32.sum PASS 
+fp32   big1       out : dtype=fp32 超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.f32.out 逐位一致 golden/big1.f32.max 逐位一致 golden/big1.f32.sum PASS 
+########## GATE2 expect(双dtype) ##########
+q1h        fp16=超差 0/8192 fp32=超差 0/8192
+q2h        fp16=超差 0/8192 fp32=超差 0/8192
+q3h        fp16=超差 0/16384 fp32=超差 0/16384
+p_n64      fp16=超差 0/524288 fp32=超差 0/524288
+p_n512     fp16=超差 0/524288 fp32=超差 0/524288
+p_n1024    fp16=超差 0/524288 fp32=超差 0/524288
+e1empty    fp16=超差 0/8192 fp32=超差 0/8192
+e2one      fp16=超差 0/8192 fp32=超差 0/8192
+e3two      fp16=超差 0/8192 fp32=超差 0/8192
+e4odd      fp16=超差 0/8192 fp32=超差 0/8192
+e5s2one    fp16=超差 0/8192 fp32=超差 0/8192
+e6many     fp16=超差 0/65536 fp32=超差 0/65536
+e7padq     fp16=超差 0/16384 fp32=超差 0/16384
+e8padkv    fp16=超差 0/8192 fp32=超差 0/8192
+P32_GATE_DONE
+P118_PROBE_DONE MODE=cold
