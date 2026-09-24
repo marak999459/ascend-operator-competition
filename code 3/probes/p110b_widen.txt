@@ -1,0 +1,45 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+f815bf1eaba0f8bc3224729d488d3958dc0b11e18470ebfe765d44e427d1e52f  ../kernel_pristine.cpp
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+########## ARM wid2 ##########
+MODE=wid2  HITS=2
+HITS_MARK=2 EXPECT=2
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  inert  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  inert  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04
+  w3              5.8360 ms
+  w4             10.2189 ms
+  big1            0.7143 ms
+  w2              1.4793 ms
+  p6              0.7983 ms
+########## ARM hoist ##########
+MODE=hoist  HITS=1
+HITS_MARK=1 EXPECT=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  inert  out : dtype=fp16 超差 37496/65536  maxAbs=5.627e-02 (该处|exp|=1.556e-02)
+  inert  LSE : max 超差 95/128 maxAbs=9.035e-01 | sum 超差 94/128 maxAbs=7.355e+02
+  w3              5.1431 ms
+  w4              9.0081 ms
+  big1            0.6384 ms
+  w2              1.3055 ms
+  p6              0.7102 ms
+########## ARM rep1 ##########
+MODE=rep1  HITS=0
+HITS_MARK=0 EXPECT=0
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  inert  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  inert  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04
+  w3              5.4408 ms
+  w4              9.5324 ms
+  big1            0.6700 ms
+  w2              1.3807 ms
+  p6              0.7486 ms
+=== 还原干净构建 ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04

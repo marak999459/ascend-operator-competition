@@ -1,0 +1,98 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+PATCHED code/op_host/sparse_flash_attention.cpp
+3
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+>>> 探活第 1 次 OK
+########## p1 (4/4) ##########
+p1        AUTO        nb=2 nblk=48 ks=5 sbs=1 rows=4 count=2048
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.1188 ms 最小 0.1187 最大 0.1191 [单发/批量 = 1.19]| out : dtype=fp16 超差 0/8192 maxAbs=6.104e-05 (该处|exp|=6.464e-02)| LSE : max 超差 0/16 maxAbs=2.384e-07 | sum 超差 0/16 maxAbs=1.831e-04|
+p1        nb=1  ks=1   nblk=48  批量 0.2917 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=1  ks=2   nblk=48  批量 0.1602 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=2  ks=1   nblk=48  批量 0.4424 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=2  ks=2   nblk=48  批量 0.2332 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=2  ks=4   nblk=48  批量 0.1350 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.221e-04
+p1        nb=2  ks=5   nblk=48  批量 0.1188 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=4  ks=1   nblk=48  批量 0.7448 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=4  ks=2   nblk=48  批量 0.3840 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=4  ks=4   nblk=48  批量 0.2064 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.221e-04
+p1        nb=4  ks=5   nblk=48  批量 0.1732 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=4  ks=8   nblk=48  批量 0.1294 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.831e-04
+p1        nb=4  ks=10  nblk=48  批量 0.1180 ms  超差 out=0/8192 | 超差 0/16 maxAbs=2.384e-07 | sum= 0/16 maxAbs=1.221e-04
+########## p2 (8/2) ##########
+p2        AUTO        nb=2 nblk=48 ks=5 sbs=1 rows=8 count=2048
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.1164 ms 最小 0.1162 最大 0.1166 [单发/批量 = 1.18]| out : dtype=fp16 超差 0/8192 maxAbs=3.052e-05 (该处|exp|=3.854e-02)| LSE : max 超差 0/16 maxAbs=1.192e-07 | sum 超差 0/16 maxAbs=1.221e-04|
+p2        nb=1  ks=1   nblk=48  批量 0.2912 ms  超差 out=0/8192 | 超差 0/16 maxAbs=1.192e-07 | sum= 0/16 maxAbs=1.221e-04
+p2        nb=1  ks=2   nblk=48  批量 0.1594 ms  超差 out=0/8192 | 超差 0/16 maxAbs=1.192e-07 | sum= 0/16 maxAbs=1.221e-04
+p2        nb=2  ks=1   nblk=48  批量 0.4422 ms  超差 out=0/8192 | 超差 0/16 maxAbs=1.192e-07 | sum= 0/16 maxAbs=1.221e-04
+p2        nb=2  ks=2   nblk=48  批量 0.2332 ms  超差 out=0/8192 | 超差 0/16 maxAbs=1.192e-07 | sum= 0/16 maxAbs=1.221e-04
+p2        nb=2  ks=4   nblk=48  批量 0.1331 ms  超差 out=0/8192 | 超差 0/16 maxAbs=1.192e-07 | sum= 0/16 maxAbs=1.221e-04
+p2        nb=2  ks=5   nblk=48  批量 0.1157 ms  超差 out=0/8192 | 超差 0/16 maxAbs=1.192e-07 | sum= 0/16 maxAbs=1.221e-04
+########## pm41 (4/4) ##########
+pm41      AUTO        nb=2 nblk=48 ks=5 sbs=1 rows=4 count=4096
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.2184 ms 最小 0.2182 最大 0.2185 [单发/批量 = 1.11]| out : dtype=fp16 超差 6858/8192 maxAbs=3.366e-02 (该处|exp|=0.000e+00)| LSE : max 超差 16/16 maxAbs=1.514e+00 | sum 超差 16/16 maxAbs=1.418e+03|
+pm41      nb=1  ks=1   nblk=48  批量 0.5757 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=1  ks=2   nblk=48  批量 0.3083 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=2  ks=1   nblk=48  批量 0.8776 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=2  ks=2   nblk=48  批量 0.4560 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=2  ks=4   nblk=48  批量 0.2552 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=2  ks=5   nblk=48  批量 0.2193 ms  超差 out=6858/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=4  ks=1   nblk=48  批量 1.4831 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=4  ks=2   nblk=48  批量 0.7573 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=4  ks=4   nblk=48  批量 0.4001 ms  超差 out=6857/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=4  ks=5   nblk=48  批量 0.3316 ms  超差 out=6858/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=4  ks=8   nblk=48  批量 0.2344 ms  超差 out=6859/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+pm41      nb=4  ks=10  nblk=48  批量 0.2041 ms  超差 out=6858/8192 | 超差 16/16 maxAbs=1.514e+00 | sum= 16/16 maxAbs=1.418e+03
+########## pm4full (4/4) ##########
+pm4full   AUTO        nb=2 nblk=48 ks=5 sbs=1 rows=4 count=4096
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.2187 ms 最小 0.2186 最大 0.2187 [单发/批量 = 1.09]| out : dtype=fp16 超差 6832/8192 maxAbs=3.253e-02 (该处|exp|=0.000e+00)| LSE : max 超差 16/16 maxAbs=1.460e+00 | sum 超差 16/16 maxAbs=1.574e+03|
+pm4full   nb=1  ks=1   nblk=48  批量 0.5815 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=1  ks=2   nblk=48  批量 0.3098 ms  超差 out=6831/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=2  ks=1   nblk=48  批量 0.8824 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=2  ks=2   nblk=48  批量 0.4571 ms  超差 out=6831/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=2  ks=4   nblk=48  批量 0.2551 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=2  ks=5   nblk=48  批量 0.2180 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=4  ks=1   nblk=48  批量 1.4873 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=4  ks=2   nblk=48  批量 0.7577 ms  超差 out=6831/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=4  ks=4   nblk=48  批量 0.4001 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=4  ks=5   nblk=48  批量 0.3318 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=4  ks=8   nblk=48  批量 0.2345 ms  超差 out=6832/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+pm4full   nb=4  ks=10  nblk=48  批量 0.2040 ms  超差 out=6833/8192 | 超差 16/16 maxAbs=1.460e+00 | sum= 16/16 maxAbs=1.574e+03
+########## pm81 (8/4) ##########
+pm81      AUTO        nb=4 nblk=48 ks=5 sbs=1 rows=8 count=4096
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.3367 ms 最小 0.3365 最大 0.3368 [单发/批量 = 1.07]| out : dtype=fp16 超差 13691/16384 maxAbs=3.455e-02 (该处|exp|=0.000e+00)| LSE : max 超差 32/32 maxAbs=1.526e+00 | sum 超差 32/32 maxAbs=1.441e+03|
+pm81      nb=1  ks=1   nblk=48  批量 0.5798 ms  超差 out=13692/16384 | 超差 32/32 maxAbs=1.526e+00 | sum= 32/32 maxAbs=1.441e+03
+pm81      nb=2  ks=1   nblk=48  批量 0.8795 ms  超差 out=13692/16384 | 超差 32/32 maxAbs=1.526e+00 | sum= 32/32 maxAbs=1.441e+03
+pm81      nb=2  ks=2   nblk=48  批量 0.4595 ms  超差 out=13693/16384 | 超差 32/32 maxAbs=1.526e+00 | sum= 32/32 maxAbs=1.441e+03
+pm81      nb=4  ks=1   nblk=48  批量 1.4838 ms  超差 out=13692/16384 | 超差 32/32 maxAbs=1.526e+00 | sum= 32/32 maxAbs=1.441e+03
+pm81      nb=4  ks=2   nblk=48  批量 0.7590 ms  超差 out=13693/16384 | 超差 32/32 maxAbs=1.526e+00 | sum= 32/32 maxAbs=1.441e+03
+pm81      nb=4  ks=4   nblk=48  批量 0.4039 ms  超差 out=13692/16384 | 超差 32/32 maxAbs=1.526e+00 | sum= 32/32 maxAbs=1.441e+03
+pm81      nb=4  ks=5   nblk=48  批量 0.3375 ms  超差 out=13691/16384 | 超差 32/32 maxAbs=1.526e+00 | sum= 32/32 maxAbs=1.441e+03
+########## p4 (16/4) ##########
+p4        AUTO        nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.3882 ms 最小 0.3878 最大 0.3891 [单发/批量 = 1.06]| out : dtype=fp16 超差 0/32768 maxAbs=6.104e-05 (该处|exp|=6.525e-02)| LSE : max 超差 0/64 maxAbs=2.384e-07 | sum 超差 0/64 maxAbs=1.221e-04|
+p4        nb=1  ks=1   nblk=48  批量 0.5793 ms  超差 out=0/32768 | 超差 0/64 maxAbs=2.384e-07 | sum= 0/64 maxAbs=1.831e-04
+p4        nb=2  ks=1   nblk=48  批量 0.4465 ms  超差 out=0/32768 | 超差 0/64 maxAbs=2.384e-07 | sum= 0/64 maxAbs=1.831e-04
+p4        nb=4  ks=1   nblk=48  批量 0.7459 ms  超差 out=0/32768 | 超差 0/64 maxAbs=2.384e-07 | sum= 0/64 maxAbs=1.831e-04
+p4        nb=4  ks=2   nblk=48  批量 0.3879 ms  超差 out=0/32768 | 超差 0/64 maxAbs=2.384e-07 | sum= 0/64 maxAbs=1.221e-04
+########## p6 (32/4) ##########
+p6        AUTO        nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.7488 ms 最小 0.7488 最大 0.7489 [单发/批量 = 1.04]| out : dtype=fp16 超差 0/65536 maxAbs=3.052e-05 (该处|exp|=4.034e-02)| LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04|
+p6        nb=1  ks=1   nblk=48  批量 1.1473 ms  超差 out=0/65536 | 超差 0/128 maxAbs=2.384e-07 | sum= 0/128 maxAbs=1.831e-04
+p6        nb=2  ks=1   nblk=48  批量 0.8823 ms  超差 out=0/65536 | 超差 0/128 maxAbs=2.384e-07 | sum= 0/128 maxAbs=1.831e-04
+p6        nb=4  ks=1   nblk=48  批量 0.7492 ms  超差 out=0/65536 | 超差 0/128 maxAbs=2.384e-07 | sum= 0/128 maxAbs=1.831e-04
+########## pm161 (16/4) ##########
+pm161     AUTO        nb=4 nblk=48 ks=2 sbs=1 rows=16 count=4096
+                       批量口径(连发20只sync一次, 摊薄 launch): 平均 0.7617 ms 最小 0.7617 最大 0.7618 [单发/批量 = 1.03]| out : dtype=fp16 超差 27317/32768 maxAbs=3.513e-02 (该处|exp|=0.000e+00)| LSE : max 超差 64/64 maxAbs=1.826e+00 | sum 超差 64/64 maxAbs=1.432e+03|
+pm161     nb=1  ks=1   nblk=48  批量 1.1496 ms  超差 out=27317/32768 | 超差 64/64 maxAbs=1.826e+00 | sum= 64/64 maxAbs=1.432e+03
+pm161     nb=2  ks=1   nblk=48  批量 0.8842 ms  超差 out=27317/32768 | 超差 64/64 maxAbs=1.826e+00 | sum= 64/64 maxAbs=1.432e+03
+pm161     nb=4  ks=1   nblk=48  批量 1.4853 ms  超差 out=27317/32768 | 超差 64/64 maxAbs=1.826e+00 | sum= 64/64 maxAbs=1.432e+03
+pm161     nb=4  ks=2   nblk=48  批量 0.7623 ms  超差 out=27317/32768 | 超差 64/64 maxAbs=1.826e+00 | sum= 64/64 maxAbs=1.432e+03
+=== 还原干净构建 ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.7491 ms  最小 0.7489  最大 0.7492   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04

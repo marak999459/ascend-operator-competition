@@ -1,0 +1,51 @@
+=== 1) 推提交源 code 3/code -> ~/sfa_real/code ===
+=== 2) 推 harness / 参考实现 ===
+=== 3) md5 复验（本地提交源 vs 远端） ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+HITS_SOC=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+PATCHED code/op_host/sparse_flash_attention.cpp
+HITS_FORCE_NB=1 HITS_FORCE_KS=1 HITS_PICK=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+>>> 探活第 1 次 OK
+----- w3 (rows:qN:nb = 128:4:1,2,4) -----
+w3             force_nb=auto 批量  5.4435 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3             force_nb=1    批量  5.9739 ms  pick[nb=1 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3             force_nb=2    批量  5.3228 ms  pick[nb=2 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3             force_nb=4    批量  5.4443 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3             force_nb=auto 批量  5.4440 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+----- w4 (rows:qN:nb = 128:8:1,2,4,8) -----
+w4             force_nb=auto 批量  9.5277 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w4             force_nb=1    批量 11.9275 ms  pick[nb=1 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w4             force_nb=2    批量  9.9019 ms  pick[nb=2 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w4             force_nb=4    批量  9.5273 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w4             force_nb=8    批量 10.5450 ms  pick[nb=8 nblk=40 ks=1 sbs=2 rows=128 count=2048]
+w4             force_nb=auto 批量  9.5301 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+----- big1 (rows:qN:nb = 128:8:1,2,4,8) -----
+big1           force_nb=auto 批量  0.6700 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1           force_nb=1    批量  0.9576 ms  pick[nb=1 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1           force_nb=2    批量  0.7352 ms  pick[nb=2 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1           force_nb=4    批量  0.6702 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1           force_nb=8    批量  0.7131 ms  pick[nb=8 nblk=40 ks=1 sbs=1 rows=128 count=2048]
+big1           force_nb=auto 批量  0.6703 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+----- w2 (rows:qN:nb = 32:4:1,2,4) -----
+w2             force_nb=auto 批量  1.3804 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+w2             force_nb=1    批量  1.8546 ms  pick[nb=1 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+w2             force_nb=2    批量  1.5399 ms  pick[nb=2 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+w2             force_nb=4    批量  1.3803 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+w2             force_nb=auto 批量  1.3806 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+----- p32s1c16384 (rows:qN:nb = 32:4:1,2,4) -----
+p32s1c16384    force_nb=auto 批量  5.9106 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+p32s1c16384    force_nb=1    批量  9.0670 ms  pick[nb=1 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+p32s1c16384    force_nb=2    批量  6.9684 ms  pick[nb=2 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+p32s1c16384    force_nb=4    批量  5.9112 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+p32s1c16384    force_nb=auto 批量  5.9099 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+=== 还原干净构建 ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.7487 ms  最小 0.7487  最大 0.7488   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04

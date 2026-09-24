@@ -1,0 +1,23 @@
+提交代码到题目 6a7c22d6a52e0f540a8a098d...
+提交成功! Submission ID: 6ab46765694b590c3cc3dd0b
+
+等待结果...
+
+============================================================
+状态: Pass
+============================================================
+
+测试用例结果:
+  Case 1: Pass
+           precision_ratio: 1, time（平台原值）: 9.64
+  Case 2: Pass
+           precision_ratio: 1, time（平台原值）: 9.18
+  Case 3: Pass
+           precision_ratio: 1, time（平台原值）: 13.68
+  Case 4: Pass
+           precision_ratio: 1, time（平台原值）: 14.54
+  Case 5: Pass
+           precision_ratio: 1, time（平台原值）: 12.32
+  Case 6: Pass
+           precision_ratio: 1, time（平台原值）: 14.92
+通过: 6/6

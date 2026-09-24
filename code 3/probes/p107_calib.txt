@@ -1,0 +1,153 @@
+=== 1) 推提交源 code 3/code -> ~/sfa_real/code ===
+=== 2) 推 harness / 参考实现 ===
+=== 3) md5 复验（本地提交源 vs 远端） ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+HITS_SOC=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+PATCHED code/op_host/sparse_flash_attention.cpp
+PATCHED code/op_host/sparse_flash_attention.cpp
+HITS_SFA_PICK=1 HITS_PROBE=1 HITS_FORCE=2
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+>>> 探活第 1 次 OK
+########## P107 标定：扰动 off vs (rows<=40 -> n_blk=16) vs (rows<=20 -> n_blk=16) ##########
+p1             r=4    n=4  off  批量  0.1188 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=2048]
+p1             r=4    n=4  on/40/16 批量  0.1395 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=2048]
+p1             r=4    n=4  on/20/16 批量  0.1398 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=2048]
+---
+p2             r=8    n=2  off  批量  0.1161 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=8 count=2048]
+p2             r=8    n=2  on/40/16 批量  0.1388 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=8 count=2048]
+p2             r=8    n=2  on/20/16 批量  0.1386 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=8 count=2048]
+---
+p4             r=16   n=4  off  批量  0.3883 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048]
+p4             r=16   n=4  on/40/16 批量  0.4930 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048]
+p4             r=16   n=4  on/20/16 批量  0.4928 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=2048]
+---
+p6             r=32   n=4  off  批量  0.7493 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+p6             r=32   n=4  on/40/16 批量  0.9617 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+p6             r=32   n=4  on/20/16 批量  0.7489 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=2048]
+---
+pm41           r=4    n=4  off  批量  0.2200 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=4096]
+pm41           r=4    n=4  on/40/16 批量  0.2632 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=4096]
+pm41           r=4    n=4  on/20/16 批量  0.2633 ms  pick[nb=2 nblk=48 ks=5 sbs=1 rows=4 count=4096]
+---
+pm81           r=8    n=4  off  批量  0.3375 ms  pick[nb=4 nblk=48 ks=5 sbs=1 rows=8 count=4096]
+pm81           r=8    n=4  on/40/16 批量  0.4208 ms  pick[nb=4 nblk=48 ks=5 sbs=1 rows=8 count=4096]
+pm81           r=8    n=4  on/20/16 批量  0.4208 ms  pick[nb=4 nblk=48 ks=5 sbs=1 rows=8 count=4096]
+---
+pm161          r=16   n=4  off  批量  0.7624 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=4096]
+pm161          r=16   n=4  on/40/16 批量  0.9749 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=4096]
+pm161          r=16   n=4  on/20/16 批量  0.9754 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=4096]
+---
+p1s1c16384     r=4    n=1  off  批量             pick[]
+p1s1c16384     r=4    n=1  on/40/16 批量             pick[]
+p1s1c16384     r=4    n=1  on/20/16 批量             pick[]
+---
+p4s1c16384     r=4    n=4  off  批量  0.7092 ms  pick[nb=4 nblk=48 ks=10 sbs=1 rows=4 count=16384]
+p4s1c16384     r=4    n=4  on/40/16 批量  0.8775 ms  pick[nb=4 nblk=48 ks=10 sbs=1 rows=4 count=16384]
+p4s1c16384     r=4    n=4  on/20/16 批量  0.8776 ms  pick[nb=4 nblk=48 ks=10 sbs=1 rows=4 count=16384]
+---
+p16s1c16384    r=16   n=4  off  批量  3.0055 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=16384]
+p16s1c16384    r=16   n=4  on/40/16 批量  3.8570 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=16384]
+p16s1c16384    r=16   n=4  on/20/16 批量  3.8572 ms  pick[nb=4 nblk=48 ks=2 sbs=1 rows=16 count=16384]
+---
+p32s1c16384    r=32   n=4  off  批量  5.9106 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+p32s1c16384    r=32   n=4  on/40/16 批量  7.6171 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+p32s1c16384    r=32   n=4  on/20/16 批量  5.9103 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=32 count=16384]
+---
+p4s128c512     r=4    n=4  off  批量  2.1885 ms  pick[nb=4 nblk=48 ks=10 sbs=128 rows=4 count=512]
+p4s128c512     r=4    n=4  on/40/16 批量  3.0364 ms  pick[nb=4 nblk=48 ks=10 sbs=128 rows=4 count=512]
+p4s128c512     r=4    n=4  on/20/16 批量  3.0352 ms  pick[nb=4 nblk=48 ks=10 sbs=128 rows=4 count=512]
+---
+p16s128c128    r=16   n=4  off  批量  2.6451 ms  pick[nb=4 nblk=48 ks=2 sbs=128 rows=16 count=128]
+p16s128c128    r=16   n=4  on/40/16 批量  3.6338 ms  pick[nb=4 nblk=48 ks=2 sbs=128 rows=16 count=128]
+p16s128c128    r=16   n=4  on/20/16 批量  3.6327 ms  pick[nb=4 nblk=48 ks=2 sbs=128 rows=16 count=128]
+---
+p32s128c512    r=32   n=4  off  批量 21.2861 ms  pick[nb=4 nblk=48 ks=1 sbs=128 rows=32 count=512]
+p32s128c512    r=32   n=4  on/40/16 批量 29.6479 ms  pick[nb=4 nblk=48 ks=1 sbs=128 rows=32 count=512]
+p32s128c512    r=32   n=4  on/20/16 批量 21.2842 ms  pick[nb=4 nblk=48 ks=1 sbs=128 rows=32 count=512]
+---
+w1             r=4    n=4  off  批量  0.1858 ms  pick[nb=2 nblk=48 ks=5 sbs=2 rows=4 count=2048]
+w1             r=4    n=4  on/40/16 批量  0.2317 ms  pick[nb=2 nblk=48 ks=5 sbs=2 rows=4 count=2048]
+w1             r=4    n=4  on/20/16 批量  0.2307 ms  pick[nb=2 nblk=48 ks=5 sbs=2 rows=4 count=2048]
+---
+w2             r=32   n=4  off  批量  1.3811 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+w2             r=32   n=4  on/40/16 批量  1.8186 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+w2             r=32   n=4  on/20/16 批量  1.3807 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=32 count=2048]
+---
+big1           r=128  n=4  off  批量  0.6720 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1           r=128  n=4  on/40/16 批量  0.6717 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+big1           r=128  n=4  on/20/16 批量  0.6716 ms  pick[nb=4 nblk=48 ks=1 sbs=1 rows=128 count=2048]
+---
+w3             r=128  n=4  off  批量  5.4452 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3             r=128  n=4  on/40/16 批量  5.4431 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w3             r=128  n=4  on/20/16 批量  5.4433 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+---
+w4             r=128  n=8  off  批量  9.5352 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w4             r=128  n=8  on/40/16 批量  9.5376 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+w4             r=128  n=8  on/20/16 批量  9.5352 ms  pick[nb=4 nblk=48 ks=1 sbs=2 rows=128 count=2048]
+---
+########## 探针 ON(rows<=40) 下的正确性：只读有真 expect 的档 ##########
+r1_min     fp16  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r1_min.out 逐位一致 golden/r1_min.max 逐位一致 golden/r1_min.sum PASS 
+r1_min     fp32  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r1_min.f32.out 逐位一致 golden/r1_min.f32.max 逐位一致 golden/r1_min.f32.sum PASS 
+r2_chunk   fp16  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.out 逐位一致 golden/r2_chunk.max 逐位一致 golden/r2_chunk.sum PASS 
+r2_chunk   fp32  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.f32.out 逐位一致 golden/r2_chunk.f32.max 逐位一致 golden/r2_chunk.f32.sum PASS 
+r3_mode3   fp16  超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r3_mode3.out 逐位一致 golden/r3_mode3.max 逐位一致 golden/r3_mode3.sum PASS 
+r3_mode3   fp32  超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r3_mode3.f32.out 逐位一致 golden/r3_mode3.f32.max 逐位一致 golden/r3_mode3.f32.sum PASS 
+r4_shortkv fp16  超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r4_shortkv.out 逐位一致 golden/r4_shortkv.max 逐位一致 golden/r4_shortkv.sum PASS 
+r4_shortkv fp32  超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r4_shortkv.f32.out 逐位一致 golden/r4_shortkv.f32.max 逐位一致 golden/r4_shortkv.f32.sum PASS 
+r5_blocks  fp16  超差 0/1024 超差 0/2 超差 0/2 逐位一致 golden/r5_blocks.out 逐位一致 golden/r5_blocks.max 逐位一致 golden/r5_blocks.sum PASS 
+r5_blocks  fp32  超差 0/1024 超差 0/2 超差 0/2 逐位一致 golden/r5_blocks.f32.out 逐位一致 golden/r5_blocks.f32.max 逐位一致 golden/r5_blocks.f32.sum PASS 
+r6_multiB  fp16  超差 0/4096 超差 0/8 超差 0/8 逐位一致 golden/r6_multiB.out 逐位一致 golden/r6_multiB.max 逐位一致 golden/r6_multiB.sum PASS 
+r6_multiB  fp32  超差 0/4096 超差 0/8 超差 0/8 逐位一致 golden/r6_multiB.f32.out 逐位一致 golden/r6_multiB.f32.max 逐位一致 golden/r6_multiB.f32.sum PASS 
+r7_norope  fp16  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r7_norope.out 逐位一致 golden/r7_norope.max 逐位一致 golden/r7_norope.sum PASS 
+r7_norope  fp32  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r7_norope.f32.out 逐位一致 golden/r7_norope.f32.max 逐位一致 golden/r7_norope.f32.sum PASS 
+r8_heads   fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/r8_heads.out 逐位一致 golden/r8_heads.max 逐位一致 golden/r8_heads.sum PASS 
+r8_heads   fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/r8_heads.f32.out 逐位一致 golden/r8_heads.f32.max 逐位一致 golden/r8_heads.f32.sum PASS 
+q1h        fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/q1h.max FAIL 
+q1h        fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/q1h.f32.max FAIL 
+q2h        fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/q2h.max FAIL 
+q2h        fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/q2h.f32.max FAIL 
+q3h        fp16  超差 0/16384 超差 0/32 超差 0/32 逐位一致 golden/q3h.max FAIL 
+q3h        fp32  超差 0/16384 超差 0/32 超差 0/32 逐位一致 golden/q3h.f32.max FAIL 
+p_n64      fp16  超差 0/524288 超差 0/1024 超差 0/1024 FAIL 
+p_n64      fp32  超差 0/524288 超差 0/1024 超差 0/1024 FAIL 
+p_n512     fp16  超差 0/524288 超差 0/1024 超差 0/1024 FAIL 
+p_n512     fp32  超差 0/524288 超差 0/1024 超差 0/1024 FAIL 
+p_n1024    fp16  超差 0/524288 超差 0/1024 超差 0/1024 FAIL 
+p_n1024    fp32  超差 0/524288 超差 0/1024 超差 0/1024 FAIL 
+e1empty    fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e1empty.out 逐位一致 golden/e1empty.max 逐位一致 golden/e1empty.sum PASS 
+e1empty    fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e1empty.f32.out 逐位一致 golden/e1empty.f32.max 逐位一致 golden/e1empty.f32.sum PASS 
+e2one      fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e2one.out 逐位一致 golden/e2one.max 逐位一致 golden/e2one.sum PASS 
+e2one      fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e2one.f32.out 逐位一致 golden/e2one.f32.max 逐位一致 golden/e2one.f32.sum PASS 
+e3two      fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e3two.out 逐位一致 golden/e3two.max 逐位一致 golden/e3two.sum PASS 
+e3two      fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e3two.f32.out 逐位一致 golden/e3two.f32.max 逐位一致 golden/e3two.f32.sum PASS 
+e4odd      fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e4odd.max FAIL 
+e4odd      fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e4odd.f32.max FAIL 
+e5s2one    fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e5s2one.out 逐位一致 golden/e5s2one.max 逐位一致 golden/e5s2one.sum PASS 
+e5s2one    fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e5s2one.f32.out 逐位一致 golden/e5s2one.f32.max 逐位一致 golden/e5s2one.f32.sum PASS 
+e6many     fp16  超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/e6many.out 逐位一致 golden/e6many.max 逐位一致 golden/e6many.sum PASS 
+e6many     fp32  超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/e6many.f32.out 逐位一致 golden/e6many.f32.max 逐位一致 golden/e6many.f32.sum PASS 
+e7padq     fp16  超差 0/16384 超差 0/32 超差 0/32 逐位一致 golden/e7padq.max FAIL 
+e7padq     fp32  超差 0/16384 超差 0/32 超差 0/32 逐位一致 golden/e7padq.f32.max FAIL 
+e8padkv    fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e8padkv.max FAIL 
+e8padkv    fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/e8padkv.f32.max FAIL 
+p1         fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p1.max FAIL 
+p1         fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p1.f32.max FAIL 
+p2         fp16  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p2.max FAIL 
+p2         fp32  超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p2.f32.max FAIL 
+p4         fp16  超差 0/32768 超差 0/64 超差 0/64 逐位一致 golden/p4.max FAIL 
+p4         fp32  超差 0/32768 超差 0/64 超差 0/64 逐位一致 golden/p4.f32.max FAIL 
+p6         fp16  超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.max FAIL 
+p6         fp32  超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.f32.max FAIL 
+big1       fp16  超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.out 逐位一致 golden/big1.max 逐位一致 golden/big1.sum PASS 
+big1       fp32  超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.f32.out 逐位一致 golden/big1.f32.max 逐位一致 golden/big1.f32.sum PASS 
+P107_CALIB_DONE
+=== 还原干净构建 ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.7490 ms  最小 0.7490  最大 0.7491   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04

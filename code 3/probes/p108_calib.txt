@@ -1,0 +1,179 @@
+=== 1) 推提交源 code 3/code -> ~/sfa_real/code ===
+=== 2) 推 harness / 参考实现 ===
+=== 3) md5 复验（本地提交源 vs 远端） ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+HITS_SOC=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+PATCHED code/op_host/sparse_flash_attention.cpp
+PATCHED code/op_host/sparse_flash_attention.cpp
+HITS_SFA_PICK=1 HITS_PROBE=1 HITS_FORCE=2
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+>>> 探活第 1 次 OK
+########## P108 前置快检：n_blk=8 可行性 ##########
+SFA_EFF nblk=8 rows=32
+  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=4.272e-04
+==> FAIL
+SFA_EFF nblk=8 rows=128
+  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)
+  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=3.052e-05
+==> FAIL
+>>> n_blk=8 可跑 ⇒ 继续扫
+########## P108 幅度标定：off vs n_blk=8 vs n_blk=16（ROWS=100000 ⇒ 全部行都夹） ##########
+p1             r=4    n=4  off         批量  0.1187 ms  eff[nblk=48 rows=4]
+p1             r=4    n=4  on/100000/8 批量  0.1723 ms  eff[nblk=8 rows=4]
+p1             r=4    n=4  on/100000/16 批量  0.1405 ms  eff[nblk=16 rows=4]
+---
+p2             r=8    n=2  off         批量  0.1158 ms  eff[nblk=48 rows=8]
+p2             r=8    n=2  on/100000/8 批量  0.1724 ms  eff[nblk=8 rows=8]
+p2             r=8    n=2  on/100000/16 批量  0.1393 ms  eff[nblk=16 rows=8]
+---
+p4             r=16   n=4  off         批量  0.3878 ms  eff[nblk=48 rows=16]
+p4             r=16   n=4  on/100000/8 批量  0.6188 ms  eff[nblk=8 rows=16]
+p4             r=16   n=4  on/100000/16 批量  0.4934 ms  eff[nblk=16 rows=16]
+---
+p6             r=32   n=4  off         批量  0.7489 ms  eff[nblk=48 rows=32]
+p6             r=32   n=4  on/100000/8 批量  1.2117 ms  eff[nblk=8 rows=32]
+p6             r=32   n=4  on/100000/16 批量  0.9617 ms  eff[nblk=16 rows=32]
+---
+pm41           r=4    n=4  off         批量  0.2184 ms  eff[nblk=48 rows=4]
+  out : dtype=fp16 超差 6858/8192  maxAbs=3.366e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 16/16 maxAbs=1.514e+00 | sum 超差 16/16 maxAbs=1.418e+03
+pm41           r=4    n=4  on/100000/8 批量  0.3258 ms  eff[nblk=8 rows=4]
+  out : dtype=fp16 超差 6858/8192  maxAbs=3.366e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 16/16 maxAbs=1.514e+00 | sum 超差 16/16 maxAbs=1.418e+03
+pm41           r=4    n=4  on/100000/16 批量  0.2631 ms  eff[nblk=16 rows=4]
+  out : dtype=fp16 超差 6858/8192  maxAbs=3.366e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 16/16 maxAbs=1.514e+00 | sum 超差 16/16 maxAbs=1.418e+03
+---
+pm81           r=8    n=4  off         批量  0.3365 ms  eff[nblk=48 rows=8]
+  out : dtype=fp16 超差 13691/16384  maxAbs=3.455e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 32/32 maxAbs=1.526e+00 | sum 超差 32/32 maxAbs=1.441e+03
+pm81           r=8    n=4  on/100000/8 批量  0.5196 ms  eff[nblk=8 rows=8]
+  out : dtype=fp16 超差 13691/16384  maxAbs=3.455e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 32/32 maxAbs=1.526e+00 | sum 超差 32/32 maxAbs=1.441e+03
+pm81           r=8    n=4  on/100000/16 批量  0.4207 ms  eff[nblk=16 rows=8]
+  out : dtype=fp16 超差 13691/16384  maxAbs=3.455e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 32/32 maxAbs=1.526e+00 | sum 超差 32/32 maxAbs=1.441e+03
+---
+pm161          r=16   n=4  off         批量  0.7622 ms  eff[nblk=48 rows=16]
+  out : dtype=fp16 超差 27317/32768  maxAbs=3.513e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 64/64 maxAbs=1.826e+00 | sum 超差 64/64 maxAbs=1.432e+03
+pm161          r=16   n=4  on/100000/8 批量  1.2244 ms  eff[nblk=8 rows=16]
+  out : dtype=fp16 超差 27317/32768  maxAbs=3.513e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 64/64 maxAbs=1.826e+00 | sum 超差 64/64 maxAbs=1.432e+03
+pm161          r=16   n=4  on/100000/16 批量  0.9756 ms  eff[nblk=16 rows=16]
+  out : dtype=fp16 超差 27317/32768  maxAbs=3.513e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 64/64 maxAbs=1.826e+00 | sum 超差 64/64 maxAbs=1.432e+03
+---
+w1             r=4    n=4  off         批量  0.1828 ms  eff[nblk=48 rows=4]
+  out : dtype=fp16 超差 6874/8192  maxAbs=5.365e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 16/16 maxAbs=1.422e+00 | sum 超差 16/16 maxAbs=1.482e+03
+w1             r=4    n=4  on/100000/8 批量  0.2950 ms  eff[nblk=8 rows=4]
+  out : dtype=fp16 超差 6874/8192  maxAbs=5.365e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 16/16 maxAbs=1.422e+00 | sum 超差 16/16 maxAbs=1.482e+03
+w1             r=4    n=4  on/100000/16 批量  0.2305 ms  eff[nblk=16 rows=4]
+  out : dtype=fp16 超差 6874/8192  maxAbs=5.365e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 16/16 maxAbs=1.422e+00 | sum 超差 16/16 maxAbs=1.482e+03
+---
+w2             r=32   n=4  off         批量  1.3807 ms  eff[nblk=48 rows=32]
+  out : dtype=fp16 超差 54990/65536  maxAbs=6.155e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 128/128 maxAbs=1.638e+00 | sum 超差 128/128 maxAbs=1.526e+03
+w2             r=32   n=4  on/100000/8 批量  2.3522 ms  eff[nblk=8 rows=32]
+  out : dtype=fp16 超差 54990/65536  maxAbs=6.155e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 128/128 maxAbs=1.638e+00 | sum 超差 128/128 maxAbs=1.526e+03
+w2             r=32   n=4  on/100000/16 批量  1.8183 ms  eff[nblk=16 rows=32]
+  out : dtype=fp16 超差 54990/65536  maxAbs=6.155e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 128/128 maxAbs=1.638e+00 | sum 超差 128/128 maxAbs=1.526e+03
+---
+big1           r=128  n=4  off         批量  0.6710 ms  eff[nblk=48 rows=128]
+big1           r=128  n=4  on/100000/8 批量  1.0660 ms  eff[nblk=8 rows=128]
+big1           r=128  n=4  on/100000/16 批量  0.8489 ms  eff[nblk=16 rows=128]
+---
+w3             r=128  n=4  off         批量  5.4454 ms  eff[nblk=48 rows=128]
+  out : dtype=fp16 超差 220831/262144  maxAbs=6.561e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 512/512 maxAbs=1.776e+00 | sum 超差 512/512 maxAbs=1.496e+03
+w3             r=128  n=4  on/100000/8 批量  9.3176 ms  eff[nblk=8 rows=128]
+  out : dtype=fp16 超差 220831/262144  maxAbs=6.561e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 512/512 maxAbs=1.776e+00 | sum 超差 512/512 maxAbs=1.496e+03
+w3             r=128  n=4  on/100000/16 批量  7.1927 ms  eff[nblk=16 rows=128]
+  out : dtype=fp16 超差 220831/262144  maxAbs=6.561e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 512/512 maxAbs=1.776e+00 | sum 超差 512/512 maxAbs=1.496e+03
+---
+w4             r=128  n=8  off         批量  9.5360 ms  eff[nblk=48 rows=128]
+  out : dtype=fp16 超差 440361/524288  maxAbs=6.360e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 1024/1024 maxAbs=1.901e+00 | sum 超差 1024/1024 maxAbs=1.543e+03
+w4             r=128  n=8  on/100000/8 批量 16.2962 ms  eff[nblk=8 rows=128]
+  out : dtype=fp16 超差 440361/524288  maxAbs=6.360e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 1024/1024 maxAbs=1.901e+00 | sum 超差 1024/1024 maxAbs=1.543e+03
+w4             r=128  n=8  on/100000/16 批量 12.5787 ms  eff[nblk=16 rows=128]
+  out : dtype=fp16 超差 440361/524288  maxAbs=6.360e-02 (该处|exp|=0.000e+00)
+  LSE : max 超差 1024/1024 maxAbs=1.901e+00 | sum 超差 1024/1024 maxAbs=1.543e+03
+---
+########## n_blk=8 下的正确性（判据只认 超差；golden 逐位一致在换 chunk 宽度后必挂） ##########
+r1_min     fp16  超差 0/512 超差 0/1 超差 0/1 
+r1_min     fp32  超差 0/512 超差 0/1 超差 0/1 
+r2_chunk   fp16  超差 0/512 超差 0/1 超差 0/1 
+r2_chunk   fp32  超差 0/512 超差 0/1 超差 0/1 
+r3_mode3   fp16  超差 0/2048 超差 0/4 超差 0/4 
+r3_mode3   fp32  超差 0/2048 超差 0/4 超差 0/4 
+r4_shortkv fp16  超差 0/2048 超差 0/4 超差 0/4 
+r4_shortkv fp32  超差 0/2048 超差 0/4 超差 0/4 
+r5_blocks  fp16  超差 0/1024 超差 0/2 超差 0/2 
+r5_blocks  fp32  超差 0/1024 超差 0/2 超差 0/2 
+r6_multiB  fp16  超差 0/4096 超差 0/8 超差 0/8 
+r6_multiB  fp32  超差 0/4096 超差 0/8 超差 0/8 
+r7_norope  fp16  超差 0/512 超差 0/1 超差 0/1 
+r7_norope  fp32  超差 0/512 超差 0/1 超差 0/1 
+r8_heads   fp16  超差 0/8192 超差 0/16 超差 0/16 
+r8_heads   fp32  超差 0/8192 超差 0/16 超差 0/16 
+p1         fp16  超差 0/8192 超差 0/16 超差 0/16 
+p1         fp32  超差 0/8192 超差 0/16 超差 0/16 
+p2         fp16  超差 0/8192 超差 0/16 超差 0/16 
+p2         fp32  超差 0/8192 超差 0/16 超差 0/16 
+p4         fp16  超差 0/32768 超差 0/64 超差 0/64 
+p4         fp32  超差 0/32768 超差 0/64 超差 0/64 
+p6         fp16  超差 0/65536 超差 0/128 超差 0/128 
+p6         fp32  超差 0/65536 超差 0/128 超差 0/128 
+big1       fp16  超差 0/524288 超差 0/1024 超差 0/1024 
+big1       fp32  超差 0/524288 超差 0/1024 超差 0/1024 
+w3         fp16  超差 220831/262144 超差 512/512 超差 512/512 
+w3         fp32  超差 220830/262144 超差 512/512 超差 512/512 
+q1h        fp16  超差 0/8192 超差 0/16 超差 0/16 
+q1h        fp32  超差 0/8192 超差 0/16 超差 0/16 
+q2h        fp16  超差 0/8192 超差 0/16 超差 0/16 
+q2h        fp32  超差 0/8192 超差 0/16 超差 0/16 
+q3h        fp16  超差 0/16384 超差 0/32 超差 0/32 
+q3h        fp32  超差 0/16384 超差 0/32 超差 0/32 
+p_n64      fp16  超差 0/524288 超差 0/1024 超差 0/1024 
+p_n64      fp32  超差 0/524288 超差 0/1024 超差 0/1024 
+p_n512     fp16  超差 0/524288 超差 0/1024 超差 0/1024 
+p_n512     fp32  超差 0/524288 超差 0/1024 超差 0/1024 
+p_n1024    fp16  超差 0/524288 超差 0/1024 超差 0/1024 
+p_n1024    fp32  超差 0/524288 超差 0/1024 超差 0/1024 
+e1empty    fp16  超差 0/8192 超差 0/16 超差 0/16 
+e1empty    fp32  超差 0/8192 超差 0/16 超差 0/16 
+e2one      fp16  超差 0/8192 超差 0/16 超差 0/16 
+e2one      fp32  超差 0/8192 超差 0/16 超差 0/16 
+e3two      fp16  超差 0/8192 超差 0/16 超差 0/16 
+e3two      fp32  超差 0/8192 超差 0/16 超差 0/16 
+e4odd      fp16  超差 0/8192 超差 0/16 超差 0/16 
+e4odd      fp32  超差 0/8192 超差 0/16 超差 0/16 
+e5s2one    fp16  超差 0/8192 超差 0/16 超差 0/16 
+e5s2one    fp32  超差 0/8192 超差 0/16 超差 0/16 
+e6many     fp16  超差 0/65536 超差 0/128 超差 0/128 
+e6many     fp32  超差 0/65536 超差 0/128 超差 0/128 
+e7padq     fp16  超差 0/16384 超差 0/32 超差 0/32 
+e7padq     fp32  超差 0/16384 超差 0/32 超差 0/32 
+e8padkv    fp16  超差 0/8192 超差 0/16 超差 0/16 
+e8padkv    fp32  超差 0/8192 超差 0/16 超差 0/16 
+P108_CALIB_DONE
+=== 还原干净构建 ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  批量口径(连发20只sync一次, 摊薄 launch): 平均 0.7489 ms  最小 0.7488  最大 0.7490   [单发/批量 = 1.04]
+  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04

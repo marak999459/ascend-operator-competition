@@ -1,0 +1,35 @@
+本地 kernel sha = f815bf1eaba0f8bc  期望 f815bf1eaba0f8bc
+02dd48f90480ac6d8774457e6f649b9b  code/op_kernel/tiling_key_sparse_flash_attention.h
+f815bf1eaba0f8bc op_kernel/sparse_flash_attention.cpp
+SOCEDEX=0 MARK_P115=0 MARK=0 FORBID=op_kernel/sparse_flash_attention.cpp:0 op_host/sparse_flash_attention.cpp:0
+      "bytes": 4149,
+      "sha256": "f2b28a86e998c194f3e816bfb85f8769f89c5f0da694de41170e1f6c970baff6"
+      "bytes": 460,
+      "sha256": "1046b349538f3007c3fda6a06e2fae4a6b81c9fda47646dabfcab09b32c89eff"
+      "bytes": 36758,
+      "sha256": "3a8f53050c8f15ae823846eace857d0db1b5abb98a5fb330d332839b235fb453"
+      "bytes": 68923,
+      "sha256": "f815bf1eaba0f8bc3224729d488d3958dc0b11e18470ebfe765d44e427d1e52f"
+提交代码到题目 6a7c22d6a52e0f540a8a098d...
+提交成功! Submission ID: 6ab4681f694b590c3cc413d5
+
+等待结果...
+
+============================================================
+状态: Pass
+============================================================
+
+测试用例结果:
+  Case 1: Pass
+           precision_ratio: 1, time（平台原值）: 7.82
+  Case 2: Pass
+           precision_ratio: 1, time（平台原值）: 8.62
+  Case 3: Pass
+           precision_ratio: 1, time（平台原值）: 11
+  Case 4: Pass
+           precision_ratio: 1, time（平台原值）: 12.6
+  Case 5: Pass
+           precision_ratio: 1, time（平台原值）: 11.46
+  Case 6: Pass
+           precision_ratio: 1, time（平台原值）: 14.2
+通过: 6/6

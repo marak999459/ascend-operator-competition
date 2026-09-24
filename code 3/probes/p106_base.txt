@@ -1,0 +1,28 @@
+K/V/kr = 36 MB 复用
+pm1       L=1     段/行=4096  tok/行=4096 单元=128 ht=5.24e+05   36 MB
+pm2       L=2     段/行=2048  tok/行=4096 单元=128 ht=5.24e+05   36 MB
+pm4       L=4     段/行=1024  tok/行=4096 单元=128 ht=5.24e+05   36 MB
+pm8       L=8     段/行=512   tok/行=4096 单元=128 ht=5.24e+05   36 MB
+pm64      L=64    段/行=64    tok/行=4096 单元=128 ht=5.24e+05   36 MB
+pm256     L=256   段/行=16    tok/行=4096 单元=128 ht=5.24e+05   36 MB
+pm1024    L=1024  段/行=4     tok/行=4096 单元=128 ht=5.24e+05   36 MB
+pmfull    L=full  段/行=1     tok/行=4096 单元=128 ht=5.24e+05   36 MB
+== run 构建 = 261110f7d885 kernel
+   探活 p6:   估算 MAC = 2.846e+08   ->  751.18 GFLOP/s (按 2*MAC)
+   探活 p6: === DONE ===
+===== run 第 1 遍 (reps=10) =====
+p6         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.7570 ms 最小 = 0.7548 ms 最大 = 0.7599 ms 
+p1         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.1742 ms 最小 = 0.1705 ms 最大 = 0.1923 ms 
+p2         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.1706 ms 最小 = 0.1691 ms 最大 = 0.1744 ms 
+p4         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.4031 ms 最小 = 0.4008 ms 最大 = 0.4060 ms 
+pm41       rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.3159 ms 最小 = 0.3119 ms 最大 = 0.3291 ms 
+pm81       rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.4645 ms 最小 = 0.4608 ms 最大 = 0.4680 ms 
+pm161      rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.7696 ms 最小 = 0.7660 ms 最大 = 0.7752 ms 
+===== run 第 2 遍 (reps=10) =====
+p6         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.7575 ms 最小 = 0.7549 ms 最大 = 0.7647 ms 
+p1         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.1726 ms 最小 = 0.1711 ms 最大 = 0.1741 ms 
+p2         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.1716 ms 最小 = 0.1693 ms 最大 = 0.1747 ms 
+p4         rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.4021 ms 最小 = 0.3999 ms 最大 = 0.4058 ms 
+pm41       rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.3117 ms 最小 = 0.3088 ms 最大 = 0.3171 ms 
+pm81       rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.4641 ms 最小 = 0.4617 ms 最大 = 0.4680 ms 
+pm161      rc=0  SBS=1 MODE=3 | reps=10 平均 = 0.7689 ms 最小 = 0.7657 ms 最大 = 0.7729 ms 

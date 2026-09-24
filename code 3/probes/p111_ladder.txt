@@ -1,0 +1,38 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+f815bf1eaba0f8bc3224729d488d3958dc0b11e18470ebfe765d44e427d1e52f  ../kernel_pristine.cpp
+########## ARM probe ##########
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+5
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  [probe diff]   out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  [probe diff]   LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04
+  p1s1             sbs=1     0.1192 ms
+  p1s2             sbs=2     0.2215 ms
+  p1s4             sbs=4     0.3812 ms
+  p1s8             sbs=8     0.3713 ms
+  p1s16            sbs=16    0.4442 ms
+  p1s32            sbs=32    0.4542 ms
+  p1s64            sbs=64    0.6018 ms
+  p1s128           sbs=128   1.3600 ms
+########## ARM pristine ##########
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+0
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  [pristine diff]   out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)
+  [pristine diff]   LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04
+  p1s1             sbs=1     0.1188 ms
+  p1s2             sbs=2     0.1837 ms
+  p1s4             sbs=4     0.3072 ms
+  p1s8             sbs=8     0.2977 ms
+  p1s16            sbs=16    0.2959 ms
+  p1s32            sbs=32    0.3068 ms
+  p1s64            sbs=64    0.4205 ms
+  p1s128           sbs=128   0.8212 ms
+=== 还原干净构建 ===
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+0
+构建 OK

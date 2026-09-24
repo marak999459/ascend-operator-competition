@@ -1,0 +1,58 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+f815bf1eaba0f8bc
+>>> pristine sha 本地=f815bf1eaba0f8bc 远端应同
+########## ARM base ##########
+REP=1  HITS_P114=0  EXPECT=0
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+r64c65        case=r64c65 B=1 S1=64 S2=131072 N1=1 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 13173/32768  maxAbs=1.216e-02 (该处|exp|=0.000e+00)|  LSE : max 超差 64/64 maxAbs=1.948e+00 | sum 超差 64/64 maxAbs=1.835e+04|  golden 写入 golden_p113/r64c65: OK|==> FAIL|
+b32n8s1       case=b32n8s1 B=1 S1=32 S2=131072 N1=8 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 51035/131072  maxAbs=9.949e-03 (该处|exp|=0.000e+00)|  LSE : max 超差 256/256 maxAbs=1.856e+00 | sum 超差 256/256 maxAbs=1.890e+04|  golden 写入 golden_p113/b32n8s1: OK|==> FAIL|
+r32c65        case=r32c65 B=1 S1=32 S2=131072 N1=1 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 6643/16384  maxAbs=9.537e-03 (该处|exp|=0.000e+00)|  LSE : max 超差 32/32 maxAbs=1.827e+00 | sum 超差 32/32 maxAbs=1.755e+04|  golden 写入 golden_p113/r32c65: OK|==> FAIL|
+p32s1c16384   case=p32s1c16384 B=1 S1=32 S2=131072 N1=4 D=512 SBS=1 COUNT=16384 MODE=3 LSE=1|  out : dtype=fp16 超差 44625/65536  maxAbs=1.802e-02 (该处|exp|=0.000e+00)|  LSE : max 超差 128/128 maxAbs=1.742e+00 | sum 超差 128/128 maxAbs=5.390e+03|  golden 写入 golden_p113/p32s1c16384: OK|==> FAIL|
+big1          case=big1 B=1 S1=128 S2=8192 N1=8 D=512 SBS=1 COUNT=2048 MODE=3 LSE=1|  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)|  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05|  golden 写入 golden_p113/big1: OK|==> PASS|
+p6            case=p6 B=1 S1=32 S2=8192 N1=4 D=512 SBS=1 COUNT=2048 MODE=3 LSE=1|  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)|  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04|  golden 写入 golden_p113/p6: OK|==> PASS|
+  r64c65         18.8317 ms ms
+  b32n8s1        44.9888 ms ms
+  r32c65          9.4079 ms ms
+  p32s1c16384     5.9106 ms ms
+  big1            0.6711 ms ms
+  p6              0.7496 ms ms
+########## ARM score ##########
+REP=2  extra_calls=1  HITS=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+r64c65        case=r64c65 B=1 S1=64 S2=131072 N1=1 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 13173/32768  maxAbs=1.216e-02 (该处|exp|=0.000e+00)|  LSE : max 超差 64/64 maxAbs=1.948e+00 | sum 超差 64/64 maxAbs=1.835e+04|  逐位一致 golden_p113/r64c65.out (65536 B)|  逐位一致 golden_p113/r64c65.max (256 B)|  逐位一致 golden_p113/r64c65.sum (256 B)|==> FAIL|
+b32n8s1       case=b32n8s1 B=1 S1=32 S2=131072 N1=8 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 51035/131072  maxAbs=9.949e-03 (该处|exp|=0.000e+00)|  LSE : max 超差 256/256 maxAbs=1.856e+00 | sum 超差 256/256 maxAbs=1.890e+04|  逐位一致 golden_p113/b32n8s1.out (262144 B)|  逐位一致 golden_p113/b32n8s1.max (1024 B)|  逐位一致 golden_p113/b32n8s1.sum (1024 B)|==> FAIL|
+r32c65        case=r32c65 B=1 S1=32 S2=131072 N1=1 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 6643/16384  maxAbs=9.537e-03 (该处|exp|=0.000e+00)|  LSE : max 超差 32/32 maxAbs=1.827e+00 | sum 超差 32/32 maxAbs=1.755e+04|  逐位一致 golden_p113/r32c65.out (32768 B)|  逐位一致 golden_p113/r32c65.max (128 B)|  逐位一致 golden_p113/r32c65.sum (128 B)|==> FAIL|
+p32s1c16384   case=p32s1c16384 B=1 S1=32 S2=131072 N1=4 D=512 SBS=1 COUNT=16384 MODE=3 LSE=1|  out : dtype=fp16 超差 44625/65536  maxAbs=1.802e-02 (该处|exp|=0.000e+00)|  LSE : max 超差 128/128 maxAbs=1.742e+00 | sum 超差 128/128 maxAbs=5.390e+03|  逐位一致 golden_p113/p32s1c16384.out (131072 B)|  逐位一致 golden_p113/p32s1c16384.max (512 B)|  逐位一致 golden_p113/p32s1c16384.sum (512 B)|==> FAIL|
+big1          case=big1 B=1 S1=128 S2=8192 N1=8 D=512 SBS=1 COUNT=2048 MODE=3 LSE=1|  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)|  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05|  逐位一致 golden_p113/big1.out (1048576 B)|  逐位一致 golden_p113/big1.max (4096 B)|  逐位一致 golden_p113/big1.sum (4096 B)|==> PASS|
+p6            case=p6 B=1 S1=32 S2=8192 N1=4 D=512 SBS=1 COUNT=2048 MODE=3 LSE=1|  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)|  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04|  逐位一致 golden_p113/p6.out (131072 B)|  逐位一致 golden_p113/p6.max (512 B)|  逐位一致 golden_p113/p6.sum (512 B)|==> PASS|
+  r64c65         23.3583 ms ms
+  b32n8s1        67.6898 ms ms
+  r32c65         11.6745 ms ms
+  p32s1c16384     8.5904 ms ms
+  big1            0.9698 ms ms
+  p6              1.0843 ms ms
+########## ARM gather ##########
+REP=2  HITS_P114=3  EXPECT=3
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+r64c65        case=r64c65 B=1 S1=64 S2=131072 N1=1 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 13173/32768  maxAbs=1.216e-02 (该处|exp|=0.000e+00)|  LSE : max 超差 64/64 maxAbs=1.948e+00 | sum 超差 64/64 maxAbs=1.835e+04|  逐位一致 golden_p113/r64c65.out (65536 B)|  逐位一致 golden_p113/r64c65.max (256 B)|  逐位一致 golden_p113/r64c65.sum (256 B)|==> FAIL|
+b32n8s1       case=b32n8s1 B=1 S1=32 S2=131072 N1=8 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 51035/131072  maxAbs=9.949e-03 (该处|exp|=0.000e+00)|  LSE : max 超差 256/256 maxAbs=1.856e+00 | sum 超差 256/256 maxAbs=1.890e+04|  逐位一致 golden_p113/b32n8s1.out (262144 B)|  逐位一致 golden_p113/b32n8s1.max (1024 B)|  逐位一致 golden_p113/b32n8s1.sum (1024 B)|==> FAIL|
+r32c65        case=r32c65 B=1 S1=32 S2=131072 N1=1 D=512 SBS=1 COUNT=65536 MODE=3 LSE=1|  out : dtype=fp16 超差 6643/16384  maxAbs=9.537e-03 (该处|exp|=0.000e+00)|  LSE : max 超差 32/32 maxAbs=1.827e+00 | sum 超差 32/32 maxAbs=1.755e+04|  逐位一致 golden_p113/r32c65.out (32768 B)|  逐位一致 golden_p113/r32c65.max (128 B)|  逐位一致 golden_p113/r32c65.sum (128 B)|==> FAIL|
+p32s1c16384   case=p32s1c16384 B=1 S1=32 S2=131072 N1=4 D=512 SBS=1 COUNT=16384 MODE=3 LSE=1|  out : dtype=fp16 超差 44625/65536  maxAbs=1.802e-02 (该处|exp|=0.000e+00)|  LSE : max 超差 128/128 maxAbs=1.742e+00 | sum 超差 128/128 maxAbs=5.390e+03|  逐位一致 golden_p113/p32s1c16384.out (131072 B)|  逐位一致 golden_p113/p32s1c16384.max (512 B)|  逐位一致 golden_p113/p32s1c16384.sum (512 B)|==> FAIL|
+big1          case=big1 B=1 S1=128 S2=8192 N1=8 D=512 SBS=1 COUNT=2048 MODE=3 LSE=1|  out : dtype=fp16 超差 0/524288  maxAbs=1.221e-04 (该处|exp|=1.283e-01)|  LSE : max 超差 0/1024 maxAbs=2.384e-07 | sum 超差 0/1024 maxAbs=2.289e-05|  逐位一致 golden_p113/big1.out (1048576 B)|  逐位一致 golden_p113/big1.max (4096 B)|  逐位一致 golden_p113/big1.sum (4096 B)|==> PASS|
+p6            case=p6 B=1 S1=32 S2=8192 N1=4 D=512 SBS=1 COUNT=2048 MODE=3 LSE=1|  out : dtype=fp16 超差 0/65536  maxAbs=3.052e-05 (该处|exp|=4.034e-02)|  LSE : max 超差 0/128 maxAbs=2.384e-07 | sum 超差 0/128 maxAbs=1.831e-04|  逐位一致 golden_p113/p6.out (131072 B)|  逐位一致 golden_p113/p6.max (512 B)|  逐位一致 golden_p113/p6.sum (512 B)|==> PASS|
+  r64c65         23.0859 ms ms
+  b32n8s1        47.0815 ms ms
+  r32c65         11.5658 ms ms
+  p32s1c16384     6.1942 ms ms
+  big1            0.6971 ms ms
+  p6              0.7953 ms ms
+=== 还原：只做 sync（远端源码 = 本地提交字节，无 sed、无 build） ===
+f815bf1eaba0f8bc
+SEDHITS=0

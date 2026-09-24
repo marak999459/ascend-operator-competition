@@ -1,0 +1,33 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+f815bf1eaba0f8bc
+>>> pristine sha 本地=f815bf1eaba0f8bc 远端应同
+########## ARM gather=1 ##########
+REP=1  HITS_P114=0  EXPECT=0
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  inert p6        超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.out 逐位一致 golden/p6.max 逐位一致 golden/p6.sum 
+  inert big1      超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.out 逐位一致 golden/big1.max 逐位一致 golden/big1.sum 
+  inert r2_chunk  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.out 逐位一致 golden/r2_chunk.max 逐位一致 golden/r2_chunk.sum 
+  w3              5.4396 ms
+  w4              9.5253 ms
+  big1            0.6693 ms
+  w2              1.3806 ms
+  p6              0.7492 ms
+########## ARM gather=2 ##########
+REP=2  HITS_P114=3  EXPECT=3
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+  inert p6        超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.out 逐位一致 golden/p6.max 逐位一致 golden/p6.sum 
+  inert big1      超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.out 逐位一致 golden/big1.max 逐位一致 golden/big1.sum 
+  inert r2_chunk  超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.out 逐位一致 golden/r2_chunk.max 逐位一致 golden/r2_chunk.sum 
+  w3              5.6389 ms
+  w4              9.8680 ms
+  big1            0.6993 ms
+  w2              1.4373 ms
+  p6              0.7952 ms
+=== 还原：只做 sync（远端源码 = 本地提交字节，无 sed、无 build） ===
+d467fef68798c4f3
+SEDHITS=0
