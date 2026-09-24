@@ -1,0 +1,53 @@
+########## ① 最后一次 sync（此后不再 build） ##########
+bee0384c430e80a74d1534709e338b56  code/op_host/sparse_flash_attention.cpp
+4ad6b976c24c7cd9061379f6ab88c583  code/op_kernel/sparse_flash_attention_tiling.h
+02dd48f90480ac6d8774457e6f649b9b  code/op_kernel/tiling_key_sparse_flash_attention.h
+########## ② 本地四枚当场 sha256 ##########
+f815bf1eaba0f8bc op_kernel/sparse_flash_attention.cpp
+f2b28a86e998c194 op_kernel/sparse_flash_attention_tiling.h
+1046b349538f3007 op_kernel/tiling_key_sparse_flash_attention.h
+f405dc065be30ecf op_host/sparse_flash_attention.cpp
+ 68923 op_kernel/sparse_flash_attention.cpp
+  4149 op_kernel/sparse_flash_attention_tiling.h
+   460 op_kernel/tiling_key_sparse_flash_attention.h
+ 37038 op_host/sparse_flash_attention.cpp
+110570 total
+########## ③ 远端四枚 + SoC 残留 + 护栏命中数 + 禁用词 ##########
+f815bf1eaba0f8bc op_kernel/sparse_flash_attention.cpp
+f2b28a86e998c194 op_kernel/sparse_flash_attention_tiling.h
+1046b349538f3007 op_kernel/tiling_key_sparse_flash_attention.h
+f405dc065be30ecf op_host/sparse_flash_attention.cpp
+SOCEDEX=0
+P128=2 BESTUNITS=3 OLDGATE=0 BC0=2 OLDTAB=1 KRES=0
+FORBID=op_kernel/sparse_flash_attention.cpp:0 op_host/sparse_flash_attention.cpp:0
+>>> 期望 P128=2 BESTUNITS=3 OLDGATE=0 BC0=2 OLDTAB=1 KRES=0 FORBID=0 SOCEDEX=0；
+>>>      host=f405dc065be30ecf，kernel 三枚 = f815bf1e / f2b28a86 / 1046b349（一发都没动）
+⚠️ KRES 的门用 'P1[12][0-9]'：pristine kernel 里合法留着 'P105' 注释（发货字节的一部分，不是探针残留）。
+⚠️ OLDTAB=1 是**对的**：P128 不动候选表（那是 P126 的钉法），只在 L304 的改档门上套护栏。
+########## ④ dry-run（四枚必须逐个吻合） ##########
+{
+  "problemId": "6a7c22d6a52e0f540a8a098d",
+  "files": [
+    {
+      "path": "tiling_h",
+      "bytes": 4149,
+      "sha256": "f2b28a86e998c194f3e816bfb85f8769f89c5f0da694de41170e1f6c970baff6"
+    },
+    {
+      "path": "tiling_key_h",
+      "bytes": 460,
+      "sha256": "1046b349538f3007c3fda6a06e2fae4a6b81c9fda47646dabfcab09b32c89eff"
+    },
+    {
+      "path": "host_cpp",
+      "bytes": 37038,
+      "sha256": "f405dc065be30ecf2582e540cb76097c1e0c29816dddb3e41a20e83812cb8661"
+    },
+    {
+      "path": "kernel_cpp",
+      "bytes": 68923,
+      "sha256": "f815bf1eaba0f8bc3224729d488d3958dc0b11e18470ebfe765d44e427d1e52f"
+    }
+  ]
+}
+P128_PRECHECK_DONE

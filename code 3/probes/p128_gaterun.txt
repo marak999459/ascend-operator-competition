@@ -1,0 +1,95 @@
+########## ① 本地钉档状态 + sync ##########
+[check: PINNED] P128=2 bestUnits=3 旧门=0 cost * 20ULL=1 bestCost==0=2 OLDTAB=1 禁用词=0 sha=f405dc065be30ecf
+=== 1) 推提交源 code 3/code -> ~/sfa_real/code ===
+=== 2) 推 harness / 参考实现 ===
+=== 3) md5 复验（本地提交源 vs 远端） ===
+########## ② 命中数门 + 四枚 sha（远端副本，sed 之前） ##########
+P128=2 BESTUNITS=3 OLDGATE=0 GUARD=1 BC0=2 OLDTAB=1 FORBID=0
+f405dc065be30ecf
+f815bf1eaba0f8bc
+f2b28a86e998c194
+1046b349538f3007
+>>> 期望 P128=2 BESTUNITS=3 OLDGATE=0 GUARD=1 BC0=2 OLDTAB=1 FORBID=0 ；host=f405dc065be30ecf，kernel 三枚 = f815bf1eaba0f8bc f2b28a86e998c194 1046b349538f3007
+########## ③ SoC sed（只在远端）+ build ##########
+HITS_SOC=1
+构建 OK
+########## ④ 探活 + 补 pn16a/pn32a 的 .bin ##########
+>>> 探活第 1 次 OK
+2
+pn16a  B=1 S1=4   S2=8192 N1=16 nblk=2048  rows=4       18.0 MB  25.4s
+pn32a  B=1 S1=8   S2=8192 N1=32 nblk=2048  rows=8       18.5 MB  86.1s
+########## ⑤ 时间指纹对表（REPS=5；两臂参考值取自同机 p126_ab.txt 与 p127_gaterun.txt） ##########
+case              批量  数值
+p1             0.1200 ms  超差[超差 0/8192 超差 0/16 超差 0/16 ] 逐位3 不逐位0
+p2             0.1152 ms  超差[超差 0/8192 超差 0/16 超差 0/16 ] 逐位3 不逐位0
+p4             0.3884 ms  超差[超差 0/32768 超差 0/64 超差 0/64 ] 逐位3 不逐位0
+p6             0.7490 ms  超差[超差 0/65536 超差 0/128 超差 0/128 ] 逐位3 不逐位0
+big1           0.7136 ms  超差[超差 0/524288 超差 0/1024 超差 0/1024 ] 逐位1 不逐位2
+w3             5.4448 ms  超差[-] 逐位无golden 不逐位-
+r64c65        18.8345 ms  超差[-] 逐位无golden 不逐位-
+pn16a          0.3151 ms  超差[超差 0/32768 超差 0/64 超差 0/64 ] 逐位0 不逐位0
+pn32a          1.3943 ms  超差[超差 0/131072 超差 0/256 超差 0/256 ] 逐位0 不逐位0
+>>> 两臂参考（同一台机、同一次构建口径）：
+      case     auto(生产字节)      pin(P127)        护栏应落在
+      p1       0.1192 (nb=2)       0.1319 (nb=4)    **auto 侧**（u=4<80 ⇒ 交回 auto）
+      big1     0.6715 (nb=4)       0.7143 (nb=8)    **pin 侧**（u=128>=80 ⇒ 保住大档）
+      pn16a    未量                0.3399 (nb=16)   交回 auto ⇒ **必须偏离 0.3399**
+      pn32a    未量                1.3920 (nb=16)   交回 auto ⇒ **必须偏离 1.3920**
+      p2/p4/p6/w3/r64c65 两臂同值（可证惰性）⇒ 只核"没掉进退化档"
+>>> 硬失败条件（任一条 = 这一发不发）：
+      ① p1 落在 0.1298 那一侧 ⇒ 护栏没把小形状捞回来（等价于重演 P127 的 C1 +76 %）
+      ② big1 落在 0.6715 那一侧 ⇒ 护栏把该保住的大档也关了 ⇒ 整发是空操作
+      ③ 任何一例落在 0.375 式的退化档（nb=1 nblk=16 ks=1）⇒ 掉进 L434 降级块
+########## ⑥ 全量数值门（p32_gate.sh 26 例双 dtype） ##########
+########## GATE0 harness 重建 ##########
+-rwxrwxr-x 1 developer developer 35048 Sep 24 16:44 test_sfa_dev
+########## GATE1 fp16 ##########
+fp16   r1_min     out : dtype=fp16 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r1_min.out 逐位一致 golden/r1_min.max 逐位一致 golden/r1_min.sum PASS 
+fp16   r2_chunk   out : dtype=fp16 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.out 逐位一致 golden/r2_chunk.max 逐位一致 golden/r2_chunk.sum PASS 
+fp16   r3_mode3   out : dtype=fp16 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r3_mode3.out 逐位一致 golden/r3_mode3.max 逐位一致 golden/r3_mode3.sum PASS 
+fp16   r4_shortkv out : dtype=fp16 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r4_shortkv.out 逐位一致 golden/r4_shortkv.max 逐位一致 golden/r4_shortkv.sum PASS 
+fp16   r5_blocks  out : dtype=fp16 超差 0/1024 超差 0/2 超差 0/2 逐位一致 golden/r5_blocks.out 逐位一致 golden/r5_blocks.max 逐位一致 golden/r5_blocks.sum PASS 
+fp16   r6_multiB  out : dtype=fp16 超差 0/4096 超差 0/8 超差 0/8 逐位一致 golden/r6_multiB.out 逐位一致 golden/r6_multiB.max 逐位一致 golden/r6_multiB.sum PASS 
+fp16   r7_norope  out : dtype=fp16 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r7_norope.out 逐位一致 golden/r7_norope.max 逐位一致 golden/r7_norope.sum PASS 
+fp16   r8_heads   out : dtype=fp16 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/r8_heads.out 逐位一致 golden/r8_heads.max 逐位一致 golden/r8_heads.sum PASS 
+fp16   p1         out : dtype=fp16 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p1.out 逐位一致 golden/p1.max 逐位一致 golden/p1.sum PASS 
+fp16   p2         out : dtype=fp16 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p2.out 逐位一致 golden/p2.max 逐位一致 golden/p2.sum PASS 
+fp16   p4         out : dtype=fp16 超差 0/32768 超差 0/64 超差 0/64 逐位一致 golden/p4.out 逐位一致 golden/p4.max 逐位一致 golden/p4.sum PASS 
+fp16   p6         out : dtype=fp16 超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.out 逐位一致 golden/p6.max 逐位一致 golden/p6.sum PASS 
+fp16   big1       out : dtype=fp16 超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.max FAIL 
+########## GATE1 fp32 ##########
+fp32   r1_min     out : dtype=fp32 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r1_min.f32.out 逐位一致 golden/r1_min.f32.max 逐位一致 golden/r1_min.f32.sum PASS 
+fp32   r2_chunk   out : dtype=fp32 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r2_chunk.f32.out 逐位一致 golden/r2_chunk.f32.max 逐位一致 golden/r2_chunk.f32.sum PASS 
+fp32   r3_mode3   out : dtype=fp32 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r3_mode3.f32.out 逐位一致 golden/r3_mode3.f32.max 逐位一致 golden/r3_mode3.f32.sum PASS 
+fp32   r4_shortkv out : dtype=fp32 超差 0/2048 超差 0/4 超差 0/4 逐位一致 golden/r4_shortkv.f32.out 逐位一致 golden/r4_shortkv.f32.max 逐位一致 golden/r4_shortkv.f32.sum PASS 
+fp32   r5_blocks  out : dtype=fp32 超差 0/1024 超差 0/2 超差 0/2 逐位一致 golden/r5_blocks.f32.out 逐位一致 golden/r5_blocks.f32.max 逐位一致 golden/r5_blocks.f32.sum PASS 
+fp32   r6_multiB  out : dtype=fp32 超差 0/4096 超差 0/8 超差 0/8 逐位一致 golden/r6_multiB.f32.out 逐位一致 golden/r6_multiB.f32.max 逐位一致 golden/r6_multiB.f32.sum PASS 
+fp32   r7_norope  out : dtype=fp32 超差 0/512 超差 0/1 超差 0/1 逐位一致 golden/r7_norope.f32.out 逐位一致 golden/r7_norope.f32.max 逐位一致 golden/r7_norope.f32.sum PASS 
+fp32   r8_heads   out : dtype=fp32 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/r8_heads.f32.out 逐位一致 golden/r8_heads.f32.max 逐位一致 golden/r8_heads.f32.sum PASS 
+fp32   p1         out : dtype=fp32 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p1.f32.out 逐位一致 golden/p1.f32.max 逐位一致 golden/p1.f32.sum PASS 
+fp32   p2         out : dtype=fp32 超差 0/8192 超差 0/16 超差 0/16 逐位一致 golden/p2.f32.out 逐位一致 golden/p2.f32.max 逐位一致 golden/p2.f32.sum PASS 
+fp32   p4         out : dtype=fp32 超差 0/32768 超差 0/64 超差 0/64 逐位一致 golden/p4.f32.out 逐位一致 golden/p4.f32.max 逐位一致 golden/p4.f32.sum PASS 
+fp32   p6         out : dtype=fp32 超差 0/65536 超差 0/128 超差 0/128 逐位一致 golden/p6.f32.out 逐位一致 golden/p6.f32.max 逐位一致 golden/p6.f32.sum PASS 
+fp32   big1       out : dtype=fp32 超差 0/524288 超差 0/1024 超差 0/1024 逐位一致 golden/big1.f32.out 逐位一致 golden/big1.f32.max 逐位一致 golden/big1.f32.sum PASS 
+########## GATE2 expect(双dtype) ##########
+q1h        fp16=超差 0/8192 fp32=超差 0/8192
+q2h        fp16=超差 0/8192 fp32=超差 0/8192
+q3h        fp16=超差 0/16384 fp32=超差 0/16384
+p_n64      fp16=超差 0/524288 fp32=超差 0/524288
+p_n512     fp16=超差 0/524288 fp32=超差 0/524288
+p_n1024    fp16=超差 0/524288 fp32=超差 0/524288
+e1empty    fp16=超差 0/8192 fp32=超差 0/8192
+e2one      fp16=超差 0/8192 fp32=超差 0/8192
+e3two      fp16=超差 0/8192 fp32=超差 0/8192
+e4odd      fp16=超差 0/8192 fp32=超差 0/8192
+e5s2one    fp16=超差 0/8192 fp32=超差 0/8192
+e6many     fp16=超差 0/65536 fp32=超差 0/65536
+e7padq     fp16=超差 0/16384 fp32=超差 0/16384
+e8padkv    fp16=超差 0/8192 fp32=超差 0/8192
+P32_GATE_DONE
+########## ⑥b 两枚新用例双 dtype ##########
+fp16  pn16a   超差 0/32768 超差 0/64 超差 0/64 FAIL 
+fp16  pn32a   超差 0/131072 超差 0/256 超差 0/256 FAIL 
+fp32  pn16a   超差 0/32768 超差 0/64 超差 0/64 FAIL 
+fp32  pn32a   超差 0/131072 超差 0/256 超差 0/256 FAIL 
+P128_GATE_DONE
