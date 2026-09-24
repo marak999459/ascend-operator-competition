@@ -1,0 +1,50 @@
+########## ① 最后一次 sync（此后不再 build） ##########
+47dd83765e25422d25d3873fcaf0aca6  code/op_host/sparse_flash_attention.cpp
+4ad6b976c24c7cd9061379f6ab88c583  code/op_kernel/sparse_flash_attention_tiling.h
+02dd48f90480ac6d8774457e6f649b9b  code/op_kernel/tiling_key_sparse_flash_attention.h
+########## ② 本地四枚当场 sha256 ##########
+6eb722650b24507c op_kernel/sparse_flash_attention.cpp
+f2b28a86e998c194 op_kernel/sparse_flash_attention_tiling.h
+1046b349538f3007 op_kernel/tiling_key_sparse_flash_attention.h
+3a8f53050c8f15ae op_host/sparse_flash_attention.cpp
+ 69237 op_kernel/sparse_flash_attention.cpp
+  4149 op_kernel/sparse_flash_attention_tiling.h
+   460 op_kernel/tiling_key_sparse_flash_attention.h
+ 36758 op_host/sparse_flash_attention.cpp
+110604 total
+########## ③ 远端四枚 + SoC 残留 + 命中数 + 禁用词 ##########
+6eb722650b24507c op_kernel/sparse_flash_attention.cpp
+f2b28a86e998c194 op_kernel/sparse_flash_attention_tiling.h
+1046b349538f3007 op_kernel/tiling_key_sparse_flash_attention.h
+3a8f53050c8f15ae op_host/sparse_flash_attention.cpp
+SOCEDEX=0
+HITS_P116=1 LOOP=1 REPML=2
+RESIDUE=0
+FORBID=op_kernel/sparse_flash_attention.cpp:0 op_host/sparse_flash_attention.cpp:0
+########## ④ dry-run（四枚必须逐个吻合） ##########
+{
+  "problemId": "6a7c22d6a52e0f540a8a098d",
+  "files": [
+    {
+      "path": "tiling_h",
+      "bytes": 4149,
+      "sha256": "f2b28a86e998c194f3e816bfb85f8769f89c5f0da694de41170e1f6c970baff6"
+    },
+    {
+      "path": "tiling_key_h",
+      "bytes": 460,
+      "sha256": "1046b349538f3007c3fda6a06e2fae4a6b81c9fda47646dabfcab09b32c89eff"
+    },
+    {
+      "path": "host_cpp",
+      "bytes": 36758,
+      "sha256": "3a8f53050c8f15ae823846eace857d0db1b5abb98a5fb330d332839b235fb453"
+    },
+    {
+      "path": "kernel_cpp",
+      "bytes": 69237,
+      "sha256": "6eb722650b24507c299297fb43d070c6f0e28da217bf84079e2e7b5191744b62"
+    }
+  ]
+}
+P116_PRECHECK_DONE

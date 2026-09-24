@@ -1,0 +1,49 @@
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+>>> pristine sha 本地=f815bf1eaba0f8bc 远端应同
+f815bf1eaba0f8bc
+########## ARM rep=1 ##########
+REP=1  HITS_P116=0  EXPECT=0
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+g64c1       golden 写入 golden_p116/g64c1: OK 
+g64c4       golden 写入 golden_p116/g64c4: OK 
+g64c16      golden 写入 golden_p116/g64c16: OK 
+v64c8       golden 写入 golden_p116/v64c8: OK 
+r64c65      golden 写入 golden_p116/r64c65: OK 
+p6          golden 写入 golden_p116/p6: OK 
+big1        golden 写入 golden_p116/big1: OK 
+w3          golden 写入 golden_p116/w3: OK 
+  g64c1        0.3130 ms
+  g64c4        1.2479 ms
+  g64c16       4.8131 ms
+  v64c8        2.2984 ms
+  r64c65      18.8352 ms
+  p6           0.7491 ms
+  big1         0.6718 ms
+  w3           5.4433 ms
+########## ARM rep=2 ##########
+REP=2  HITS_P116=1  EXPECT=1
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+Warning: Permanently added '[127.0.0.1]:26780' (ED25519) to the list of known hosts.
+构建 OK
+g64c1       逐位一致 golden_p116/g64c1.out 逐位一致 golden_p116/g64c1.max 逐位一致 golden_p116/g64c1.sum 
+g64c4       逐位一致 golden_p116/g64c4.out 逐位一致 golden_p116/g64c4.max 逐位一致 golden_p116/g64c4.sum 
+g64c16      逐位一致 golden_p116/g64c16.out 逐位一致 golden_p116/g64c16.max 逐位一致 golden_p116/g64c16.sum 
+v64c8       逐位一致 golden_p116/v64c8.out 逐位一致 golden_p116/v64c8.max 逐位一致 golden_p116/v64c8.sum 
+r64c65      逐位一致 golden_p116/r64c65.out 逐位一致 golden_p116/r64c65.max 逐位一致 golden_p116/r64c65.sum 
+p6          逐位一致 golden_p116/p6.out 逐位一致 golden_p116/p6.max 逐位一致 golden_p116/p6.sum 
+big1        逐位一致 golden_p116/big1.out 逐位一致 golden_p116/big1.max 逐位一致 golden_p116/big1.sum 
+w3          逐位一致 golden_p116/w3.out 逐位一致 golden_p116/w3.max 逐位一致 golden_p116/w3.sum 
+  g64c1        0.3200 ms
+  g64c4        1.2791 ms
+  g64c16       4.9311 ms
+  v64c8        2.3557 ms
+  r64c65      19.2975 ms
+  p6           0.7682 ms
+  big1         0.6902 ms
+  w3           5.5912 ms
+=== 还原：只做 sync（远端源码 = 本地提交字节，无 sed、无 build） ===
+f815bf1eaba0f8bc
+SEDHITS=0
